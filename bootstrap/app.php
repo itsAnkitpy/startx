@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\BindTenantToRequest;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,7 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Before anything else, including authentication: the subdomain says which
+        // client company this request belongs to, and the database wall denies
+        // every read until it is told.
+        $middleware->prepend(BindTenantToRequest::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
