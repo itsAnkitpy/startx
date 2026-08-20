@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Exceptions\EmployeeRecordRefused;
+use App\Exceptions\ReferenceListRefused;
 use App\Tenancy\BelongsToTenant;
 use Database\Factories\EmploymentRecordFactory;
 use DateTimeInterface;
@@ -26,8 +27,9 @@ use Illuminate\Support\Facades\DB;
  * read in a tribunal next year has to show the department, the manager and the status
  * the person actually had at the time, not the ones they have now.
  *
- * Designation, work location and cost centre join these rows in step 5, with the lists
- * they point at.
+ * The designation and the office arrived in step 5 with the lists they point at, and each
+ * carries a frozen copy of what its row said at the time — see {@see freezeReferenceLabels}.
+ * A cost centre was dropped from the plan: nothing in this product reads one.
  *
  * Two fields are deliberately absent from what a form may fill, for the same reason:
  * `tenant_id` is stamped from the client company in scope, and `recorded_by` from
@@ -37,9 +39,9 @@ use Illuminate\Support\Facades\DB;
  * they are allowed to write to.
  */
 #[Fillable([
-    'user_id', 'employee_code', 'org_unit_id', 'employment_type', 'employment_status',
-    'reports_to_id', 'joining_date', 'last_working_day', 'effective_from', 'effective_to',
-    'change_reason',
+    'user_id', 'employee_code', 'org_unit_id', 'designation_id', 'office_id',
+    'employment_type', 'employment_status', 'reports_to_id', 'joining_date',
+    'last_working_day', 'effective_from', 'effective_to', 'change_reason',
 ])]
 class EmploymentRecord extends Model
 {
@@ -83,6 +85,7 @@ class EmploymentRecord extends Model
     {
         static::saving(function (self $record): void {
             $record->refuseReportingLoop();
+            $record->freezeReferenceLabels();
         });
 
         // Who entered the row, stamped rather than submitted. Null where nobody is
@@ -104,6 +107,26 @@ class EmploymentRecord extends Model
     public function orgUnit(): BelongsTo
     {
         return $this->belongsTo(OrgUnit::class);
+    }
+
+    /**
+     * The entry on the client's designation list this row points at. What it *said* when
+     * the row was written is on the row itself, not here.
+     */
+    public function designation(): BelongsTo
+    {
+        return $this->belongsTo(Designation::class);
+    }
+
+    /**
+     * The place the person worked. The country and the state it was in when the row was
+     * written are on the row itself, because an edited office entry would otherwise
+     * rewrite where every past row claims the person worked — and professional tax
+     * follows the state.
+     */
+    public function office(): BelongsTo
+    {
+        return $this->belongsTo(Office::class);
     }
 
     public function reportsTo(): BelongsTo
@@ -185,6 +208,51 @@ class EmploymentRecord extends Model
             ->where('effective_to', $dayBefore)
             ->orderByDesc('effective_from')
             ->first();
+    }
+
+    /**
+     * Copy the designation's words, and the office's country and state, onto this row.
+     *
+     * The whole reason step 5 puts the words here as well as the link: freezing the link
+     * freezes *which* list row was chosen, not *what that row said*. A client tidying
+     * "Sr. Manager" into "Senior Manager" would otherwise rewrite the designation on every
+     * case already closed, and reusing a closed London office entry for a Dublin one would
+     * move every past row that named it to Ireland. The state is copied for its own
+     * reason: professional tax follows the state a person worked in.
+     *
+     * Stamped here rather than by whoever writes the row, so a seeder, an import and a
+     * screen are all covered by one rule — the same choice already made for who entered
+     * the row, and none of the three fields is one a form may fill. Only read when the
+     * link itself changes, so an ordinary save costs nothing.
+     *
+     * A link pointing at another client company's entry, or at nothing at all, is refused
+     * here by name. The database would refuse the row anyway, but for the wrong reason —
+     * it would report a link with no copy beside it, which sends whoever is debugging an
+     * import to the write path instead of to the wrong number in their file.
+     *
+     * ponytail: one lookup per list per row. A bulk join-in-bulk pass (module 10) writing
+     * a thousand rows re-reads the same handful of list rows a thousand times — measured
+     * at twenty of the thirty queries ten rows cost. When that pass exists, hand it the
+     * rows it already read rather than caching in here.
+     */
+    private function freezeReferenceLabels(): void
+    {
+        if ($this->isDirty('designation_id')) {
+            $this->recorded_designation_name = $this->designation_id === null
+                ? null
+                : Designation::query()->whereKey($this->designation_id)->value('name')
+                    ?? throw ReferenceListRefused::unknownEntry('designation', (int) $this->designation_id);
+        }
+
+        if ($this->isDirty('office_id')) {
+            $office = $this->office_id === null
+                ? null
+                : Office::query()->whereKey($this->office_id)->first(['country', 'state_code'])
+                    ?? throw ReferenceListRefused::unknownEntry('office', (int) $this->office_id);
+
+            $this->recorded_office_country = $office?->country;
+            $this->recorded_office_state_code = $office?->state_code;
+        }
     }
 
     /**

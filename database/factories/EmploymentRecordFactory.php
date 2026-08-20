@@ -2,7 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Models\Designation;
 use App\Models\EmploymentRecord;
+use App\Models\Office;
 use App\Models\OrgUnit;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -53,6 +55,20 @@ class EmploymentRecordFactory extends Factory
     public function reportingTo(User $manager): static
     {
         return $this->state(['reports_to_id' => $manager->getKey()]);
+    }
+
+    /**
+     * The designation this row points at. Its words are copied onto the row by the model,
+     * never passed in, which is what a rename must not reach backwards through.
+     */
+    public function designated(Designation $designation): static
+    {
+        return $this->state(['designation_id' => $designation->getKey()]);
+    }
+
+    public function basedAt(Office $office): static
+    {
+        return $this->state(['office_id' => $office->getKey()]);
     }
 
     /**

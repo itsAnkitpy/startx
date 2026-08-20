@@ -2,6 +2,7 @@
 
 use App\Authorization\Permission;
 use App\Authorization\PermissionResolver;
+use App\Models\Designation;
 use App\Models\EmploymentRecord;
 use App\Models\OrgUnit;
 use App\Models\Role;
@@ -208,10 +209,15 @@ it('projects onto the identity attributes a directory sync expects, with no tran
     // Module 11 provisions to Okta, Entra and Google, all of which speak SCIM. The
     // point of this test is that the payload is assembled from columns rather than
     // computed: if a bespoke transform were needed, the record would be the wrong shape.
-    // Job title, department and cost centre join it in step 5, with the lists they
-    // point at.
+    //
+    // The designation completed this in step 5 and is the last attribute SCIM asks for —
+    // sent as the words the job row froze rather than a live read of the list, so a
+    // directory receives what the person's record says rather than what the list says
+    // today. SCIM's own `costCenter` is simply not sent: it is an optional attribute and
+    // this product holds no cost centre.
     TenantContext::run($this->meridian, function () {
         $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
+        $designation = Designation::factory()->named('Sr. Manager')->create();
         $anjali = User::factory()->named('Anjali Rao')->create();
 
         $priya = User::create([
@@ -222,7 +228,7 @@ it('projects onto the identity attributes a directory sync expects, with no tran
         ]);
 
         $job = EmploymentRecord::factory()
-            ->forPerson($priya)->in($freight)->reportingTo($anjali)
+            ->forPerson($priya)->in($freight)->reportingTo($anjali)->designated($designation)
             ->create(['employee_code' => 'MER-0041', 'employment_type' => 'full_time']);
 
         $payload = [
@@ -234,6 +240,7 @@ it('projects onto the identity attributes a directory sync expects, with no tran
                 'familyName' => $priya->last_name,
             ],
             'displayName' => $priya->preferred_name,
+            'title' => $job->recorded_designation_name,
             'userType' => $job->employment_type,
             'active' => $priya->active,
             'preferredLanguage' => $priya->locale,
@@ -257,6 +264,7 @@ it('projects onto the identity attributes a directory sync expects, with no tran
             'familyName' => 'Nair',
         ])
             ->and($payload['userName'])->toBe('priya@meridian.test')
+            ->and($payload['title'])->toBe('Sr. Manager')
             ->and($payload['timezone'])->toBe('Asia/Kolkata')
             ->and($payload['urn:ietf:params:scim:schemas:extension:enterprise:2.0:User'])->toBe([
                 'employeeNumber' => 'MER-0041',
