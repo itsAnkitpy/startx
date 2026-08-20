@@ -18,4 +18,19 @@ class TenantContextMissing extends RuntimeException
             .'TenantContext::run(), or use TenantContext::cross() if reaching across tenants is intended.'
         );
     }
+
+    /**
+     * Thrown when a setting is read or written with no tenant in scope. Handing back
+     * the declared default here would be worse than the error: a scheduled pass that
+     * forgot to name its client company would read a money threshold nobody chose and
+     * act on it.
+     */
+    public static function forSetting(string $key): self
+    {
+        return new self(
+            "No tenant is in scope, so the setting [{$key}] cannot be read or written. A default "
+            .'returned here would be a value no client had chosen. Set the client company with '
+            .'TenantContext::run().'
+        );
+    }
 }

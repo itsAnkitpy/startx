@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Authorization\PermissionResolver;
 use App\Authorization\TenantPasswordBrokers;
+use App\Settings\Settings;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,6 +21,11 @@ class AppServiceProvider extends ServiceProvider
         // leak across that boundary could not answer one client's question from
         // another's rows.
         $this->app->scoped(PermissionResolver::class);
+
+        // Scoped for the same reason, and the client company is likewise in every cache
+        // key: a value read here decides who has to approve a hire, so a stale answer
+        // held past the end of a request is not a cheap mistake.
+        $this->app->scoped(Settings::class);
 
         // Laravel's password reset store looks a person up by email address alone, with
         // no client company, so a link issued at one client resets an account at
