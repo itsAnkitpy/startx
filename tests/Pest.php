@@ -134,19 +134,34 @@ function tenantWallFaults(string $table, ?array $tenantOwned = null): array
         }
     }
 
-    $hasCompositeUnique = DB::selectOne(
+    // The constraint on the tenant and the id together exists so that another
+    // tenant-owned table can point at this one with a key that carries the tenant. A
+    // table with no `id` at all cannot be pointed at that way and has nothing to
+    // protect — Laravel's password reset table is keyed on the address, which is the
+    // only one so far. Asking the schema rather than keeping a list of exceptions means
+    // nobody has to remember to maintain the list.
+    $hasIdColumn = DB::selectOne(
         "select count(*) as total
-           from pg_index i
-          where i.indrelid = ?::regclass
-            and i.indisunique
-            and (select array_agg(att.attname::text order by att.attname)
-                   from pg_attribute att
-                  where att.attrelid = i.indrelid and att.attnum = any(i.indkey)) = array['id', 'tenant_id']",
+           from pg_attribute
+          where attrelid = ?::regclass and attname = 'id' and attnum > 0 and not attisdropped",
         [$table]
     );
 
-    if ((int) $hasCompositeUnique->total === 0) {
-        $faults[] = "{$table} has no unique constraint on the tenant and the id together, so no other table can point at it with a key that carries the tenant.";
+    if ((int) $hasIdColumn->total > 0) {
+        $hasCompositeUnique = DB::selectOne(
+            "select count(*) as total
+               from pg_index i
+              where i.indrelid = ?::regclass
+                and i.indisunique
+                and (select array_agg(att.attname::text order by att.attname)
+                       from pg_attribute att
+                      where att.attrelid = i.indrelid and att.attnum = any(i.indkey)) = array['id', 'tenant_id']",
+            [$table]
+        );
+
+        if ((int) $hasCompositeUnique->total === 0) {
+            $faults[] = "{$table} has no unique constraint on the tenant and the id together, so no other table can point at it with a key that carries the tenant.";
+        }
     }
 
     $tenantOwned ??= tenantOwnedTables();

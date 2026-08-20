@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Login;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -27,7 +28,14 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->login()
+            ->login(Login::class)
+
+            // Filament's own documentation is explicit that a missing policy, or a
+            // missing method on one, *grants* access — it assumes authorization has not
+            // been set up yet. For a product whose whole claim is an attributable trail
+            // over salary and settlement figures, a forgotten policy has to fail loudly
+            // instead of quietly opening a screen.
+            ->strictAuthorization()
             ->colors([
                 'primary' => Color::Amber,
             ])

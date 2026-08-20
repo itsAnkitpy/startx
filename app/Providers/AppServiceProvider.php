@@ -2,23 +2,54 @@
 
 namespace App\Providers;
 
+use App\Authorization\PermissionResolver;
+use App\Authorization\TenantPasswordBrokers;
+use Illuminate\Auth\EloquentUserProvider;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
-        //
+        // Scoped, not a singleton: Laravel discards a scoped instance between requests
+        // and between queued jobs, which is exactly how long a permission answer should
+        // be remembered. The client company is in every cache key as well, so even a
+        // leak across that boundary could not answer one client's question from
+        // another's rows.
+        $this->app->scoped(PermissionResolver::class);
+
+        // Laravel's password reset store looks a person up by email address alone, with
+        // no client company, so a link issued at one client resets an account at
+        // another. `extend` rather than `bind` because the framework registers
+        // `auth.password` from a deferred provider that would otherwise load after us
+        // and overwrite the binding; an extender is applied after that provider has had
+        // its say.
+        $this->app->extend(
+            'auth.password',
+            fn () => new TenantPasswordBrokers($this->app),
+        );
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
+        // No account survives its last working day, and that has to be true of
+        // authentication itself rather than only of the panel's own door.
         //
+        // All three ways the framework finds an account — signing in, rehydrating a
+        // session on the next request, and the remember-me cookie — run through this one
+        // query, so the condition is written once. The effect worth knowing: an account
+        // deactivated while somebody is signed in stops working on their very next
+        // request, which is exactly what an exit on a last working day should do.
+        //
+        // What a leaver is still owed after that date — the relieving letter, the
+        // settlement statement, the Form 16, a disputed settlement line — travels on
+        // signed links to a personal address and needs no account at all.
+        Auth::provider('eloquent', fn (Application $app, array $config): EloquentUserProvider => (new EloquentUserProvider(
+            $app['hash'],
+            $config['model'],
+        ))->withQuery(fn (Builder $query) => $query->where('active', true)));
     }
 }
