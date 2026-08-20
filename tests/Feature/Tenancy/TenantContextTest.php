@@ -120,7 +120,59 @@ it('leaves no client company in scope for an unknown or inactive subdomain', fun
 
             return response('ok');
         });
+
+        expect(TenantContext::id())->toBeNull();
     }
+});
+
+it('tells a visitor at an address we do not have that we do not have it', function () {
+    $reached = false;
+
+    $response = (new BindTenantToRequest)->handle(
+        Request::create('http://nobody.localhost/admin'),
+        function () use (&$reached) {
+            $reached = true;
+
+            return response('ok');
+        }
+    );
+
+    // Stopped here rather than carrying on to a sign-in form with no company behind it,
+    // which is what a visitor used to get: a page they could type into and never pass.
+    expect($reached)->toBeFalse()
+        ->and($response->getStatusCode())->toBe(404)
+        ->and($response->getContent())->toContain('No StartX company at this address')
+        ->and($response->getContent())->toContain('Check the address with your HR team');
+});
+
+it('tells a switched-off client company something different, and never says why', function () {
+    // Anjali's company is locked out for non-payment. Before this she saw exactly what a
+    // stranger guessing addresses saw, so the product looked broken and she rang support.
+    $this->vertex->update(['active' => false]);
+
+    $response = (new BindTenantToRequest)->handle(
+        Request::create('http://vertex.localhost/admin'),
+        fn () => response('ok')
+    );
+
+    expect($response->getStatusCode())->toBe(403)
+        ->and($response->getContent())->toContain('Vertex Foods cannot be signed in to right now')
+        // Why access is off is between SummerHill and the company. Every employee of it
+        // sees this page, so the reason cannot be on it.
+        ->and($response->getContent())->not->toContain('payment')
+        ->and($response->getContent())->not->toContain('suspend');
+});
+
+it('lets the address with no company in it through to the welcome page', function () {
+    $reached = false;
+
+    (new BindTenantToRequest)->handle(Request::create('http://localhost/'), function () use (&$reached) {
+        $reached = true;
+
+        return response('ok');
+    });
+
+    expect($reached)->toBeTrue();
 });
 
 it('lets background work run for a deactivated client company, because that is a login gate only', function () {
