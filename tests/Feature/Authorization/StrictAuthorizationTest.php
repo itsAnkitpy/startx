@@ -42,7 +42,7 @@ it('answers from the policy where there is one', function () {
         $roles = StarterRoles::seed();
         $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
 
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create([
             'role_id' => $roles['hr_head']->getKey(),
             'org_unit_id' => $freight->getKey(),
@@ -64,7 +64,7 @@ it('denies a person whose role carries none of the actions', function () {
         $roles = StarterRoles::seed();
         $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
 
-        $priya = User::factory()->create(['name' => 'Priya Nair']);
+        $priya = User::factory()->named('Priya Nair')->create();
         $priya->roleAssignments()->create(['role_id' => $roles['employee']->getKey()]);
 
         $this->actingAs($priya);
@@ -80,10 +80,10 @@ it('refuses to delete a person at any permission level', function () {
     TenantContext::run($this->meridian, function () {
         $role = Role::factory()->withPermissions(Permission::all())->create();
 
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create(['role_id' => $role->getKey()]);
 
-        $rakesh = User::factory()->create(['name' => 'Rakesh Iyer']);
+        $rakesh = User::factory()->named('Rakesh Iyer')->create();
 
         $this->actingAs($anjali);
 

@@ -80,7 +80,7 @@ it('refuses to move an administrator grant onto a leaver when only one would rem
     // an account that can no longer sign in.
     TenantContext::run($this->meridian, function () {
         $grants = appointAdministrators(2);
-        $rakesh = User::factory()->inactive()->create(['name' => 'Rakesh Iyer']);
+        $rakesh = User::factory()->inactive()->named('Rakesh Iyer')->create();
 
         $grants[0]->update(['user_id' => $rakesh->getKey()]);
     });
@@ -136,7 +136,7 @@ it('counts one person administering two branches as one administrator', function
         $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
         $retail = OrgUnit::create(['type' => 'business_line', 'name' => 'Retail Fulfilment']);
 
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $freight->getKey()]);
         $anjali->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $retail->getKey()]);
 

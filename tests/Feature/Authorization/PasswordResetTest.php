@@ -30,11 +30,11 @@ beforeEach(function () {
     $this->vertex = Tenant::factory()->create(['name' => 'Vertex Foods', 'slug' => 'vertex']);
 
     $this->meridianPriya = TenantContext::run($this->meridian, fn () => User::factory()->create([
-        'name' => 'Priya Nair', 'work_email' => 'priya@example.test',
+        'first_name' => 'Priya', 'last_name' => 'Nair', 'work_email' => 'priya@example.test',
     ]));
 
     $this->vertexPriya = TenantContext::run($this->vertex, fn () => User::factory()->create([
-        'name' => 'Priya Nair', 'work_email' => 'priya@example.test',
+        'first_name' => 'Priya', 'last_name' => 'Nair', 'work_email' => 'priya@example.test',
     ]));
 });
 

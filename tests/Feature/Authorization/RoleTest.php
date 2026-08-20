@@ -51,7 +51,7 @@ it('does not change any answer when a client renames a role', function () {
             ->withPermissions([Permission::ViewPerson])
             ->create();
 
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create(['role_id' => $role->getKey()]);
 
         $before = $resolver->allows($anjali, Permission::ViewPerson);
@@ -77,7 +77,7 @@ it('keeps two client companies using one internal role name entirely separate', 
             ->withPermissions([Permission::ViewPerson, Permission::UpdatePerson])
             ->create();
 
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create(['role_id' => $role->getKey()]);
 
         return $anjali;
@@ -90,7 +90,7 @@ it('keeps two client companies using one internal role name entirely separate', 
             ->withPermissions([Permission::ViewPerson])
             ->create();
 
-        $deepak = User::factory()->create(['name' => 'Deepak Verma']);
+        $deepak = User::factory()->named('Deepak Verma')->create();
         $deepak->roleAssignments()->create(['role_id' => $role->getKey()]);
 
         return $deepak;

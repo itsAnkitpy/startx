@@ -50,7 +50,7 @@ function meridianStructure(): array
 it('keeps a grant on one branch out of the branch below it', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
 
         $anjali->roleAssignments()->create([
             'role_id' => $tree['role']->getKey(),
@@ -67,7 +67,7 @@ it('keeps a grant on one branch out of the branch below it', function () {
 it('reaches everything below when the grant says to', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
 
         $anjali->roleAssignments()->create([
             'role_id' => $tree['role']->getKey(),
@@ -90,7 +90,7 @@ it('reaches everything below when the grant says to', function () {
 it('covers the whole client company when a grant names no unit', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
 
         $anjali->roleAssignments()->create(['role_id' => $tree['role']->getKey()]);
 
@@ -103,7 +103,7 @@ it('covers the whole client company when a grant names no unit', function () {
 it('says no to an action the person\'s roles do not carry', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
 
         $anjali->roleAssignments()->create(['role_id' => $tree['role']->getKey()]);
 
@@ -117,7 +117,7 @@ it('says no to an action the person\'s roles do not carry', function () {
 it('says no to someone holding no role at all', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $priya = User::factory()->create(['name' => 'Priya Nair']);
+        $priya = User::factory()->named('Priya Nair')->create();
 
         expect($this->resolver->allows($priya, Permission::ViewPerson))->toBeFalse()
             ->and($this->resolver->allows($priya, Permission::ViewPerson, $tree['freight']))->toBeFalse();
@@ -138,7 +138,7 @@ it('answers the same question per client company, not once per person', function
     // would be handed back.
     $anjali = TenantContext::run($this->meridian, function () {
         $role = Role::factory()->keyed('hr_head')->withPermissions([Permission::ViewPerson])->create();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
         $anjali->roleAssignments()->create(['role_id' => $role->getKey()]);
 
         return $anjali;
@@ -162,7 +162,7 @@ it('answers the same question per client company, not once per person', function
 it('counts one person holding the role twice as one grant, not two answers', function () {
     TenantContext::run($this->meridian, function () {
         $tree = meridianStructure();
-        $anjali = User::factory()->create(['name' => 'Anjali Rao']);
+        $anjali = User::factory()->named('Anjali Rao')->create();
 
         $anjali->roleAssignments()->create([
             'role_id' => $tree['role']->getKey(),

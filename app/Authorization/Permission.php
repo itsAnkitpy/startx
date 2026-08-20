@@ -38,6 +38,15 @@ final class Permission
 
     public const DeactivatePerson = 'deactivate_person';
 
+    /**
+     * Reading a person's tax, provident-fund, bank or passport identifiers. Separate
+     * from {@see ViewPerson} on purpose: these are the fields a client is legally
+     * exposed by, so seeing somebody's record is not the same as seeing their bank
+     * account. Deliberately not on the seeded HR Head role — a client ticks it on for
+     * whoever actually hands data to payroll.
+     */
+    public const ViewStatutoryId = 'view_statutory_id';
+
     public const ViewRole = 'view_role';
 
     /** Editing a role's label and its action list, and granting or revoking it. */

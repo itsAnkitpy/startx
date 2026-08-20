@@ -7,11 +7,25 @@ use App\Authorization\PermissionResolver;
 use App\Models\User;
 
 /**
- * A person's own position in the structure arrives in step 4, on their dated
- * employment record. Until then these questions cannot be narrowed to one branch, so
- * they ask only whether the person holds the action at all. When employment records
- * land, the unit is passed here the same way it already is for a structure unit, and
- * no caller changes.
+ * A question about one person is narrowed to the part of the structure that person
+ * belongs to, which their most recent employment record says. So an HR head
+ * responsible for one branch is answered no about somebody in another branch, rather
+ * than yes because they hold the action somewhere.
+ *
+ * Their most recent row rather than the row that is true today, because a leaver has
+ * no row that is true today. Reading only the current one widened every leaver's file
+ * to anybody holding the action in any branch, on the day they left — and a leaver's
+ * file is the one this product exists to protect.
+ *
+ * Somebody who has never held a job row has no place in the structure yet, and the
+ * question falls back to whether the asker holds the action anywhere at all. That is
+ * the state every account is in before their first employment row is written, so it
+ * cannot be a refusal.
+ *
+ * Two questions here cannot be narrowed and are not:
+ * {@see viewAny} opens a list, and the rows in the list are each checked in turn.
+ * {@see create} is asked without a record, so the screen has to ask about the target
+ * branch before it writes. Both are written into module 12.
  */
 class UserPolicy
 {
@@ -24,7 +38,7 @@ class UserPolicy
 
     public function view(User $user, User $subject): bool
     {
-        return $this->permissions->allows($user, Permission::ViewPerson);
+        return $this->permissions->allows($user, Permission::ViewPerson, $subject->lastKnownOrgUnit());
     }
 
     public function create(User $user): bool
@@ -34,7 +48,7 @@ class UserPolicy
 
     public function update(User $user, User $subject): bool
     {
-        return $this->permissions->allows($user, Permission::UpdatePerson);
+        return $this->permissions->allows($user, Permission::UpdatePerson, $subject->lastKnownOrgUnit());
     }
 
     /**
@@ -50,6 +64,6 @@ class UserPolicy
 
     public function deactivate(User $user, User $subject): bool
     {
-        return $this->permissions->allows($user, Permission::DeactivatePerson);
+        return $this->permissions->allows($user, Permission::DeactivatePerson, $subject->lastKnownOrgUnit());
     }
 }

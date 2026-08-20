@@ -23,13 +23,13 @@ beforeEach(function () {
 
 it('lets the same work address hold an account at two client companies', function () {
     $meridianPriya = TenantContext::run($this->meridian, fn () => User::create([
-        'name' => 'Priya Nair',
+        'first_name' => 'Priya', 'last_name' => 'Nair',
         'work_email' => 'priya@example.test',
         'password' => 'correct-horse',
     ]));
 
     $vertexPriya = TenantContext::run($this->vertex, fn () => User::create([
-        'name' => 'Priya Nair',
+        'first_name' => 'Priya', 'last_name' => 'Nair',
         'work_email' => 'priya@example.test',
         'password' => 'correct-horse',
     ]));
@@ -45,9 +45,9 @@ it('lets the same work address hold an account at two client companies', functio
 
 it('refuses a second account on the same work address inside one client company', function () {
     TenantContext::run($this->meridian, function () {
-        User::create(['name' => 'Priya Nair', 'work_email' => 'priya@example.test', 'password' => 'x']);
+        User::create(['first_name' => 'Priya', 'last_name' => 'Nair', 'work_email' => 'priya@example.test', 'password' => 'x']);
 
-        User::create(['name' => 'Priya Menon', 'work_email' => 'priya@example.test', 'password' => 'x']);
+        User::create(['first_name' => 'Priya', 'last_name' => 'Menon', 'work_email' => 'priya@example.test', 'password' => 'x']);
     });
 })->throws(QueryException::class);
 
@@ -57,9 +57,9 @@ it('keeps a departed person holding their work address', function () {
     // found, so somebody creates a second one. Here a rehire is fresh employment rows on
     // this same account, so the address never needs releasing.
     TenantContext::run($this->meridian, function () {
-        User::factory()->inactive()->create(['name' => 'Rakesh Iyer', 'work_email' => 'rakesh@example.test']);
+        User::factory()->inactive()->named('Rakesh Iyer')->create(['work_email' => 'rakesh@example.test']);
 
-        User::create(['name' => 'Rakesh Sharma', 'work_email' => 'rakesh@example.test', 'password' => 'x']);
+        User::create(['first_name' => 'Rakesh', 'last_name' => 'Sharma', 'work_email' => 'rakesh@example.test', 'password' => 'x']);
     });
 })->throws(QueryException::class);
 
