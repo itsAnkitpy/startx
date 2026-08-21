@@ -22,6 +22,7 @@ class OfficeFactory extends Factory
             'country' => 'IN',
             'state_code' => 'IN-HP',
             'address_block' => null,
+            'weekly_off_days' => [0, 6],
             'active' => true,
         ];
     }
@@ -35,6 +36,17 @@ class OfficeFactory extends Factory
     public function in(string $country, ?string $stateCode = null): static
     {
         return $this->state(['country' => $country, 'state_code' => $stateCode]);
+    }
+
+    /**
+     * Which weekdays this office does not work, as Carbon counts them — Sunday is 0 and
+     * Saturday is 6. A Gulf office is `weekendOn([5, 6])`.
+     *
+     * @param  list<int>  $days
+     */
+    public function weekendOn(array $days): static
+    {
+        return $this->state(['weekly_off_days' => $days]);
     }
 
     public function switchedOff(): static
