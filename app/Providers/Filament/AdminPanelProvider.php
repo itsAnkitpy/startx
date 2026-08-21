@@ -29,6 +29,14 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login(Login::class)
+            ->brandName('StartX')
+            ->favicon(asset('favicon.svg'))
+
+            // The sign-in page is a dark design, and it is the one page in the panel
+            // nobody has chosen a theme for yet. Forcing dark there puts the class on the
+            // document from the server, so there is no pale flash before Filament's own
+            // scripts run. Everywhere else the person's own choice still decides.
+            ->darkMode(isForced: fn (): bool => request()->routeIs('filament.admin.auth.login'))
 
             // Filament's own documentation is explicit that a missing policy, or a
             // missing method on one, *grants* access — it assumes authorization has not
@@ -36,8 +44,10 @@ class AdminPanelProvider extends PanelProvider
             // over salary and settlement figures, a forgotten policy has to fail loudly
             // instead of quietly opening a screen.
             ->strictAuthorization()
+            // The brand blue, the same #6E88FF the sign-in and welcome pages are built
+            // from. Amber was the scaffold's default and matched nothing.
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => Color::hex('#6E88FF'),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')

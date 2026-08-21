@@ -1,223 +1,1824 @@
+{{--
+    The front page. Two jobs, and they are for two different people.
+
+    Somebody who already works at a client company needs one thing: the way in. That is the
+    panel beside the headline, and it changes with the address. At a company's own address there
+    is nothing to ask, so it offers that company's sign-in page. On the bare domain it asks which
+    company, because signing in only happens at a company's address and a form here could never
+    let anybody through. Darwinbox asks the same question the same way; every product checked on
+    20 August 2026 keeps sign-in underneath a company's own address.
+
+    Somebody who has never heard of us needs everything below the hero: what the product does,
+    why it exists, and what it deliberately does not do.
+
+    Every claim on this page comes from `PRD/overview.md` and `PRD/market-position.md`. Two rules
+    from those documents must not be relaxed by a later edit:
+
+    - **Never write "48 hours".** The statute says two *working* days, which is a different date
+      around weekends and holidays. This is the most customer-facing page in the product and so
+      the worst place to carry the shorter, wrong phrase.
+    - **No penalty figures, and no claim that a breach is punished.** `market-position.md` says
+      those numbers need a lawyer's sign-off first, and that enforcement is softer than a
+      compliance pitch wants. What is defensible is that the old thirty-to-forty-five-day habit
+      is no longer lawful on paper.
+
+    There are no customer logos, no testimonials and no numbers about ourselves, because we have
+    none and inventing them is the one thing a page selling an audit trail cannot do. The honest
+    limits section stands in their place.
+
+    ── The redesign of 21 August 2026, and why the page is shaped the way it is ──
+
+    The previous version was honest and worked, and read as one shape repeated five times: label,
+    heading, paragraph, row of identical cards. The fix is rhythm rather than decoration, so
+    every section now differs from its neighbours in three ways at once — height, density and the
+    kind of object it holds:
+
+    - The hero is a two-column split, headline against the sign-in panel, not a centred stack.
+    - A single tight strip carries the statute, and is deliberately the shortest thing here.
+    - The queue-versus-at-once picture is the widest thing here, with the deadline drawn across
+      it as a line the queue visibly falls past. It was already the only place the page showed
+      rather than told; the redesign makes it the centre instead of a detail.
+    - One band is a single sentence at display size, and holds nothing else.
+    - "What it runs" is three tiles of two different sizes, the largest holding a drawn
+      clearance board — labelled as a drawing, because we do not have a screen to show yet.
+    - "What is different" has no cards at all: numbered rows separated by hairlines.
+    - The limits are the densest block on the page, and the closing is the emptiest.
+
+    Amber is the only addition to the palette and it means one thing: the deadline. Nothing else
+    on any page is allowed to use it.
+
+    Self-contained, like the sign-in and wrong-address pages: no `@vite`, so it renders before
+    anybody has run a front-end build. No JavaScript.
+--}}
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>StartX — hiring, onboarding and exits in one place</title>
+    <meta name="description" content="StartX by Summerhill Technologies. One configurable platform for hiring requests, onboarding and exits, with an attributable trail behind every approval and every rupee of a final settlement.">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+    {{-- SVG rather than the .ico, which was an empty file. One drawing, every size. --}}
+    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
 
-        @fonts
+    {{-- Paints the phone browser's own chrome the same colour as the page, instead of
+         leaving a white band above a dark page. --}}
+    <meta name="theme-color" content="#0a0e14">
 
-        <!-- Styles / Scripts -->
-        @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
-            @vite(['resources/css/app.css', 'resources/js/app.js'])
-        @else
-            <style>
-                /*! tailwindcss v4.0.7 | MIT License | https://tailwindcss.com */ @layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-x-reverse:0;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-duration:initial;--tw-ease:initial;--tw-content:""}}}@layer theme{:root,:host{--font-sans:"Instrument Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";--font-serif:ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;--font-mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;--color-red-50:oklch(97.1% .013 17.38);--color-red-100:oklch(93.6% .032 17.717);--color-red-200:oklch(88.5% .062 18.334);--color-red-300:oklch(80.8% .114 19.571);--color-red-400:oklch(70.4% .191 22.216);--color-red-500:oklch(63.7% .237 25.331);--color-red-600:oklch(57.7% .245 27.325);--color-red-700:oklch(50.5% .213 27.518);--color-red-800:oklch(44.4% .177 26.899);--color-red-900:oklch(39.6% .141 25.723);--color-red-950:oklch(25.8% .092 26.042);--color-orange-50:oklch(98% .016 73.684);--color-orange-100:oklch(95.4% .038 75.164);--color-orange-200:oklch(90.1% .076 70.697);--color-orange-300:oklch(83.7% .128 66.29);--color-orange-400:oklch(75% .183 55.934);--color-orange-500:oklch(70.5% .213 47.604);--color-orange-600:oklch(64.6% .222 41.116);--color-orange-700:oklch(55.3% .195 38.402);--color-orange-800:oklch(47% .157 37.304);--color-orange-900:oklch(40.8% .123 38.172);--color-orange-950:oklch(26.6% .079 36.259);--color-amber-50:oklch(98.7% .022 95.277);--color-amber-100:oklch(96.2% .059 95.617);--color-amber-200:oklch(92.4% .12 95.746);--color-amber-300:oklch(87.9% .169 91.605);--color-amber-400:oklch(82.8% .189 84.429);--color-amber-500:oklch(76.9% .188 70.08);--color-amber-600:oklch(66.6% .179 58.318);--color-amber-700:oklch(55.5% .163 48.998);--color-amber-800:oklch(47.3% .137 46.201);--color-amber-900:oklch(41.4% .112 45.904);--color-amber-950:oklch(27.9% .077 45.635);--color-yellow-50:oklch(98.7% .026 102.212);--color-yellow-100:oklch(97.3% .071 103.193);--color-yellow-200:oklch(94.5% .129 101.54);--color-yellow-300:oklch(90.5% .182 98.111);--color-yellow-400:oklch(85.2% .199 91.936);--color-yellow-500:oklch(79.5% .184 86.047);--color-yellow-600:oklch(68.1% .162 75.834);--color-yellow-700:oklch(55.4% .135 66.442);--color-yellow-800:oklch(47.6% .114 61.907);--color-yellow-900:oklch(42.1% .095 57.708);--color-yellow-950:oklch(28.6% .066 53.813);--color-lime-50:oklch(98.6% .031 120.757);--color-lime-100:oklch(96.7% .067 122.328);--color-lime-200:oklch(93.8% .127 124.321);--color-lime-300:oklch(89.7% .196 126.665);--color-lime-400:oklch(84.1% .238 128.85);--color-lime-500:oklch(76.8% .233 130.85);--color-lime-600:oklch(64.8% .2 131.684);--color-lime-700:oklch(53.2% .157 131.589);--color-lime-800:oklch(45.3% .124 130.933);--color-lime-900:oklch(40.5% .101 131.063);--color-lime-950:oklch(27.4% .072 132.109);--color-green-50:oklch(98.2% .018 155.826);--color-green-100:oklch(96.2% .044 156.743);--color-green-200:oklch(92.5% .084 155.995);--color-green-300:oklch(87.1% .15 154.449);--color-green-400:oklch(79.2% .209 151.711);--color-green-500:oklch(72.3% .219 149.579);--color-green-600:oklch(62.7% .194 149.214);--color-green-700:oklch(52.7% .154 150.069);--color-green-800:oklch(44.8% .119 151.328);--color-green-900:oklch(39.3% .095 152.535);--color-green-950:oklch(26.6% .065 152.934);--color-emerald-50:oklch(97.9% .021 166.113);--color-emerald-100:oklch(95% .052 163.051);--color-emerald-200:oklch(90.5% .093 164.15);--color-emerald-300:oklch(84.5% .143 164.978);--color-emerald-400:oklch(76.5% .177 163.223);--color-emerald-500:oklch(69.6% .17 162.48);--color-emerald-600:oklch(59.6% .145 163.225);--color-emerald-700:oklch(50.8% .118 165.612);--color-emerald-800:oklch(43.2% .095 166.913);--color-emerald-900:oklch(37.8% .077 168.94);--color-emerald-950:oklch(26.2% .051 172.552);--color-teal-50:oklch(98.4% .014 180.72);--color-teal-100:oklch(95.3% .051 180.801);--color-teal-200:oklch(91% .096 180.426);--color-teal-300:oklch(85.5% .138 181.071);--color-teal-400:oklch(77.7% .152 181.912);--color-teal-500:oklch(70.4% .14 182.503);--color-teal-600:oklch(60% .118 184.704);--color-teal-700:oklch(51.1% .096 186.391);--color-teal-800:oklch(43.7% .078 188.216);--color-teal-900:oklch(38.6% .063 188.416);--color-teal-950:oklch(27.7% .046 192.524);--color-cyan-50:oklch(98.4% .019 200.873);--color-cyan-100:oklch(95.6% .045 203.388);--color-cyan-200:oklch(91.7% .08 205.041);--color-cyan-300:oklch(86.5% .127 207.078);--color-cyan-400:oklch(78.9% .154 211.53);--color-cyan-500:oklch(71.5% .143 215.221);--color-cyan-600:oklch(60.9% .126 221.723);--color-cyan-700:oklch(52% .105 223.128);--color-cyan-800:oklch(45% .085 224.283);--color-cyan-900:oklch(39.8% .07 227.392);--color-cyan-950:oklch(30.2% .056 229.695);--color-sky-50:oklch(97.7% .013 236.62);--color-sky-100:oklch(95.1% .026 236.824);--color-sky-200:oklch(90.1% .058 230.902);--color-sky-300:oklch(82.8% .111 230.318);--color-sky-400:oklch(74.6% .16 232.661);--color-sky-500:oklch(68.5% .169 237.323);--color-sky-600:oklch(58.8% .158 241.966);--color-sky-700:oklch(50% .134 242.749);--color-sky-800:oklch(44.3% .11 240.79);--color-sky-900:oklch(39.1% .09 240.876);--color-sky-950:oklch(29.3% .066 243.157);--color-blue-50:oklch(97% .014 254.604);--color-blue-100:oklch(93.2% .032 255.585);--color-blue-200:oklch(88.2% .059 254.128);--color-blue-300:oklch(80.9% .105 251.813);--color-blue-400:oklch(70.7% .165 254.624);--color-blue-500:oklch(62.3% .214 259.815);--color-blue-600:oklch(54.6% .245 262.881);--color-blue-700:oklch(48.8% .243 264.376);--color-blue-800:oklch(42.4% .199 265.638);--color-blue-900:oklch(37.9% .146 265.522);--color-blue-950:oklch(28.2% .091 267.935);--color-indigo-50:oklch(96.2% .018 272.314);--color-indigo-100:oklch(93% .034 272.788);--color-indigo-200:oklch(87% .065 274.039);--color-indigo-300:oklch(78.5% .115 274.713);--color-indigo-400:oklch(67.3% .182 276.935);--color-indigo-500:oklch(58.5% .233 277.117);--color-indigo-600:oklch(51.1% .262 276.966);--color-indigo-700:oklch(45.7% .24 277.023);--color-indigo-800:oklch(39.8% .195 277.366);--color-indigo-900:oklch(35.9% .144 278.697);--color-indigo-950:oklch(25.7% .09 281.288);--color-violet-50:oklch(96.9% .016 293.756);--color-violet-100:oklch(94.3% .029 294.588);--color-violet-200:oklch(89.4% .057 293.283);--color-violet-300:oklch(81.1% .111 293.571);--color-violet-400:oklch(70.2% .183 293.541);--color-violet-500:oklch(60.6% .25 292.717);--color-violet-600:oklch(54.1% .281 293.009);--color-violet-700:oklch(49.1% .27 292.581);--color-violet-800:oklch(43.2% .232 292.759);--color-violet-900:oklch(38% .189 293.745);--color-violet-950:oklch(28.3% .141 291.089);--color-purple-50:oklch(97.7% .014 308.299);--color-purple-100:oklch(94.6% .033 307.174);--color-purple-200:oklch(90.2% .063 306.703);--color-purple-300:oklch(82.7% .119 306.383);--color-purple-400:oklch(71.4% .203 305.504);--color-purple-500:oklch(62.7% .265 303.9);--color-purple-600:oklch(55.8% .288 302.321);--color-purple-700:oklch(49.6% .265 301.924);--color-purple-800:oklch(43.8% .218 303.724);--color-purple-900:oklch(38.1% .176 304.987);--color-purple-950:oklch(29.1% .149 302.717);--color-fuchsia-50:oklch(97.7% .017 320.058);--color-fuchsia-100:oklch(95.2% .037 318.852);--color-fuchsia-200:oklch(90.3% .076 319.62);--color-fuchsia-300:oklch(83.3% .145 321.434);--color-fuchsia-400:oklch(74% .238 322.16);--color-fuchsia-500:oklch(66.7% .295 322.15);--color-fuchsia-600:oklch(59.1% .293 322.896);--color-fuchsia-700:oklch(51.8% .253 323.949);--color-fuchsia-800:oklch(45.2% .211 324.591);--color-fuchsia-900:oklch(40.1% .17 325.612);--color-fuchsia-950:oklch(29.3% .136 325.661);--color-pink-50:oklch(97.1% .014 343.198);--color-pink-100:oklch(94.8% .028 342.258);--color-pink-200:oklch(89.9% .061 343.231);--color-pink-300:oklch(82.3% .12 346.018);--color-pink-400:oklch(71.8% .202 349.761);--color-pink-500:oklch(65.6% .241 354.308);--color-pink-600:oklch(59.2% .249 .584);--color-pink-700:oklch(52.5% .223 3.958);--color-pink-800:oklch(45.9% .187 3.815);--color-pink-900:oklch(40.8% .153 2.432);--color-pink-950:oklch(28.4% .109 3.907);--color-rose-50:oklch(96.9% .015 12.422);--color-rose-100:oklch(94.1% .03 12.58);--color-rose-200:oklch(89.2% .058 10.001);--color-rose-300:oklch(81% .117 11.638);--color-rose-400:oklch(71.2% .194 13.428);--color-rose-500:oklch(64.5% .246 16.439);--color-rose-600:oklch(58.6% .253 17.585);--color-rose-700:oklch(51.4% .222 16.935);--color-rose-800:oklch(45.5% .188 13.697);--color-rose-900:oklch(41% .159 10.272);--color-rose-950:oklch(27.1% .105 12.094);--color-slate-50:oklch(98.4% .003 247.858);--color-slate-100:oklch(96.8% .007 247.896);--color-slate-200:oklch(92.9% .013 255.508);--color-slate-300:oklch(86.9% .022 252.894);--color-slate-400:oklch(70.4% .04 256.788);--color-slate-500:oklch(55.4% .046 257.417);--color-slate-600:oklch(44.6% .043 257.281);--color-slate-700:oklch(37.2% .044 257.287);--color-slate-800:oklch(27.9% .041 260.031);--color-slate-900:oklch(20.8% .042 265.755);--color-slate-950:oklch(12.9% .042 264.695);--color-gray-50:oklch(98.5% .002 247.839);--color-gray-100:oklch(96.7% .003 264.542);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-gray-950:oklch(13% .028 261.692);--color-zinc-50:oklch(98.5% 0 0);--color-zinc-100:oklch(96.7% .001 286.375);--color-zinc-200:oklch(92% .004 286.32);--color-zinc-300:oklch(87.1% .006 286.286);--color-zinc-400:oklch(70.5% .015 286.067);--color-zinc-500:oklch(55.2% .016 285.938);--color-zinc-600:oklch(44.2% .017 285.786);--color-zinc-700:oklch(37% .013 285.805);--color-zinc-800:oklch(27.4% .006 286.033);--color-zinc-900:oklch(21% .006 285.885);--color-zinc-950:oklch(14.1% .005 285.823);--color-neutral-50:oklch(98.5% 0 0);--color-neutral-100:oklch(97% 0 0);--color-neutral-200:oklch(92.2% 0 0);--color-neutral-300:oklch(87% 0 0);--color-neutral-400:oklch(70.8% 0 0);--color-neutral-500:oklch(55.6% 0 0);--color-neutral-600:oklch(43.9% 0 0);--color-neutral-700:oklch(37.1% 0 0);--color-neutral-800:oklch(26.9% 0 0);--color-neutral-900:oklch(20.5% 0 0);--color-neutral-950:oklch(14.5% 0 0);--color-stone-50:oklch(98.5% .001 106.423);--color-stone-100:oklch(97% .001 106.424);--color-stone-200:oklch(92.3% .003 48.717);--color-stone-300:oklch(86.9% .005 56.366);--color-stone-400:oklch(70.9% .01 56.259);--color-stone-500:oklch(55.3% .013 58.071);--color-stone-600:oklch(44.4% .011 73.639);--color-stone-700:oklch(37.4% .01 67.558);--color-stone-800:oklch(26.8% .007 34.298);--color-stone-900:oklch(21.6% .006 56.043);--color-stone-950:oklch(14.7% .004 49.25);--color-black:#000;--color-white:#fff;--spacing:.25rem;--breakpoint-sm:40rem;--breakpoint-md:48rem;--breakpoint-lg:64rem;--breakpoint-xl:80rem;--breakpoint-2xl:96rem;--container-3xs:16rem;--container-2xs:18rem;--container-xs:20rem;--container-sm:24rem;--container-md:28rem;--container-lg:32rem;--container-xl:36rem;--container-2xl:42rem;--container-3xl:48rem;--container-4xl:56rem;--container-5xl:64rem;--container-6xl:72rem;--container-7xl:80rem;--text-xs:.75rem;--text-xs--line-height:calc(1 / .75);--text-sm:.875rem;--text-sm--line-height:calc(1.25 / .875);--text-base:1rem;--text-base--line-height: 1.5 ;--text-lg:1.125rem;--text-lg--line-height:calc(1.75 / 1.125);--text-xl:1.25rem;--text-xl--line-height:calc(1.75 / 1.25);--text-2xl:1.5rem;--text-2xl--line-height:calc(2 / 1.5);--text-3xl:1.875rem;--text-3xl--line-height: 1.2 ;--text-4xl:2.25rem;--text-4xl--line-height:calc(2.5 / 2.25);--text-5xl:3rem;--text-5xl--line-height:1;--text-6xl:3.75rem;--text-6xl--line-height:1;--text-7xl:4.5rem;--text-7xl--line-height:1;--text-8xl:6rem;--text-8xl--line-height:1;--text-9xl:8rem;--text-9xl--line-height:1;--font-weight-thin:100;--font-weight-extralight:200;--font-weight-light:300;--font-weight-normal:400;--font-weight-medium:500;--font-weight-semibold:600;--font-weight-bold:700;--font-weight-extrabold:800;--font-weight-black:900;--tracking-tighter:-.05em;--tracking-tight:-.025em;--tracking-normal:0em;--tracking-wide:.025em;--tracking-wider:.05em;--tracking-widest:.1em;--leading-tight:1.25;--leading-snug:1.375;--leading-normal:1.5;--leading-relaxed:1.625;--leading-loose:2;--radius-xs:.125rem;--radius-sm:.25rem;--radius-md:.375rem;--radius-lg:.5rem;--radius-xl:.75rem;--radius-2xl:1rem;--radius-3xl:1.5rem;--radius-4xl:2rem;--shadow-2xs:0 1px #0000000d;--shadow-xs:0 1px 2px 0 #0000000d;--shadow-sm:0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;--shadow-md:0 4px 6px -1px #0000001a, 0 2px 4px -2px #0000001a;--shadow-lg:0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a;--shadow-xl:0 20px 25px -5px #0000001a, 0 8px 10px -6px #0000001a;--shadow-2xl:0 25px 50px -12px #00000040;--inset-shadow-2xs:inset 0 1px #0000000d;--inset-shadow-xs:inset 0 1px 1px #0000000d;--inset-shadow-sm:inset 0 2px 4px #0000000d;--drop-shadow-xs:0 1px 1px #0000000d;--drop-shadow-sm:0 1px 2px #00000026;--drop-shadow-md:0 3px 3px #0000001f;--drop-shadow-lg:0 4px 4px #00000026;--drop-shadow-xl:0 9px 7px #0000001a;--drop-shadow-2xl:0 25px 25px #00000026;--ease-in:cubic-bezier(.4, 0, 1, 1);--ease-out:cubic-bezier(0, 0, .2, 1);--ease-in-out:cubic-bezier(.4, 0, .2, 1);--animate-spin:spin 1s linear infinite;--animate-ping:ping 1s cubic-bezier(0, 0, .2, 1) infinite;--animate-pulse:pulse 2s cubic-bezier(.4, 0, .6, 1) infinite;--animate-bounce:bounce 1s infinite;--blur-xs:4px;--blur-sm:8px;--blur-md:12px;--blur-lg:16px;--blur-xl:24px;--blur-2xl:40px;--blur-3xl:64px;--perspective-dramatic:100px;--perspective-near:300px;--perspective-normal:500px;--perspective-midrange:800px;--perspective-distant:1200px;--aspect-video:16 / 9;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:var(--font-sans);--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab,red,red)){::placeholder{color:color-mix(in oklab,currentcolor 50%,transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}}@layer components;@layer utilities{.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:calc(var(--spacing) * 0)}.start{inset-inline-start:var(--spacing)}.top-0{top:calc(var(--spacing) * 0)}.right-0{right:calc(var(--spacing) * 0)}.container{width:100%}@media(min-width:40rem){.container{max-width:40rem}}@media(min-width:48rem){.container{max-width:48rem}}@media(min-width:64rem){.container{max-width:64rem}}@media(min-width:80rem){.container{max-width:80rem}}@media(min-width:96rem){.container{max-width:96rem}}.mx-auto{margin-inline:auto}.-mt-\[6\.6rem\]{margin-top:-6.6rem}.-mt-px{margin-top:-1px}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-6{margin-top:calc(var(--spacing) * 6)}.mt-8{margin-top:calc(var(--spacing) * 8)}.mr-2{margin-right:calc(var(--spacing) * 2)}.-mb-px{margin-bottom:-1px}.mb-1{margin-bottom:calc(var(--spacing) * 1)}.mb-2{margin-bottom:calc(var(--spacing) * 2)}.mb-4{margin-bottom:calc(var(--spacing) * 4)}.mb-6{margin-bottom:calc(var(--spacing) * 6)}.-ml-8{margin-left:calc(var(--spacing) * -8)}.-ml-px{margin-left:-1px}.ml-1{margin-left:calc(var(--spacing) * 1)}.ml-2{margin-left:calc(var(--spacing) * 2)}.ml-4{margin-left:calc(var(--spacing) * 4)}.ml-12{margin-left:calc(var(--spacing) * 12)}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.table{display:table}.aspect-\[335\/364\]{aspect-ratio:335/364}.h-1{height:calc(var(--spacing) * 1)}.h-1\.5{height:calc(var(--spacing) * 1.5)}.h-2{height:calc(var(--spacing) * 2)}.h-2\.5{height:calc(var(--spacing) * 2.5)}.h-3{height:calc(var(--spacing) * 3)}.h-3\.5{height:calc(var(--spacing) * 3.5)}.h-5{height:calc(var(--spacing) * 5)}.h-8{height:calc(var(--spacing) * 8)}.h-14{height:calc(var(--spacing) * 14)}.h-14\.5{height:calc(var(--spacing) * 14.5)}.h-16{height:calc(var(--spacing) * 16)}.min-h-screen{min-height:100vh}.w-1{width:calc(var(--spacing) * 1)}.w-1\.5{width:calc(var(--spacing) * 1.5)}.w-2{width:calc(var(--spacing) * 2)}.w-2\.5{width:calc(var(--spacing) * 2.5)}.w-3{width:calc(var(--spacing) * 3)}.w-3\.5{width:calc(var(--spacing) * 3.5)}.w-5{width:calc(var(--spacing) * 5)}.w-8{width:calc(var(--spacing) * 8)}.w-\[438px\]{width:438px}.w-auto{width:auto}.w-full{width:100%}.max-w-6xl{max-width:var(--container-6xl)}.max-w-\[335px\]{max-width:335px}.max-w-none{max-width:none}.max-w-xl{max-width:var(--container-xl)}.flex-1{flex:1}.shrink-0{flex-shrink:0}.translate-y-0{--tw-translate-y:calc(var(--spacing) * 0);translate:var(--tw-translate-x) var(--tw-translate-y)}.transform{transform:var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,)}.cursor-default{cursor:default}.cursor-not-allowed{cursor:not-allowed}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-col-reverse{flex-direction:column-reverse}.items-center{align-items:center}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.justify-items-center{justify-items:center}.gap-2{gap:calc(var(--spacing) * 2)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}:where(.space-x-1>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * 1) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * 1) * calc(1 - var(--tw-space-x-reverse)))}.overflow-hidden{overflow:hidden}.rounded-full{border-radius:3.40282e38px}.rounded-md{border-radius:var(--radius-md)}.rounded-sm{border-radius:var(--radius-sm)}.rounded-t-lg{border-top-left-radius:var(--radius-lg);border-top-right-radius:var(--radius-lg)}.rounded-l-md{border-top-left-radius:var(--radius-md);border-bottom-left-radius:var(--radius-md)}.rounded-r-md{border-top-right-radius:var(--radius-md);border-bottom-right-radius:var(--radius-md)}.rounded-br-lg{border-bottom-right-radius:var(--radius-lg)}.rounded-bl-lg{border-bottom-left-radius:var(--radius-lg)}.border{border-style:var(--tw-border-style);border-width:1px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.border-\[\#19140035\]{border-color:#19140035}.border-\[\#e3e3e0\]{border-color:#e3e3e0}.border-black{border-color:var(--color-black)}.border-gray-200{border-color:var(--color-gray-200)}.border-gray-300{border-color:var(--color-gray-300)}.border-gray-400{border-color:var(--color-gray-400)}.border-transparent{border-color:#0000}.bg-\[\#1b1b18\]{background-color:#1b1b18}.bg-\[\#FDFDFC\]{background-color:#fdfdfc}.bg-\[\#dbdbd7\]{background-color:#dbdbd7}.bg-\[\#fff2f2\]{background-color:#fff2f2}.bg-gray-100{background-color:var(--color-gray-100)}.bg-gray-200{background-color:var(--color-gray-200)}.bg-white{background-color:var(--color-white)}.p-6{padding:calc(var(--spacing) * 6)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-5{padding-inline:calc(var(--spacing) * 5)}.px-6{padding-inline:calc(var(--spacing) * 6)}.py-1{padding-block:calc(var(--spacing) * 1)}.py-1\.5{padding-block:calc(var(--spacing) * 1.5)}.py-2{padding-block:calc(var(--spacing) * 2)}.py-4{padding-block:calc(var(--spacing) * 4)}.pt-8{padding-top:calc(var(--spacing) * 8)}.pb-6{padding-bottom:calc(var(--spacing) * 6)}.pb-12{padding-bottom:calc(var(--spacing) * 12)}.text-center{text-align:center}.text-lg{font-size:var(--text-lg);line-height:var(--tw-leading,var(--text-lg--line-height))}.text-sm{font-size:var(--text-sm);line-height:var(--tw-leading,var(--text-sm--line-height))}.text-\[13px\]{font-size:13px}.leading-5{--tw-leading:calc(var(--spacing) * 5);line-height:calc(var(--spacing) * 5)}.leading-7{--tw-leading:calc(var(--spacing) * 7);line-height:calc(var(--spacing) * 7)}.leading-\[20px\]{--tw-leading:20px;line-height:20px}.leading-normal{--tw-leading:var(--leading-normal);line-height:var(--leading-normal)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.text-\[\#1B1B18\],.text-\[\#1b1b18\]{color:#1b1b18}.text-\[\#706f6c\]{color:#706f6c}.text-\[\#F3BEC7\]{color:#f3bec7}.text-\[\#F8B803\]{color:#f8b803}.text-\[\#F53003\],.text-\[\#f53003\]{color:#f53003}.text-gray-200{color:var(--color-gray-200)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-gray-700{color:var(--color-gray-700)}.text-gray-800{color:var(--color-gray-800)}.text-gray-900{color:var(--color-gray-900)}.text-white{color:var(--color-white)}.uppercase{text-transform:uppercase}.underline{text-decoration-line:underline}.underline-offset-4{text-underline-offset:4px}.antialiased{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}.opacity-100{opacity:1}.mix-blend-color{mix-blend-mode:color}.mix-blend-darken{mix-blend-mode:darken}.mix-blend-hard-light{mix-blend-mode:hard-light}.mix-blend-multiply{mix-blend-mode:multiply}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-\[0px_0px_1px_0px_rgba\(0\,0\,0\,0\.03\)\,0px_1px_2px_0px_rgba\(0\,0\,0\,0\.06\)\]{--tw-shadow:0px 0px 1px 0px var(--tw-shadow-color,#00000008), 0px 1px 2px 0px var(--tw-shadow-color,#0000000f);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-\[inset_0px_0px_0px_1px_rgba\(26\,26\,0\,0\.16\)\]{--tw-shadow:inset 0px 0px 0px 1px var(--tw-shadow-color,#1a1a0029);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-sm{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.ring-gray-300{--tw-ring-color:var(--color-gray-300)}.filter{filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-all{transition-property:all;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.delay-200{transition-delay:.2s}.delay-300{transition-delay:.3s}.delay-400{transition-delay:.4s}.duration-150{--tw-duration:.15s;transition-duration:.15s}.duration-750{--tw-duration:.75s;transition-duration:.75s}.ease-in-out{--tw-ease:var(--ease-in-out);transition-timing-function:var(--ease-in-out)}.\[--stroke-color\:\#1B1B18\]{--stroke-color:#1b1b18}.not-has-\[nav\]\:hidden:not(:has(:is(nav))){display:none}.before\:absolute:before{content:var(--tw-content);position:absolute}.before\:top-0:before{content:var(--tw-content);top:calc(var(--spacing) * 0)}.before\:top-1\/2:before{content:var(--tw-content);top:50%}.before\:bottom-0:before{content:var(--tw-content);bottom:calc(var(--spacing) * 0)}.before\:bottom-1\/2:before{content:var(--tw-content);bottom:50%}.before\:left-\[0\.4rem\]:before{content:var(--tw-content);left:.4rem}.before\:border-l:before{content:var(--tw-content);border-left-style:var(--tw-border-style);border-left-width:1px}.before\:border-\[\#e3e3e0\]:before{content:var(--tw-content);border-color:#e3e3e0}@media(hover:hover){.hover\:border-\[\#1915014a\]:hover{border-color:#1915014a}.hover\:border-\[\#19140035\]:hover{border-color:#19140035}.hover\:border-black:hover{border-color:var(--color-black)}.hover\:bg-black:hover{background-color:var(--color-black)}.hover\:bg-gray-100:hover{background-color:var(--color-gray-100)}.hover\:text-gray-400:hover{color:var(--color-gray-400)}.hover\:text-gray-700:hover{color:var(--color-gray-700)}}.focus\:border-blue-300:focus{border-color:var(--color-blue-300)}.focus\:ring:focus{--tw-ring-shadow:var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.focus\:outline-none:focus{--tw-outline-style:none;outline-style:none}.active\:bg-gray-100:active{background-color:var(--color-gray-100)}.active\:text-gray-500:active{color:var(--color-gray-500)}.active\:text-gray-700:active{color:var(--color-gray-700)}.active\:text-gray-800:active{color:var(--color-gray-800)}@media(min-width:40rem){.sm\:flex{display:flex}.sm\:hidden{display:none}.sm\:flex-1{flex:1}.sm\:items-center{align-items:center}.sm\:justify-between{justify-content:space-between}.sm\:justify-start{justify-content:flex-start}.sm\:gap-2{gap:calc(var(--spacing) * 2)}.sm\:px-6{padding-inline:calc(var(--spacing) * 6)}.sm\:pt-0{padding-top:calc(var(--spacing) * 0)}}@media(min-width:64rem){.lg\:mt-10{margin-top:calc(var(--spacing) * 10)}.lg\:mb-0{margin-bottom:calc(var(--spacing) * 0)}.lg\:mb-6{margin-bottom:calc(var(--spacing) * 6)}.lg\:-ml-px{margin-left:-1px}.lg\:ml-0{margin-left:calc(var(--spacing) * 0)}.lg\:block{display:block}.lg\:aspect-auto{aspect-ratio:auto}.lg\:w-\[438px\]{width:438px}.lg\:max-w-4xl{max-width:var(--container-4xl)}.lg\:grow{flex-grow:1}.lg\:flex-row{flex-direction:row}.lg\:justify-center{justify-content:center}.lg\:rounded-t-none{border-top-left-radius:0;border-top-right-radius:0}.lg\:rounded-tl-lg{border-top-left-radius:var(--radius-lg)}.lg\:rounded-r-lg{border-top-right-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg)}.lg\:rounded-br-none{border-bottom-right-radius:0}.lg\:p-8{padding:calc(var(--spacing) * 8)}.lg\:p-20{padding:calc(var(--spacing) * 20)}.lg\:px-8{padding-inline:calc(var(--spacing) * 8)}.lg\:pb-10{padding-bottom:calc(var(--spacing) * 10)}}.rtl\:flex-row-reverse:where(:dir(rtl),[dir=rtl],[dir=rtl] *){flex-direction:row-reverse}@media(prefers-color-scheme:dark){.dark\:border-\[\#3E3E3A\]{border-color:#3e3e3a}.dark\:border-\[\#eeeeec\]{border-color:#eeeeec}.dark\:border-gray-600{border-color:var(--color-gray-600)}.dark\:bg-\[\#0a0a0a\]{background-color:#0a0a0a}.dark\:bg-\[\#1D0002\]{background-color:#1d0002}.dark\:bg-\[\#3E3E3A\]{background-color:#3e3e3a}.dark\:bg-\[\#161615\]{background-color:#161615}.dark\:bg-\[\#eeeeec\]{background-color:#eeeeec}.dark\:bg-gray-700{background-color:var(--color-gray-700)}.dark\:bg-gray-800{background-color:var(--color-gray-800)}.dark\:bg-gray-900{background-color:var(--color-gray-900)}.dark\:text-\[\#1C1C1A\]{color:#1c1c1a}.dark\:text-\[\#4B0600\]{color:#4b0600}.dark\:text-\[\#391800\]{color:#391800}.dark\:text-\[\#733000\]{color:#733000}.dark\:text-\[\#A1A09A\]{color:#a1a09a}.dark\:text-\[\#EDEDEC\]{color:#ededec}.dark\:text-\[\#F61500\]{color:#f61500}.dark\:text-\[\#FF4433\]{color:#f43}.dark\:text-black{color:var(--color-black)}.dark\:text-gray-200{color:var(--color-gray-200)}.dark\:text-gray-300{color:var(--color-gray-300)}.dark\:text-gray-400{color:var(--color-gray-400)}.dark\:text-gray-600{color:var(--color-gray-600)}.dark\:mix-blend-hard-light{mix-blend-mode:hard-light}.dark\:mix-blend-normal{mix-blend-mode:normal}.dark\:shadow-\[inset_0px_0px_0px_1px_\#fffaed2d\]{--tw-shadow:inset 0px 0px 0px 1px var(--tw-shadow-color,#fffaed2d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.dark\:\[--stroke-color\:\#FF750F\]{--stroke-color:#ff750f}.dark\:before\:border-\[\#3E3E3A\]:before{content:var(--tw-content);border-color:#3e3e3a}@media(hover:hover){.dark\:hover\:border-\[\#3E3E3A\]:hover{border-color:#3e3e3a}.dark\:hover\:border-\[\#62605b\]:hover{border-color:#62605b}.dark\:hover\:border-white:hover{border-color:var(--color-white)}.dark\:hover\:bg-gray-900:hover{background-color:var(--color-gray-900)}.dark\:hover\:bg-white:hover{background-color:var(--color-white)}.dark\:hover\:text-gray-200:hover{color:var(--color-gray-200)}.dark\:hover\:text-gray-300:hover{color:var(--color-gray-300)}}.dark\:focus\:border-blue-700:focus{border-color:var(--color-blue-700)}.dark\:focus\:border-blue-800:focus{border-color:var(--color-blue-800)}.dark\:active\:bg-gray-700:active{background-color:var(--color-gray-700)}.dark\:active\:text-gray-300:active{color:var(--color-gray-300)}}@starting-style{.starting\:opacity-0{opacity:0}}@media(prefers-reduced-motion:no-preference){@starting-style{.motion-safe\:starting\:-translate-x-\[26px\]{--tw-translate-x: -26px ;translate:var(--tw-translate-x) var(--tw-translate-y)}}@starting-style{.motion-safe\:starting\:-translate-x-\[51px\]{--tw-translate-x: -51px ;translate:var(--tw-translate-x) var(--tw-translate-y)}}@starting-style{.motion-safe\:starting\:-translate-x-\[78px\]{--tw-translate-x: -78px ;translate:var(--tw-translate-x) var(--tw-translate-y)}}@starting-style{.motion-safe\:starting\:-translate-x-\[102px\]{--tw-translate-x: -102px ;translate:var(--tw-translate-x) var(--tw-translate-y)}}@starting-style{.motion-safe\:starting\:translate-y-6{--tw-translate-y:calc(var(--spacing) * 6);translate:var(--tw-translate-x) var(--tw-translate-y)}}}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@property --tw-duration{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}@property --tw-content{syntax:"*";inherits:false;initial-value:""}@keyframes spin{to{transform:rotate(360deg)}}@keyframes ping{75%,to{opacity:0;transform:scale(2)}}@keyframes pulse{50%{opacity:.5}}@keyframes bounce{0%,to{animation-timing-function:cubic-bezier(.8,0,1,1);transform:translateY(-25%)}50%{animation-timing-function:cubic-bezier(0,0,.2,1);transform:none}}
-            </style>
-        @endif
-    </head>
-    <body class="bg-[#FDFDFC] dark:bg-[#0a0a0a] text-[#1b1b18] flex p-6 lg:p-8 items-center lg:justify-center min-h-screen flex-col">
-        <header class="w-full lg:max-w-4xl max-w-[335px] text-sm mb-6 not-has-[nav]:hidden">
-            @if (Route::has('login'))
-                <nav class="flex items-center justify-end gap-4">
-                    @auth
-                        <a
-                            href="{{ url('/dashboard') }}"
-                            class="inline-block px-5 py-1.5 dark:text-[#EDEDEC] border-[#19140035] hover:border-[#1915014a] border text-[#1b1b18] dark:border-[#3E3E3A] dark:hover:border-[#62605b] rounded-sm text-sm leading-normal"
-                        >
-                            Dashboard
-                        </a>
-                    @else
-                        <a
-                            href="{{ route('login') }}"
-                            class="inline-block px-5 py-1.5 dark:text-[#EDEDEC] text-[#1b1b18] border border-transparent hover:border-[#19140035] dark:hover:border-[#3E3E3A] rounded-sm text-sm leading-normal"
-                        >
-                            Log in
-                        </a>
+    {{-- What somebody sees when this link is pasted into a chat. Without these it
+         previews as a bare address. --}}
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="StartX — hiring, onboarding and exits in one place">
+    <meta property="og:description" content="One workspace for hiring requests, onboarding and exits, with an attributable trail behind every approval.">
+    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:image" content="{{ asset('favicon.svg') }}">
+    <meta name="twitter:card" content="summary">
 
-                        @if (Route::has('register'))
-                            <a
-                                href="{{ route('register') }}"
-                                class="inline-block px-5 py-1.5 dark:text-[#EDEDEC] border-[#19140035] hover:border-[#1915014a] border text-[#1b1b18] dark:border-[#3E3E3A] dark:hover:border-[#62605b] rounded-sm text-sm leading-normal">
-                                Register
-                            </a>
-                        @endif
-                    @endauth
-                </nav>
-            @endif
-        </header>
-        <div class="flex items-center justify-center w-full transition-opacity opacity-100 duration-750 lg:grow starting:opacity-0">
-            <main class="flex max-w-[335px] w-full flex-col-reverse lg:max-w-4xl lg:flex-row">
-                <div class="text-[13px] leading-[20px] flex-1 p-6 pb-6 lg:p-20 lg:pb-10 bg-white dark:bg-[#161615] dark:text-[#EDEDEC] shadow-[inset_0px_0px_0px_1px_rgba(26,26,0,0.16)] dark:shadow-[inset_0px_0px_0px_1px_#fffaed2d] rounded-bl-lg rounded-br-lg lg:rounded-tl-lg lg:rounded-br-none">
-                    <h1 class="mb-1 font-medium">Let's get started</h1>
-                    <p class="mb-2 text-[#706f6c] dark:text-[#A1A09A]">With so many options available to you,<br /> we suggest you start with the following:</p>
-                    <ul class="flex flex-col mb-4 lg:mb-6">
-                        <li class="flex items-center gap-4 py-2 relative before:border-l before:border-[#e3e3e0] dark:before:border-[#3E3E3A] before:top-1/2 before:bottom-0 before:left-[0.4rem] before:absolute">
-                            <span class="relative py-1 bg-white dark:bg-[#161615]">
-                                <span class="flex items-center justify-center rounded-full bg-[#FDFDFC] dark:bg-[#161615] shadow-[0px_0px_1px_0px_rgba(0,0,0,0.03),0px_1px_2px_0px_rgba(0,0,0,0.06)] w-3.5 h-3.5 border dark:border-[#3E3E3A] border-[#e3e3e0]">
-                                    <span class="rounded-full bg-[#dbdbd7] dark:bg-[#3E3E3A] w-1.5 h-1.5"></span>
-                                </span>
-                            </span>
-                            <span>
-                                Read the
-                                <a href="https://laravel.com/docs" target="_blank" class="inline-flex items-center space-x-1 font-medium underline underline-offset-4 text-[#f53003] dark:text-[#FF4433] ml-1">
-                                    <span>Documentation</span>
-                                    <svg
-                                        width="10"
-                                        height="11"
-                                        viewBox="0 0 10 11"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="w-2.5 h-2.5"
-                                    >
-                                        <path
-                                            d="M7.70833 6.95834V2.79167H3.54167M2.5 8L7.5 3.00001"
-                                            stroke="currentColor"
-                                            stroke-linecap="square"
-                                        />
-                                    </svg>
-                                </a>
-                            </span>
-                        </li>
-                        <li class="flex items-center gap-4 py-2 relative before:border-l before:border-[#e3e3e0] dark:before:border-[#3E3E3A] before:bottom-1/2 before:top-0 before:left-[0.4rem] before:absolute">
-                            <span class="relative py-1 bg-white dark:bg-[#161615]">
-                                <span class="flex items-center justify-center rounded-full bg-[#FDFDFC] dark:bg-[#161615] shadow-[0px_0px_1px_0px_rgba(0,0,0,0.03),0px_1px_2px_0px_rgba(0,0,0,0.06)] w-3.5 h-3.5 border dark:border-[#3E3E3A] border-[#e3e3e0]">
-                                    <span class="rounded-full bg-[#dbdbd7] dark:bg-[#3E3E3A] w-1.5 h-1.5"></span>
-                                </span>
-                            </span>
-                            <span>
-                                Watch video tutorials at
-                                <a href="https://laracasts.com" target="_blank" class="inline-flex items-center space-x-1 font-medium underline underline-offset-4 text-[#f53003] dark:text-[#FF4433] ml-1">
-                                    <span>Laracasts</span>
-                                    <svg
-                                        width="10"
-                                        height="11"
-                                        viewBox="0 0 10 11"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="w-2.5 h-2.5"
-                                    >
-                                        <path
-                                            d="M7.70833 6.95834V2.79167H3.54167M2.5 8L7.5 3.00001"
-                                            stroke="currentColor"
-                                            stroke-linecap="square"
-                                        />
-                                    </svg>
-                                </a>
-                            </span>
-                        </li>
-                    </ul>
-                    <ul class="flex gap-3 text-sm leading-normal">
-                        <li>
-                            <a href="https://cloud.laravel.com" target="_blank" class="inline-block dark:bg-[#eeeeec] dark:border-[#eeeeec] dark:text-[#1C1C1A] dark:hover:bg-white dark:hover:border-white hover:bg-black hover:border-black px-5 py-1.5 bg-[#1b1b18] rounded-sm border border-black text-white text-sm leading-normal">
-                                Deploy now
-                            </a>
-                        </li>
-                    </ul>
+    <x-brand-backdrop />
 
-                    <p class="mt-6 lg:mt-10 text-[#706f6c] dark:text-[#A1A09A]">
-                        v{{ app()->version() }}
-                        <a href="https://github.com/laravel/framework/blob/13.x/CHANGELOG.md" target="_blank" class="inline-flex items-center space-x-1 font-medium underline underline-offset-4 text-[#f53003] dark:text-[#FF4433] ml-1">
-                            <span>View changelog</span>
-                            <svg
-                                width="10"
-                                height="11"
-                                viewBox="0 0 10 11"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="w-2.5 h-2.5"
-                            >
-                                <path
-                                    d="M7.70833 6.95834V2.79167H3.54167M2.5 8L7.5 3.00001"
-                                    stroke="currentColor"
-                                    stroke-linecap="square"
-                                />
-                            </svg>
-                        </a>
-                    </p>
-                </div>
-                <div class="bg-[#fff2f2] dark:bg-[#1D0002] relative lg:-ml-px -mb-px lg:mb-0 rounded-t-lg lg:rounded-t-none lg:rounded-r-lg aspect-[335/364] lg:aspect-auto w-full lg:w-[438px] shrink-0 overflow-hidden">
-                    {{-- Laravel Logo --}}
-                    <svg class="w-full text-[#F53003] dark:text-[#F61500] transition-all translate-y-0 opacity-100 max-w-none duration-750 starting:opacity-0 motion-safe:starting:translate-y-6" viewBox="0 0 438 104" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M17.2036 -3H0V102.197H49.5189V86.7187H17.2036V-3Z" fill="currentColor" />
-                        <path d="M110.256 41.6337C108.061 38.1275 104.945 35.3731 100.905 33.3681C96.8667 31.3647 92.8016 30.3618 88.7131 30.3618C83.4247 30.3618 78.5885 31.3389 74.201 33.2923C69.8111 35.2456 66.0474 37.928 62.9059 41.3333C59.7643 44.7401 57.3198 48.6726 55.5754 53.1293C53.8287 57.589 52.9572 62.274 52.9572 67.1813C52.9572 72.1925 53.8287 76.8995 55.5754 81.3069C57.3191 85.7173 59.7636 89.6241 62.9059 93.0293C66.0474 96.4361 69.8119 99.1155 74.201 101.069C78.5885 103.022 83.4247 103.999 88.7131 103.999C92.8016 103.999 96.8667 102.997 100.905 100.994C104.945 98.9911 108.061 96.2359 110.256 92.7282V102.195H126.563V32.1642H110.256V41.6337ZM108.76 75.7472C107.762 78.4531 106.366 80.8078 104.572 82.8112C102.776 84.8161 100.606 86.4183 98.0637 87.6206C95.5202 88.823 92.7004 89.4238 89.6103 89.4238C86.5178 89.4238 83.7252 88.823 81.2324 87.6206C78.7388 86.4183 76.5949 84.8161 74.7998 82.8112C73.004 80.8078 71.6319 78.4531 70.6856 75.7472C69.7356 73.0421 69.2644 70.1868 69.2644 67.1821C69.2644 64.1758 69.7356 61.3205 70.6856 58.6154C71.6319 55.9102 73.004 53.5571 74.7998 51.5522C76.5949 49.5495 78.738 47.9451 81.2324 46.7427C83.7252 45.5404 86.5178 44.9396 89.6103 44.9396C92.7012 44.9396 95.5202 45.5404 98.0637 46.7427C100.606 47.9451 102.776 49.5487 104.572 51.5522C106.367 53.5571 107.762 55.9102 108.76 58.6154C109.756 61.3205 110.256 64.1758 110.256 67.1821C110.256 70.1868 109.756 73.0421 108.76 75.7472Z" fill="currentColor" />
-                        <path d="M242.805 41.6337C240.611 38.1275 237.494 35.3731 233.455 33.3681C229.416 31.3647 225.351 30.3618 221.262 30.3618C215.974 30.3618 211.138 31.3389 206.75 33.2923C202.36 35.2456 198.597 37.928 195.455 41.3333C192.314 44.7401 189.869 48.6726 188.125 53.1293C186.378 57.589 185.507 62.274 185.507 67.1813C185.507 72.1925 186.378 76.8995 188.125 81.3069C189.868 85.7173 192.313 89.6241 195.455 93.0293C198.597 96.4361 202.361 99.1155 206.75 101.069C211.138 103.022 215.974 103.999 221.262 103.999C225.351 103.999 229.416 102.997 233.455 100.994C237.494 98.9911 240.611 96.2359 242.805 92.7282V102.195H259.112V32.1642H242.805V41.6337ZM241.31 75.7472C240.312 78.4531 238.916 80.8078 237.122 82.8112C235.326 84.8161 233.156 86.4183 230.614 87.6206C228.07 88.823 225.251 89.4238 222.16 89.4238C219.068 89.4238 216.275 88.823 213.782 87.6206C211.289 86.4183 209.145 84.8161 207.35 82.8112C205.554 80.8078 204.182 78.4531 203.236 75.7472C202.286 73.0421 201.814 70.1868 201.814 67.1821C201.814 64.1758 202.286 61.3205 203.236 58.6154C204.182 55.9102 205.554 53.5571 207.35 51.5522C209.145 49.5495 211.288 47.9451 213.782 46.7427C216.275 45.5404 219.068 44.9396 222.16 44.9396C225.251 44.9396 228.07 45.5404 230.614 46.7427C233.156 47.9451 235.326 49.5487 237.122 51.5522C238.917 53.5571 240.312 55.9102 241.31 58.6154C242.306 61.3205 242.806 64.1758 242.806 67.1821C242.805 70.1868 242.305 73.0421 241.31 75.7472Z" fill="currentColor" />
-                        <path d="M438 -3H421.694V102.197H438V-3Z" fill="currentColor" />
-                        <path d="M139.43 102.197H155.735V48.2834H183.712V32.1665H139.43V102.197Z" fill="currentColor" />
-                        <path d="M324.49 32.1665L303.995 85.794L283.498 32.1665H266.983L293.748 102.197H314.242L341.006 32.1665H324.49Z" fill="currentColor" />
-                        <path d="M376.571 30.3656C356.603 30.3656 340.797 46.8497 340.797 67.1828C340.797 89.6597 356.094 104 378.661 104C391.29 104 399.354 99.1488 409.206 88.5848L398.189 80.0226C398.183 80.031 389.874 90.9895 377.468 90.9895C363.048 90.9895 356.977 79.3111 356.977 73.269H411.075C413.917 50.1328 398.775 30.3656 376.571 30.3656ZM357.02 61.0967C357.145 59.7487 359.023 43.3761 376.442 43.3761C393.861 43.3761 395.978 59.7464 396.099 61.0967H357.02Z" fill="currentColor" />
-                    </svg>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-                    {{-- 13 --}}
-                    <svg class="w-[438px] max-w-none relative -mt-[6.6rem] -ml-8 lg:ml-0 [--stroke-color:#1B1B18] dark:[--stroke-color:#FF750F]" viewBox="0 0 440 392" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <g class="mix-blend-darken dark:mix-blend-normal transition-all delay-300 opacity-100 duration-750 starting:opacity-0 text-[#1B1B18] dark:text-black">
-                            <mask id="path-1-mask" maskUnits="userSpaceOnUse" x="-0.328613" y="103" width="338" height="299" fill="black">
-                                <rect fill="white" x="-0.328613" y="103" width="338" height="299"/>
-                                <path d="M234.936 400.8C204.136 400.8 178.936 392.4 159.336 375.6C140.136 358.8 130.536 337 130.536 310.2H200.736C200.736 318.2 203.736 324.8 209.736 330C215.736 335.2 223.736 337.8 233.736 337.8C243.336 337.8 251.136 335 257.136 329.4C263.536 323.8 266.736 316.6 266.736 307.8C266.736 299.8 263.936 293.2 258.336 288C252.736 282.8 245.536 280.2 236.736 280.2H199.536V218.4H236.736C243.536 218.4 249.336 216 254.136 211.2C258.936 206.4 261.336 200.4 261.336 193.2C261.336 184.8 258.736 178.2 253.536 173.4C248.336 168.6 241.736 166.2 233.736 166.2C226.536 166.2 220.336 168.4 215.136 172.8C210.336 177.2 207.936 182.8 207.936 189.6H141.336C141.336 164.8 150.136 144.6 167.736 129C185.336 113 207.936 105 235.536 105C263.136 105 285.536 112.2 302.736 126.6C320.336 141 329.136 160 329.136 183.6C329.136 200.8 324.536 214.8 315.336 225.6C306.136 236 294.336 243.2 279.936 247.2C297.136 252 310.736 260.2 320.736 271.8C331.136 283.4 336.336 298 336.336 315.6C336.336 340.4 326.936 360.8 308.136 376.8C289.336 392.8 264.936 400.8 234.936 400.8Z"/>
-                                <path d="M26.8714 167.6H1.67139V105.2H94.6714V400.2H26.8714V167.6Z"/>
-                            </mask>
-                            <path d="M234.936 400.8C204.136 400.8 178.936 392.4 159.336 375.6C140.136 358.8 130.536 337 130.536 310.2H200.736C200.736 318.2 203.736 324.8 209.736 330C215.736 335.2 223.736 337.8 233.736 337.8C243.336 337.8 251.136 335 257.136 329.4C263.536 323.8 266.736 316.6 266.736 307.8C266.736 299.8 263.936 293.2 258.336 288C252.736 282.8 245.536 280.2 236.736 280.2H199.536V218.4H236.736C243.536 218.4 249.336 216 254.136 211.2C258.936 206.4 261.336 200.4 261.336 193.2C261.336 184.8 258.736 178.2 253.536 173.4C248.336 168.6 241.736 166.2 233.736 166.2C226.536 166.2 220.336 168.4 215.136 172.8C210.336 177.2 207.936 182.8 207.936 189.6H141.336C141.336 164.8 150.136 144.6 167.736 129C185.336 113 207.936 105 235.536 105C263.136 105 285.536 112.2 302.736 126.6C320.336 141 329.136 160 329.136 183.6C329.136 200.8 324.536 214.8 315.336 225.6C306.136 236 294.336 243.2 279.936 247.2C297.136 252 310.736 260.2 320.736 271.8C331.136 283.4 336.336 298 336.336 315.6C336.336 340.4 326.936 360.8 308.136 376.8C289.336 392.8 264.936 400.8 234.936 400.8Z" fill="currentColor"/>
-                            <path d="M26.8714 167.6H1.67139V105.2H94.6714V400.2H26.8714V167.6Z" fill="currentColor"/>
-                            <path d="M234.936 400.8C204.136 400.8 178.936 392.4 159.336 375.6C140.136 358.8 130.536 337 130.536 310.2H200.736C200.736 318.2 203.736 324.8 209.736 330C215.736 335.2 223.736 337.8 233.736 337.8C243.336 337.8 251.136 335 257.136 329.4C263.536 323.8 266.736 316.6 266.736 307.8C266.736 299.8 263.936 293.2 258.336 288C252.736 282.8 245.536 280.2 236.736 280.2H199.536V218.4H236.736C243.536 218.4 249.336 216 254.136 211.2C258.936 206.4 261.336 200.4 261.336 193.2C261.336 184.8 258.736 178.2 253.536 173.4C248.336 168.6 241.736 166.2 233.736 166.2C226.536 166.2 220.336 168.4 215.136 172.8C210.336 177.2 207.936 182.8 207.936 189.6H141.336C141.336 164.8 150.136 144.6 167.736 129C185.336 113 207.936 105 235.536 105C263.136 105 285.536 112.2 302.736 126.6C320.336 141 329.136 160 329.136 183.6C329.136 200.8 324.536 214.8 315.336 225.6C306.136 236 294.336 243.2 279.936 247.2C297.136 252 310.736 260.2 320.736 271.8C331.136 283.4 336.336 298 336.336 315.6C336.336 340.4 326.936 360.8 308.136 376.8C289.336 392.8 264.936 400.8 234.936 400.8Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-1-mask)"/>
-                            <path d="M26.8714 167.6H1.67139V105.2H94.6714V400.2H26.8714V167.6Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-1-mask)"/>
-                        </g>
+        html { scroll-behavior: smooth; }
 
-                        <g class="transition-all delay-400 opacity-100 duration-750 starting:opacity-0 motion-safe:starting:-translate-x-[26px] text-[#F3BEC7] dark:text-[#4B0600]">
-                            <mask id="path-2-mask" maskUnits="userSpaceOnUse" x="25.3357" y="103" width="338" height="299" fill="black">
-                                <rect fill="white" x="25.3357" y="103" width="338" height="299"/>
-                                <path d="M260.6 400.8C229.8 400.8 204.6 392.4 185 375.6C165.8 358.8 156.2 337 156.2 310.2H226.4C226.4 318.2 229.4 324.8 235.4 330C241.4 335.2 249.4 337.8 259.4 337.8C269 337.8 276.8 335 282.8 329.4C289.2 323.8 292.4 316.6 292.4 307.8C292.4 299.8 289.6 293.2 284 288C278.4 282.8 271.2 280.2 262.4 280.2H225.2V218.4H262.4C269.2 218.4 275 216 279.8 211.2C284.6 206.4 287 200.4 287 193.2C287 184.8 284.4 178.2 279.2 173.4C274 168.6 267.4 166.2 259.4 166.2C252.2 166.2 246 168.4 240.8 172.8C236 177.2 233.6 182.8 233.6 189.6H167C167 164.8 175.8 144.6 193.4 129C211 113 233.6 105 261.2 105C288.8 105 311.2 112.2 328.4 126.6C346 141 354.8 160 354.8 183.6C354.8 200.8 350.2 214.8 341 225.6C331.8 236 320 243.2 305.6 247.2C322.8 252 336.4 260.2 346.4 271.8C356.8 283.4 362 298 362 315.6C362 340.4 352.6 360.8 333.8 376.8C315 392.8 290.6 400.8 260.6 400.8Z"/>
-                                <path d="M52.5357 167.6H27.3357V105.2H120.336V400.2H52.5357V167.6Z"/>
-                            </mask>
-                            <path d="M260.6 400.8C229.8 400.8 204.6 392.4 185 375.6C165.8 358.8 156.2 337 156.2 310.2H226.4C226.4 318.2 229.4 324.8 235.4 330C241.4 335.2 249.4 337.8 259.4 337.8C269 337.8 276.8 335 282.8 329.4C289.2 323.8 292.4 316.6 292.4 307.8C292.4 299.8 289.6 293.2 284 288C278.4 282.8 271.2 280.2 262.4 280.2H225.2V218.4H262.4C269.2 218.4 275 216 279.8 211.2C284.6 206.4 287 200.4 287 193.2C287 184.8 284.4 178.2 279.2 173.4C274 168.6 267.4 166.2 259.4 166.2C252.2 166.2 246 168.4 240.8 172.8C236 177.2 233.6 182.8 233.6 189.6H167C167 164.8 175.8 144.6 193.4 129C211 113 233.6 105 261.2 105C288.8 105 311.2 112.2 328.4 126.6C346 141 354.8 160 354.8 183.6C354.8 200.8 350.2 214.8 341 225.6C331.8 236 320 243.2 305.6 247.2C322.8 252 336.4 260.2 346.4 271.8C356.8 283.4 362 298 362 315.6C362 340.4 352.6 360.8 333.8 376.8C315 392.8 290.6 400.8 260.6 400.8Z" fill="currentColor"/>
-                            <path d="M52.5357 167.6H27.3357V105.2H120.336V400.2H52.5357V167.6Z" fill="currentColor"/>
-                            <path d="M260.6 400.8C229.8 400.8 204.6 392.4 185 375.6C165.8 358.8 156.2 337 156.2 310.2H226.4C226.4 318.2 229.4 324.8 235.4 330C241.4 335.2 249.4 337.8 259.4 337.8C269 337.8 276.8 335 282.8 329.4C289.2 323.8 292.4 316.6 292.4 307.8C292.4 299.8 289.6 293.2 284 288C278.4 282.8 271.2 280.2 262.4 280.2H225.2V218.4H262.4C269.2 218.4 275 216 279.8 211.2C284.6 206.4 287 200.4 287 193.2C287 184.8 284.4 178.2 279.2 173.4C274 168.6 267.4 166.2 259.4 166.2C252.2 166.2 246 168.4 240.8 172.8C236 177.2 233.6 182.8 233.6 189.6H167C167 164.8 175.8 144.6 193.4 129C211 113 233.6 105 261.2 105C288.8 105 311.2 112.2 328.4 126.6C346 141 354.8 160 354.8 183.6C354.8 200.8 350.2 214.8 341 225.6C331.8 236 320 243.2 305.6 247.2C322.8 252 336.4 260.2 346.4 271.8C356.8 283.4 362 298 362 315.6C362 340.4 352.6 360.8 333.8 376.8C315 392.8 290.6 400.8 260.6 400.8Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-2-mask)"/>
-                            <path d="M52.5357 167.6H27.3357V105.2H120.336V400.2H52.5357V167.6Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-2-mask)"/>
-                        </g>
-                        
-                        <g class="mix-blend-color dark:mix-blend-hard-light transition-all delay-400 opacity-100 duration-750 starting:opacity-0 motion-safe:starting:-translate-x-[51px] text-[#F8B803] dark:text-[#391800]">
-                            <mask id="path-3-mask" maskUnits="userSpaceOnUse" x="51" y="103" width="338" height="299" fill="black">
-                                <rect fill="white" x="51" y="103" width="338" height="299"/>
-                                <path d="M286.264 400.8C255.464 400.8 230.264 392.4 210.664 375.6C191.464 358.8 181.864 337 181.864 310.2H252.064C252.064 318.2 255.064 324.8 261.064 330C267.064 335.2 275.064 337.8 285.064 337.8C294.664 337.8 302.464 335 308.464 329.4C314.864 323.8 318.064 316.6 318.064 307.8C318.064 299.8 315.264 293.2 309.664 288C304.064 282.8 296.864 280.2 288.064 280.2H250.864V218.4H288.064C294.864 218.4 300.664 216 305.464 211.2C310.264 206.4 312.664 200.4 312.664 193.2C312.664 184.8 310.064 178.2 304.864 173.4C299.664 168.6 293.064 166.2 285.064 166.2C277.864 166.2 271.664 168.4 266.464 172.8C261.664 177.2 259.264 182.8 259.264 189.6H192.664C192.664 164.8 201.464 144.6 219.064 129C236.664 113 259.264 105 286.864 105C314.464 105 336.864 112.2 354.064 126.6C371.664 141 380.464 160 380.464 183.6C380.464 200.8 375.864 214.8 366.664 225.6C357.464 236 345.664 243.2 331.264 247.2C348.464 252 362.064 260.2 372.064 271.8C382.464 283.4 387.664 298 387.664 315.6C387.664 340.4 378.264 360.8 359.464 376.8C340.664 392.8 316.264 400.8 286.264 400.8Z"/>
-                                <path d="M78.2 167.6H53V105.2H146V400.2H78.2V167.6Z"/>
-                            </mask>
-                            <path d="M286.264 400.8C255.464 400.8 230.264 392.4 210.664 375.6C191.464 358.8 181.864 337 181.864 310.2H252.064C252.064 318.2 255.064 324.8 261.064 330C267.064 335.2 275.064 337.8 285.064 337.8C294.664 337.8 302.464 335 308.464 329.4C314.864 323.8 318.064 316.6 318.064 307.8C318.064 299.8 315.264 293.2 309.664 288C304.064 282.8 296.864 280.2 288.064 280.2H250.864V218.4H288.064C294.864 218.4 300.664 216 305.464 211.2C310.264 206.4 312.664 200.4 312.664 193.2C312.664 184.8 310.064 178.2 304.864 173.4C299.664 168.6 293.064 166.2 285.064 166.2C277.864 166.2 271.664 168.4 266.464 172.8C261.664 177.2 259.264 182.8 259.264 189.6H192.664C192.664 164.8 201.464 144.6 219.064 129C236.664 113 259.264 105 286.864 105C314.464 105 336.864 112.2 354.064 126.6C371.664 141 380.464 160 380.464 183.6C380.464 200.8 375.864 214.8 366.664 225.6C357.464 236 345.664 243.2 331.264 247.2C348.464 252 362.064 260.2 372.064 271.8C382.464 283.4 387.664 298 387.664 315.6C387.664 340.4 378.264 360.8 359.464 376.8C340.664 392.8 316.264 400.8 286.264 400.8Z" fill="currentColor"/>
-                            <path d="M78.2 167.6H53V105.2H146V400.2H78.2V167.6Z" fill="currentColor"/>
-                            <path d="M286.264 400.8C255.464 400.8 230.264 392.4 210.664 375.6C191.464 358.8 181.864 337 181.864 310.2H252.064C252.064 318.2 255.064 324.8 261.064 330C267.064 335.2 275.064 337.8 285.064 337.8C294.664 337.8 302.464 335 308.464 329.4C314.864 323.8 318.064 316.6 318.064 307.8C318.064 299.8 315.264 293.2 309.664 288C304.064 282.8 296.864 280.2 288.064 280.2H250.864V218.4H288.064C294.864 218.4 300.664 216 305.464 211.2C310.264 206.4 312.664 200.4 312.664 193.2C312.664 184.8 310.064 178.2 304.864 173.4C299.664 168.6 293.064 166.2 285.064 166.2C277.864 166.2 271.664 168.4 266.464 172.8C261.664 177.2 259.264 182.8 259.264 189.6H192.664C192.664 164.8 201.464 144.6 219.064 129C236.664 113 259.264 105 286.864 105C314.464 105 336.864 112.2 354.064 126.6C371.664 141 380.464 160 380.464 183.6C380.464 200.8 375.864 214.8 366.664 225.6C357.464 236 345.664 243.2 331.264 247.2C348.464 252 362.064 260.2 372.064 271.8C382.464 283.4 387.664 298 387.664 315.6C387.664 340.4 378.264 360.8 359.464 376.8C340.664 392.8 316.264 400.8 286.264 400.8Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-3-mask)"/>
-                            <path d="M78.2 167.6H53V105.2H146V400.2H78.2V167.6Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-3-mask)"/>
-                        </g>
-                        
-                        <g class="mix-blend-multiply dark:mix-blend-normal transition-all delay-400 opacity-100 duration-750 starting:opacity-0 motion-safe:starting:-translate-x-[78px] text-[#F3BEC7] dark:text-[#733000]">
-                            <mask id="path-4-mask" maskUnits="userSpaceOnUse" x="76.6643" y="103" width="338" height="299" fill="black">
-                                <rect fill="white" x="76.6643" y="103" width="338" height="299"/>
-                                <path d="M311.929 400.8C281.129 400.8 255.929 392.4 236.329 375.6C217.129 358.8 207.529 337 207.529 310.2H277.729C277.729 318.2 280.729 324.8 286.729 330C292.729 335.2 300.729 337.8 310.729 337.8C320.329 337.8 328.129 335 334.129 329.4C340.529 323.8 343.729 316.6 343.729 307.8C343.729 299.8 340.929 293.2 335.329 288C329.729 282.8 322.529 280.2 313.729 280.2H276.529V218.4H313.729C320.529 218.4 326.329 216 331.129 211.2C335.929 206.4 338.329 200.4 338.329 193.2C338.329 184.8 335.729 178.2 330.529 173.4C325.329 168.6 318.729 166.2 310.729 166.2C303.529 166.2 297.329 168.4 292.129 172.8C287.329 177.2 284.929 182.8 284.929 189.6H218.329C218.329 164.8 227.129 144.6 244.729 129C262.329 113 284.929 105 312.529 105C340.129 105 362.529 112.2 379.729 126.6C397.329 141 406.129 160 406.129 183.6C406.129 200.8 401.529 214.8 392.329 225.6C383.129 236 371.329 243.2 356.929 247.2C374.129 252 387.729 260.2 397.729 271.8C408.129 283.4 413.329 298 413.329 315.6C413.329 340.4 403.929 360.8 385.129 376.8C366.329 392.8 341.929 400.8 311.929 400.8Z"/>
-                                <path d="M103.864 167.6H78.6643V105.2H171.664V400.2H103.864V167.6Z"/>
-                            </mask>
-                            <path d="M311.929 400.8C281.129 400.8 255.929 392.4 236.329 375.6C217.129 358.8 207.529 337 207.529 310.2H277.729C277.729 318.2 280.729 324.8 286.729 330C292.729 335.2 300.729 337.8 310.729 337.8C320.329 337.8 328.129 335 334.129 329.4C340.529 323.8 343.729 316.6 343.729 307.8C343.729 299.8 340.929 293.2 335.329 288C329.729 282.8 322.529 280.2 313.729 280.2H276.529V218.4H313.729C320.529 218.4 326.329 216 331.129 211.2C335.929 206.4 338.329 200.4 338.329 193.2C338.329 184.8 335.729 178.2 330.529 173.4C325.329 168.6 318.729 166.2 310.729 166.2C303.529 166.2 297.329 168.4 292.129 172.8C287.329 177.2 284.929 182.8 284.929 189.6H218.329C218.329 164.8 227.129 144.6 244.729 129C262.329 113 284.929 105 312.529 105C340.129 105 362.529 112.2 379.729 126.6C397.329 141 406.129 160 406.129 183.6C406.129 200.8 401.529 214.8 392.329 225.6C383.129 236 371.329 243.2 356.929 247.2C374.129 252 387.729 260.2 397.729 271.8C408.129 283.4 413.329 298 413.329 315.6C413.329 340.4 403.929 360.8 385.129 376.8C366.329 392.8 341.929 400.8 311.929 400.8Z" fill="currentColor"/>
-                            <path d="M103.864 167.6H78.6643V105.2H171.664V400.2H103.864V167.6Z" fill="currentColor"/>
-                            <path d="M311.929 400.8C281.129 400.8 255.929 392.4 236.329 375.6C217.129 358.8 207.529 337 207.529 310.2H277.729C277.729 318.2 280.729 324.8 286.729 330C292.729 335.2 300.729 337.8 310.729 337.8C320.329 337.8 328.129 335 334.129 329.4C340.529 323.8 343.729 316.6 343.729 307.8C343.729 299.8 340.929 293.2 335.329 288C329.729 282.8 322.529 280.2 313.729 280.2H276.529V218.4H313.729C320.529 218.4 326.329 216 331.129 211.2C335.929 206.4 338.329 200.4 338.329 193.2C338.329 184.8 335.729 178.2 330.529 173.4C325.329 168.6 318.729 166.2 310.729 166.2C303.529 166.2 297.329 168.4 292.129 172.8C287.329 177.2 284.929 182.8 284.929 189.6H218.329C218.329 164.8 227.129 144.6 244.729 129C262.329 113 284.929 105 312.529 105C340.129 105 362.529 112.2 379.729 126.6C397.329 141 406.129 160 406.129 183.6C406.129 200.8 401.529 214.8 392.329 225.6C383.129 236 371.329 243.2 356.929 247.2C374.129 252 387.729 260.2 397.729 271.8C408.129 283.4 413.329 298 413.329 315.6C413.329 340.4 403.929 360.8 385.129 376.8C366.329 392.8 341.929 400.8 311.929 400.8Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-4-mask)"/>
-                            <path d="M103.864 167.6H78.6643V105.2H171.664V400.2H103.864V167.6Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-4-mask)"/>
-                        </g>
-                        
-                        <g class="mix-blend-hard-light transition-all delay-400 opacity-100 duration-750 starting:opacity-0 motion-safe:starting:-translate-x-[102px] text-[#F3BEC7] dark:text-[#4B0600]">
-                            <mask id="path-5-mask" maskUnits="userSpaceOnUse" x="102.329" y="103" width="338" height="299" fill="black">
-                                <rect fill="white" x="102.329" y="103" width="338" height="299"/>
-                                <path d="M337.593 400.8C306.793 400.8 281.593 392.4 261.993 375.6C242.793 358.8 233.193 337 233.193 310.2H303.393C303.393 318.2 306.393 324.8 312.393 330C318.393 335.2 326.393 337.8 336.393 337.8C345.993 337.8 353.793 335 359.793 329.4C366.193 323.8 369.393 316.6 369.393 307.8C369.393 299.8 366.593 293.2 360.993 288C355.393 282.8 348.193 280.2 339.393 280.2H302.193V218.4H339.393C346.193 218.4 351.993 216 356.793 211.2C361.593 206.4 363.993 200.4 363.993 193.2C363.993 184.8 361.393 178.2 356.193 173.4C350.993 168.6 344.393 166.2 336.393 166.2C329.193 166.2 322.993 168.4 317.793 172.8C312.993 177.2 310.593 182.8 310.593 189.6H243.993C243.993 164.8 252.793 144.6 270.393 129C287.993 113 310.593 105 338.193 105C365.793 105 388.193 112.2 405.393 126.6C422.993 141 431.793 160 431.793 183.6C431.793 200.8 427.193 214.8 417.993 225.6C408.793 236 396.993 243.2 382.593 247.2C399.793 252 413.393 260.2 423.393 271.8C433.793 283.4 438.993 298 438.993 315.6C438.993 340.4 429.593 360.8 410.793 376.8C391.993 392.8 367.593 400.8 337.593 400.8Z"/>
-                                <path d="M129.529 167.6H104.329V105.2H197.329V400.2H129.529V167.6Z"/>
-                            </mask>
-                            <path d="M337.593 400.8C306.793 400.8 281.593 392.4 261.993 375.6C242.793 358.8 233.193 337 233.193 310.2H303.393C303.393 318.2 306.393 324.8 312.393 330C318.393 335.2 326.393 337.8 336.393 337.8C345.993 337.8 353.793 335 359.793 329.4C366.193 323.8 369.393 316.6 369.393 307.8C369.393 299.8 366.593 293.2 360.993 288C355.393 282.8 348.193 280.2 339.393 280.2H302.193V218.4H339.393C346.193 218.4 351.993 216 356.793 211.2C361.593 206.4 363.993 200.4 363.993 193.2C363.993 184.8 361.393 178.2 356.193 173.4C350.993 168.6 344.393 166.2 336.393 166.2C329.193 166.2 322.993 168.4 317.793 172.8C312.993 177.2 310.593 182.8 310.593 189.6H243.993C243.993 164.8 252.793 144.6 270.393 129C287.993 113 310.593 105 338.193 105C365.793 105 388.193 112.2 405.393 126.6C422.993 141 431.793 160 431.793 183.6C431.793 200.8 427.193 214.8 417.993 225.6C408.793 236 396.993 243.2 382.593 247.2C399.793 252 413.393 260.2 423.393 271.8C433.793 283.4 438.993 298 438.993 315.6C438.993 340.4 429.593 360.8 410.793 376.8C391.993 392.8 367.593 400.8 337.593 400.8Z" fill="currentColor"/>
-                            <path d="M129.529 167.6H104.329V105.2H197.329V400.2H129.529V167.6Z" fill="currentColor"/>
-                            <path d="M337.593 400.8C306.793 400.8 281.593 392.4 261.993 375.6C242.793 358.8 233.193 337 233.193 310.2H303.393C303.393 318.2 306.393 324.8 312.393 330C318.393 335.2 326.393 337.8 336.393 337.8C345.993 337.8 353.793 335 359.793 329.4C366.193 323.8 369.393 316.6 369.393 307.8C369.393 299.8 366.593 293.2 360.993 288C355.393 282.8 348.193 280.2 339.393 280.2H302.193V218.4H339.393C346.193 218.4 351.993 216 356.793 211.2C361.593 206.4 363.993 200.4 363.993 193.2C363.993 184.8 361.393 178.2 356.193 173.4C350.993 168.6 344.393 166.2 336.393 166.2C329.193 166.2 322.993 168.4 317.793 172.8C312.993 177.2 310.593 182.8 310.593 189.6H243.993C243.993 164.8 252.793 144.6 270.393 129C287.993 113 310.593 105 338.193 105C365.793 105 388.193 112.2 405.393 126.6C422.993 141 431.793 160 431.793 183.6C431.793 200.8 427.193 214.8 417.993 225.6C408.793 236 396.993 243.2 382.593 247.2C399.793 252 413.393 260.2 423.393 271.8C433.793 283.4 438.993 298 438.993 315.6C438.993 340.4 429.593 360.8 410.793 376.8C391.993 392.8 367.593 400.8 337.593 400.8Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-5-mask)"/>
-                            <path d="M129.529 167.6H104.329V105.2H197.329V400.2H129.529V167.6Z" stroke="var(--stroke-color)" stroke-width="2.4" mask="url(#path-5-mask)"/>
-                        </g>
-                    </svg>
-                    <div class="absolute inset-0 rounded-t-lg lg:rounded-t-none lg:rounded-r-lg shadow-[inset_0px_0px_0px_1px_rgba(26,26,0,0.16)] dark:shadow-[inset_0px_0px_0px_1px_#fffaed2d]"></div>
-                </div>
-            </main>
+        body {
+            font-family: var(--sx-body);
+            color: var(--sx-text);
+            background: var(--sx-ground);
+            background-image:
+                radial-gradient(680px 460px at 14% 8%, rgba(110, 136, 255, 0.20), transparent 60%),
+                radial-gradient(560px 520px at 92% 30%, rgba(143, 163, 255, 0.10), transparent 62%);
+            overflow-x: hidden;
+            /* Native controls, the scrollbar and autofill shading render dark. Without
+               it the address box goes yellow-on-white the moment a browser fills it. */
+            color-scheme: dark;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /*
+            The one colour this page adds to the brand, and it means exactly one thing:
+            the two-working-day deadline. Kept local rather than put in the backdrop
+            component, so no other page can quietly start using it for something else.
+        */
+        :root {
+            --sx-clock: #f2a83b;
+            --sx-clock-bright: #fbc46a;
+            --sx-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        /* Everything sits above the drifting glow and the fine grid behind it. */
+        .sx-bar, .sx-hero, .sx-strip, .sx-band, .sx-quote, .sx-foot { position: relative; z-index: 2; }
+
+        /*
+            Two measures rather than one. 72rem is the reading measure for prose and the
+            narrow sections; 84rem is for the two things that are meant to feel wide —
+            the hero split and the clearance comparison.
+        */
+        .sx-wrap {
+            width: min(72rem, 100%);
+            margin-inline: auto;
+            padding-inline: 5%;
+        }
+
+        .sx-wrap--wide { width: min(84rem, 100%); }
+
+        /* Anything the bar links to has to land below the bar rather than behind it. */
+        #sign-in, #why, #runs, #limits { scroll-margin-top: 84px; }
+
+        /* ── Top bar ─────────────────────────────── */
+
+        /* Sticky, because the way in has to be reachable from anywhere on a page this
+           long — and it is the only action somebody scrolling already knows they want. */
+        .sx-bar {
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 15px 5%;
+            border-bottom: 1px solid var(--sx-edge);
+            background: rgba(10, 14, 20, 0.72);
+            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            backdrop-filter: blur(18px) saturate(140%);
+        }
+
+        .sx-wordmark {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-right: auto;
+            font-family: var(--sx-display);
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--sx-text);
+            text-decoration: none;
+        }
+
+        .sx-wordmark svg {
+            height: 30px;
+            width: auto;
+            fill: var(--sx-text);
+            filter: drop-shadow(0 0 14px rgba(110, 136, 255, 0.45));
+        }
+
+        /* Wrapped so the word stays one flex item — without this the bar's 12px gap
+           opens up between "Start" and the coloured "X". */
+        .sx-wordmark span { display: inline-block; }
+        .sx-wordmark b { font-weight: inherit; color: var(--sx-primary-bright); }
+
+        /* Two jumps into the page. Hidden on a phone, where the whole bar has to fit
+           beside the wordmark and the one action that matters wins. */
+        .sx-nav-links { display: none; gap: 28px; }
+
+        .sx-nav-links a {
+            color: var(--sx-muted);
+            font-size: 0.88rem;
+            text-decoration: none;
+            transition: color .2s;
+        }
+
+        .sx-nav-links a:hover { color: var(--sx-text); }
+
+        /* ── Hero ────────────────────────────────── */
+
+        /*
+            A split, not a centred stack. The argument is on the left at the largest type
+            on the page; the one action is on the right, at its own weight, so neither has
+            to queue behind the other. They stack on a narrow screen, argument first.
+        */
+        .sx-hero {
+            display: grid;
+            gap: 44px;
+            padding: 8vh 0 10vh;
+        }
+
+        .sx-hero-copy {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 22px;
+        }
+
+        .sx-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border: 1px solid var(--sx-edge);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.04);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            color: var(--sx-muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .sx-badge i {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--sx-primary);
+        }
+
+        h1 {
+            font-family: var(--sx-display);
+            font-size: clamp(2.5rem, 5.4vw, 4.9rem);
+            font-weight: 700;
+            line-height: 1.02;
+            letter-spacing: -0.03em;
+        }
+
+        h1 em { font-style: normal; color: var(--sx-primary); }
+
+        /* Lets the browser even out the display lines rather than leaving one word alone
+           on the last one. Where it is unsupported the text simply wraps as before. */
+        h1, .sx-band h2, .sx-quote-line, .sx-points h3 { text-wrap: balance; }
+
+        .sx-lede {
+            max-width: 40rem;
+            color: var(--sx-muted);
+            font-size: clamp(1rem, 1.3vw, 1.15rem);
+            line-height: 1.68;
+        }
+
+        .sx-lede b { color: var(--sx-text); font-weight: 600; }
+
+        .sx-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+
+        .sx-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+            padding: 9px 15px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.02);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            color: var(--sx-muted);
+            font-size: 0.8rem;
+            letter-spacing: 0.03em;
+        }
+
+        .sx-chip svg {
+            width: 16px;
+            height: 16px;
+            flex: none;
+            fill: none;
+            stroke: var(--sx-primary);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* ── The doorway: the action for somebody who already has an account ── */
+
+        /*
+            The only glass panel on the page, and the only thing carrying a deep shadow.
+            That is what marks it as the action rather than another card.
+        */
+        .sx-door {
+            width: 100%;
+            padding: 28px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 20px;
+            background: var(--sx-panel);
+            -webkit-backdrop-filter: blur(24px) saturate(140%);
+            backdrop-filter: blur(24px) saturate(140%);
+            box-shadow:
+                0 40px 90px -30px rgba(0, 0, 0, 0.85),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .sx-door h2 {
+            font-family: var(--sx-display);
+            font-size: 1.12rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .sx-door p {
+            color: var(--sx-muted);
+            font-size: 0.9rem;
+            line-height: 1.65;
+        }
+
+        /* ── Buttons ─────────────────────────────── */
+        .sx-nav-btn {
+            flex: none;
+            padding: 10px 22px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 8px;
+            color: var(--sx-text);
+            font-size: 0.92rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .2s, border-color .2s, box-shadow .25s;
+        }
+
+        .sx-nav-btn:hover {
+            color: var(--sx-primary);
+            border-color: var(--sx-primary);
+            box-shadow: 0 0 0 1px rgba(110, 136, 255, 0.25);
+        }
+
+        .sx-cta {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            width: 100%;
+            margin-top: 16px;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--sx-primary), var(--sx-primary-bright));
+            color: var(--sx-ground);
+            font-family: var(--sx-display);
+            font-size: 0.98rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-decoration: none;
+            cursor: pointer;
+            box-shadow: 0 12px 32px -8px rgba(110, 136, 255, 0.6);
+            transition: transform .15s, box-shadow .25s, filter .2s;
+        }
+
+        .sx-cta:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.06);
+            box-shadow: 0 18px 42px -8px rgba(110, 136, 255, 0.78);
+        }
+
+        .sx-cta:active { transform: translateY(0); }
+
+        .sx-cta svg {
+            width: 18px;
+            height: 18px;
+            flex: none;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* Kept in the markup for a screen reader, out of the way for everyone else —
+           the box's own placeholder and the domain beside it already say what it is. */
+        .sx-label {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+
+        /* The address box and the fixed part of the address beside it read as one
+           control, so the person can see the whole address they are heading for. */
+        .sx-address {
+            display: flex;
+            align-items: stretch;
+            margin-top: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            overflow: hidden;
+            transition: border-color .2s, box-shadow .25s, background .2s;
+        }
+
+        .sx-address:focus-within {
+            border-color: var(--sx-primary);
+            background: rgba(110, 136, 255, 0.06);
+            box-shadow: 0 0 0 4px rgba(110, 136, 255, 0.16);
+        }
+
+        .sx-address input {
+            flex: 1 1 auto;
+            min-width: 0;
+            height: 50px;
+            padding: 0 4px 0 16px;
+            border: none;
+            background: none;
+            color: #fff;
+            font-family: var(--sx-mono);
+            font-size: 0.92rem;
+            text-align: right;
+            outline: none;
+        }
+
+        .sx-address input::placeholder { color: var(--sx-placeholder); }
+
+        .sx-address span {
+            display: grid;
+            place-items: center;
+            padding: 0 16px 0 0;
+            color: var(--sx-primary-bright);
+            font-family: var(--sx-mono);
+            font-size: 0.92rem;
+            white-space: nowrap;
+        }
+
+        .sx-error {
+            margin-top: 10px;
+            padding: 9px 13px;
+            border: 1px solid rgba(251, 113, 133, 0.35);
+            border-radius: 10px;
+            background: rgba(251, 113, 133, 0.1);
+            color: var(--sx-bad-text);
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+
+        /* ── The statute strip: the tightest thing on the page ── */
+
+        /*
+            One line, full width, and deliberately shorter than anything else here. It is
+            the only place amber appears outside the comparison picture, and it exists so
+            the section under the hero is a change of pace rather than another block.
+        */
+        .sx-strip {
+            border-block: 1px solid rgba(242, 168, 59, 0.16);
+            background:
+                linear-gradient(90deg, rgba(242, 168, 59, 0.07), rgba(242, 168, 59, 0.015) 55%, transparent);
+        }
+
+        .sx-strip .sx-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px 18px;
+            padding-block: 15px;
+            font-family: var(--sx-mono);
+            font-size: 0.78rem;
+            letter-spacing: 0.02em;
+            color: var(--sx-muted);
+        }
+
+        .sx-strip b { color: var(--sx-clock-bright); font-weight: 600; }
+
+        .sx-strip i {
+            flex: none;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--sx-clock);
+            box-shadow: 0 0 0 4px rgba(242, 168, 59, 0.14);
+            animation: sx-tick 3.2s ease-in-out infinite;
+        }
+
+        @keyframes sx-tick {
+            0%, 100% { box-shadow: 0 0 0 4px rgba(242, 168, 59, 0.14); }
+            50%      { box-shadow: 0 0 0 8px rgba(242, 168, 59, 0.05); }
+        }
+
+        /* Hairline dividers between the three facts, drawn rather than typed so no
+           screen reader announces a pile of vertical bars. */
+        .sx-strip s {
+            flex: none;
+            width: 1px;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.14);
+            text-decoration: none;
+        }
+
+        /* ── Bands: the sections below the hero ── */
+
+        /*
+            No single rhythm any more. Each band names its own height, because a page where
+            every section is the same height is the thing being fixed.
+        */
+        .sx-band { padding-block: clamp(64px, 9vh, 104px); }
+        .sx-band--tall { padding-block: clamp(80px, 12vh, 140px); }
+        .sx-band--tight { padding-block: clamp(52px, 7vh, 76px); }
+
+        /* A faint ground and hairlines, so the eye can tell where one idea ends without
+           a heavy divider. */
+        .sx-band--tint {
+            border-block: 1px solid var(--sx-edge);
+            background: rgba(255, 255, 255, 0.018);
+        }
+
+        /* One band gets a glow of its own, and only one — the argument the whole product
+           rests on. More than one and it stops meaning anything. */
+        .sx-band--lit {
+            background:
+                radial-gradient(120% 80% at 50% 0%, rgba(110, 136, 255, 0.10), transparent 65%),
+                rgba(255, 255, 255, 0.014);
+            border-block: 1px solid var(--sx-hair);
+        }
+
+        .sx-eyebrow {
+            display: block;
+            margin-bottom: 14px;
+            color: var(--sx-primary-bright);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 2.4px;
+            text-transform: uppercase;
+        }
+
+        .sx-band h2 {
+            max-width: 32ch;
+            font-family: var(--sx-display);
+            font-size: clamp(1.7rem, 3.4vw, 2.7rem);
+            font-weight: 600;
+            line-height: 1.14;
+            letter-spacing: -0.02em;
+        }
+
+        .sx-band h2 em { font-style: normal; color: var(--sx-primary); }
+
+        /*
+            The two paragraphs under a heading sit in two columns on a wide screen, which
+            is the other half of not looking like a stack: prose that is a block rather
+            than a long single ribbon.
+        */
+        .sx-say { display: grid; gap: 16px; margin-top: 20px; }
+
+        .sx-say p {
+            color: var(--sx-muted);
+            font-size: clamp(0.98rem, 1.15vw, 1.06rem);
+            line-height: 1.72;
+        }
+
+        .sx-say p b { color: var(--sx-text); font-weight: 600; }
+
+        /* ── The queue-versus-at-once picture: the widest thing here ── */
+
+        /*
+            The one idea on this page a sentence cannot carry: the same seven clearances,
+            in a line and side by side, with the deadline drawn across both. Built from
+            flex and a pseudo-element rather than an image, so it reflows on a phone and
+            needs no build step.
+        */
+        .sx-flows {
+            display: grid;
+            gap: 20px;
+            margin-top: 42px;
+        }
+
+        .sx-flow {
+            position: relative;
+            padding: 24px 26px 26px;
+            border: 1px solid var(--sx-edge);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.022);
+        }
+
+        /* The one we are describing as right gets the brand edge; the one we are
+           describing as broken stays neutral rather than being coloured as an error,
+           because it is how nearly every existing tool works and not a mistake anybody
+           made. */
+        .sx-flow--ours {
+            border-color: var(--sx-hair);
+            background:
+                linear-gradient(180deg, rgba(110, 136, 255, 0.09), rgba(110, 136, 255, 0.03));
+        }
+
+        /* Verdict above the heading rather than beside it. Side by side, the longer of
+           the two headings pushed its pill onto a second line and the two panels stopped
+           looking like the same object compared. */
+        .sx-flow-head {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .sx-flow-head h3 {
+            font-family: var(--sx-display);
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        }
+
+        .sx-verdict {
+            flex: none;
+            padding: 4px 11px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .sx-verdict--slow {
+            border: 1px solid rgba(251, 113, 133, 0.3);
+            background: rgba(251, 113, 133, 0.1);
+            color: var(--sx-bad-text);
+        }
+
+        .sx-verdict--fast {
+            border: 1px solid rgba(52, 211, 153, 0.3);
+            background: rgba(52, 211, 153, 0.1);
+            color: var(--sx-good-text);
+        }
+
+        .sx-steps { list-style: none; }
+
+        .sx-steps li {
+            border: 1px solid var(--sx-edge);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--sx-muted);
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+
+        /*
+            A queue is drawn as a column, because that is what a queue looks like: each row
+            waits for the one above it. Laying the same seven out in a row needed arrows
+            between them, and the moment the row wrapped an arrow was left pointing at the
+            end of a line.
+        */
+        .sx-steps--queue { display: grid; gap: 0; }
+
+        .sx-steps--queue li {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: baseline;
+            gap: 16px;
+            width: fit-content;
+            min-width: 15rem;
+            margin-bottom: 14px;
+            padding: 7px 13px;
+        }
+
+        /* The working day each step lands on. This is the arithmetic the heading claims —
+           seven steps in a line is a week — written down instead of asserted, and it is
+           what makes the deadline below a line something rather than a decoration. */
+        .sx-steps--queue li em {
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.68rem;
+            font-style: normal;
+        }
+
+        .sx-steps--queue li:last-child { margin-bottom: 0; }
+
+        /* The line down to the next one. Decoration around real text, so it is drawn
+           rather than being a character a screen reader would read out six times. */
+        .sx-steps--queue li:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 22px;
+            width: 1px;
+            height: 14px;
+            background: var(--sx-faint);
+        }
+
+        /*
+            The same seven with nothing between them, wrapped as one block — the shape of
+            work that all starts at the same moment. Next to the column above, the height
+            difference is the argument.
+        */
+        .sx-steps--atonce {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        /* The same day language as the queue beside it, said once because there is only
+           one day to say. */
+        .sx-atonce-day {
+            margin-bottom: 12px;
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.68rem;
+        }
+
+        .sx-steps--atonce li {
+            padding: 7px 13px;
+            border-color: var(--sx-hair);
+            background: rgba(110, 136, 255, 0.08);
+            color: var(--sx-text);
+        }
+
+        /*
+            The deadline, drawn as a line across the picture. In the queue it falls after
+            the third step and four steps sit visibly past it; beside it the block of seven
+            finishes above the line with room to spare. That is the whole argument, and it
+            is the reason this section is the widest and the most lit.
+
+            Real text rather than a pseudo-element, because it is a label somebody reading
+            with a screen reader needs as much as somebody looking at it.
+        */
+        .sx-deadline {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 18px 0;
+            color: var(--sx-clock-bright);
+            font-family: var(--sx-mono);
+            font-size: 0.72rem;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+
+        .sx-deadline::before,
+        .sx-deadline::after {
+            content: '';
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--sx-clock), transparent);
+        }
+
+        .sx-deadline::before { width: 26px; flex: none; }
+        .sx-deadline::after { flex: 1 1 auto; }
+
+        /* Past the deadline the remaining steps recede, so the eye reads them as time
+           that has already run out rather than as more of the same list. */
+        .sx-past li { opacity: 0.45; }
+
+        /* A note under each panel, in the same monospace as the deadline, holding the
+           arithmetic rather than repeating the heading. */
+        .sx-flow-note {
+            margin-top: 18px;
+            padding-top: 16px;
+            border-top: 1px solid var(--sx-edge);
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.72rem;
+            line-height: 1.7;
+        }
+
+        /* ── One sentence at display size, and nothing else ── */
+
+        /*
+            The band that carries no cards, no icons and no list. It is here because a page
+            that is five screens of blocks needs one place where the eye rests on a single
+            thought.
+        */
+        .sx-quote {
+            padding-block: clamp(76px, 13vh, 150px);
+            border-block: 1px solid var(--sx-edge);
+            background:
+                radial-gradient(70% 120% at 50% 50%, rgba(110, 136, 255, 0.07), transparent 70%),
+                rgba(0, 0, 0, 0.22);
+            text-align: center;
+        }
+
+        .sx-quote-line {
+            font-family: var(--sx-display);
+            font-size: clamp(1.8rem, 5.2vw, 3.9rem);
+            font-weight: 600;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            color: var(--sx-faint);
+        }
+
+        .sx-quote-line em {
+            display: block;
+            margin-top: 10px;
+            font-style: normal;
+            color: var(--sx-text);
+        }
+
+        .sx-quote-line em b { font-weight: inherit; color: var(--sx-primary); }
+
+        .sx-quote-src {
+            margin-top: 30px;
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.74rem;
+            letter-spacing: 0.04em;
+        }
+
+        /* ── What it runs: three tiles, two sizes ── */
+
+        /*
+            Not a row of equal cards. Exits is the reason the product exists, so it takes
+            twice the room and holds a drawn board; the other two are read-and-move-on.
+        */
+        .sx-tiles {
+            display: grid;
+            gap: 18px;
+            margin-top: 40px;
+        }
+
+        .sx-tile {
+            padding: 26px 24px;
+            border: 1px solid var(--sx-edge);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.022);
+            transition: border-color .25s, background .25s;
+        }
+
+        .sx-tile:hover {
+            border-color: var(--sx-hair);
+            background: rgba(110, 136, 255, 0.045);
+        }
+
+        .sx-tile--wide {
+            border-color: var(--sx-hair);
+            background:
+                linear-gradient(160deg, rgba(110, 136, 255, 0.07), rgba(255, 255, 255, 0.015) 60%);
+        }
+
+        .sx-tile-icon {
+            display: grid;
+            place-items: center;
+            width: 38px;
+            height: 38px;
+            margin-bottom: 16px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 10px;
+            background: rgba(110, 136, 255, 0.1);
+        }
+
+        .sx-tile-icon svg {
+            width: 19px;
+            height: 19px;
+            fill: none;
+            stroke: var(--sx-primary-bright);
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .sx-tile h3 {
+            margin-bottom: 9px;
+            font-family: var(--sx-display);
+            font-size: 1.04rem;
+            font-weight: 600;
+        }
+
+        .sx-tile p {
+            color: var(--sx-muted);
+            font-size: 0.9rem;
+            line-height: 1.68;
+        }
+
+        .sx-tile p b { color: var(--sx-text); font-weight: 600; }
+
+        /* ── The drawn clearance board ── */
+
+        /*
+            The nearest thing on this page to showing the product, and it says so
+            underneath. We have one real screen built and it is not this one, so this is a
+            drawing of the shape rather than a screenshot — a page that sells an audit
+            trail cannot pass off a picture as a photograph.
+
+            It is one image as far as a screen reader is concerned, with a label that says
+            what it shows, because reading seven rows of names and statuses aloud carries
+            noise rather than meaning.
+        */
+        .sx-board {
+            margin-top: 22px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 14px;
+            background: rgba(10, 14, 20, 0.6);
+            overflow: hidden;
+            box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+        }
+
+        .sx-board-top {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px 16px;
+            padding: 13px 16px;
+            border-bottom: 1px solid var(--sx-edge);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .sx-board-who {
+            font-family: var(--sx-display);
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+
+        .sx-board-who small {
+            display: block;
+            margin-top: 2px;
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.68rem;
+            font-weight: 400;
+        }
+
+        .sx-board-clock {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 5px 11px;
+            border: 1px solid rgba(242, 168, 59, 0.35);
+            border-radius: 999px;
+            background: rgba(242, 168, 59, 0.1);
+            color: var(--sx-clock-bright);
+            font-family: var(--sx-mono);
+            font-size: 0.68rem;
+            white-space: nowrap;
+        }
+
+        .sx-board-clock i {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--sx-clock);
+        }
+
+        .sx-board-rows { list-style: none; }
+
+        .sx-board-rows li {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 8px 12px;
+            padding: 11px 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 0.8rem;
+        }
+
+        .sx-board-rows li:first-child { border-top: none; }
+
+        .sx-board-dept b {
+            display: block;
+            font-weight: 500;
+            color: var(--sx-text);
+        }
+
+        .sx-board-dept span {
+            color: var(--sx-faint);
+            font-family: var(--sx-mono);
+            font-size: 0.68rem;
+        }
+
+        .sx-pill {
+            flex: none;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-family: var(--sx-mono);
+            font-size: 0.66rem;
+            white-space: nowrap;
+        }
+
+        .sx-pill--done {
+            border: 1px solid rgba(52, 211, 153, 0.28);
+            background: rgba(52, 211, 153, 0.09);
+            color: var(--sx-good-text);
+        }
+
+        .sx-pill--hold {
+            border: 1px solid rgba(242, 168, 59, 0.32);
+            background: rgba(242, 168, 59, 0.09);
+            color: var(--sx-clock-bright);
+        }
+
+        .sx-pill--open {
+            border: 1px solid var(--sx-edge);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--sx-muted);
+        }
+
+        .sx-board-foot {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 6px 16px;
+            padding: 13px 16px;
+            border-top: 1px solid var(--sx-hair);
+            background: rgba(110, 136, 255, 0.06);
+            font-family: var(--sx-mono);
+            font-size: 0.72rem;
+            color: var(--sx-muted);
+        }
+
+        .sx-board-foot b { color: var(--sx-text); }
+
+        .sx-drawn {
+            max-width: 46ch;
+            margin-top: 12px;
+            color: var(--sx-faint);
+            font-size: 0.72rem;
+            line-height: 1.6;
+        }
+
+        /* ── What is different: no cards at all ── */
+
+        /*
+            Numbered rows on hairlines. The number carries the type scale this section
+            needs, and dropping the card treatment entirely is what stops the page reading
+            as the same object seven times over.
+        */
+        .sx-points {
+            margin-top: 34px;
+            border-top: 1px solid var(--sx-edge);
+            list-style: none;
+            counter-reset: sx-point;
+        }
+
+        .sx-points li {
+            display: grid;
+            gap: 6px 28px;
+            padding-block: 26px;
+            border-bottom: 1px solid var(--sx-edge);
+        }
+
+        .sx-points li::before {
+            counter-increment: sx-point;
+            content: '0' counter(sx-point);
+            font-family: var(--sx-display);
+            font-size: clamp(1.6rem, 3.4vw, 2.5rem);
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.03em;
+            color: rgba(110, 136, 255, 0.34);
+        }
+
+        .sx-points h3 {
+            font-family: var(--sx-display);
+            font-size: clamp(1.05rem, 1.7vw, 1.3rem);
+            font-weight: 600;
+            line-height: 1.28;
+            letter-spacing: -0.01em;
+        }
+
+        .sx-points p {
+            color: var(--sx-muted);
+            font-size: 0.94rem;
+            line-height: 1.72;
+        }
+
+        .sx-points p b { color: var(--sx-text); font-weight: 600; }
+
+        /* ── The honest limits: the densest block here ── */
+        .sx-limits {
+            display: grid;
+            gap: 1px;
+            margin-top: 32px;
+            border: 1px solid var(--sx-edge);
+            border-radius: 16px;
+            background: var(--sx-edge);
+            overflow: hidden;
+            list-style: none;
+        }
+
+        .sx-limits li {
+            display: grid;
+            grid-template-columns: 20px 1fr;
+            gap: 14px;
+            padding: 18px 20px;
+            background: #0d1219;
+        }
+
+        .sx-limits svg {
+            width: 18px;
+            height: 18px;
+            margin-top: 3px;
+            fill: none;
+            stroke: var(--sx-faint);
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .sx-limits h3 {
+            margin-bottom: 5px;
+            font-family: var(--sx-display);
+            font-size: 0.93rem;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .sx-limits p {
+            color: var(--sx-muted);
+            font-size: 0.85rem;
+            line-height: 1.62;
+        }
+
+        /* ── Closing: the emptiest block here ── */
+        .sx-close { text-align: center; }
+        .sx-close h2 { max-width: 26ch; margin-inline: auto; }
+        .sx-close .sx-say { max-width: 52ch; margin-inline: auto; }
+
+        .sx-close-cta {
+            display: inline-flex;
+            width: auto;
+            margin-top: 30px;
+            padding-inline: 34px;
+        }
+
+        .sx-close-note {
+            margin-top: 24px;
+            color: var(--sx-faint);
+            font-size: 0.84rem;
+            line-height: 1.6;
+        }
+
+        .sx-close-note a {
+            color: var(--sx-primary-bright);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(143, 163, 255, 0.35);
+        }
+
+        .sx-close-note a:hover { border-bottom-color: var(--sx-primary-bright); }
+
+        .sx-close-note a:focus-visible {
+            outline: 2px solid var(--sx-primary-bright);
+            outline-offset: 3px;
+            border-radius: 4px;
+        }
+
+        /* ── Footer ──────────────────────────────── */
+        .sx-foot {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px 24px;
+            padding: 28px 5%;
+            border-top: 1px solid var(--sx-edge);
+            background: rgba(0, 0, 0, 0.16);
+            color: var(--sx-faint);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .sx-foot a { color: var(--sx-faint); text-decoration: none; transition: color .2s; }
+        .sx-foot a:hover { color: var(--sx-primary-bright); }
+
+        /* ── Arrival ─────────────────────────────── */
+
+        /*
+            One sequence on load rather than motion scattered through the page. Each piece
+            of the hero arrives in the order somebody reads it, which walks the eye down to
+            the one action above the fold instead of asking them to find it.
+
+            `both` holds the first frame through the delay, so nothing flashes into place
+            before its turn.
+        */
+        .sx-badge { animation: sx-rise .7s cubic-bezier(.2, .7, .2, 1) both .18s; }
+        h1        { animation: sx-rise .7s cubic-bezier(.2, .7, .2, 1) both .28s; }
+        .sx-lede  { animation: sx-rise .7s cubic-bezier(.2, .7, .2, 1) both .40s; }
+        .sx-chips { animation: sx-rise .7s cubic-bezier(.2, .7, .2, 1) both .52s; }
+        .sx-door  { animation: sx-rise .8s cubic-bezier(.2, .7, .2, 1) both .46s; }
+
+        @keyframes sx-rise { from { opacity: 0; transform: translateY(18px); } }
+
+        /*
+            There is deliberately no reveal-on-scroll below the hero. It was built with the
+            browser's own scroll-driven animation (`animation-timeline: view()`) and then
+            taken back out on the rule that nothing a reader has to see may depend on an
+            animation having run: a reader who opens the page at an anchor, reloads part-way
+            down, or prints it can land outside the animation's range, and the failure there
+            is a section at zero opacity rather than a section that arrives late.
+
+            That was a precaution rather than a reproduced fault — the screenshot that
+            prompted it turned out to be a headless-browser artifact, and the same blank
+            frame appeared with the animation gone. It stays out anyway, because the upside
+            was decoration and the downside is invisible content.
+
+            The hero's arrival is a different case and stays: it runs on load, from the top
+            of the page, every time.
+        */
+
+        /* Every focusable thing shows where the keyboard is. The browser's own ring is
+           invisible against a dark ground. */
+        .sx-wordmark:focus-visible,
+        .sx-nav-links a:focus-visible,
+        .sx-nav-btn:focus-visible,
+        .sx-cta:focus-visible,
+        .sx-foot a:focus-visible {
+            outline: 2px solid var(--sx-primary-bright);
+            outline-offset: 3px;
+            border-radius: 8px;
+        }
+
+        /* Somebody who has asked their machine for less movement gets the page fully in
+           place, rather than a page that arrives piece by piece or never arrives at all. */
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+
+            .sx-badge, h1, .sx-lede, .sx-chips, .sx-door, .sx-strip i {
+                animation: none;
+                opacity: 1;
+                transform: none;
+            }
+
+            .sx-cta, .sx-nav-btn, .sx-address, .sx-tile { transition: none; }
+        }
+
+        @media (min-width: 720px) {
+            /* Two paragraphs as a block rather than one long ribbon. */
+            .sx-say--two { grid-template-columns: 1fr 1fr; gap: 28px; }
+
+            /* Number in its own column, heading and body beside it. Asymmetric on
+               purpose: the heading column is narrow, the body column takes the rest. */
+            .sx-points li { grid-template-columns: 4.5rem minmax(0, 23ch) 1fr; align-items: start; }
+            .sx-points li::before { grid-row: span 1; }
+
+            .sx-limits { grid-template-columns: 1fr 1fr; }
+        }
+
+        @media (min-width: 900px) {
+            .sx-nav-links { display: flex; }
+
+            /* Argument and action side by side, the argument taking the larger share. */
+            .sx-hero { grid-template-columns: 1.12fr 0.88fr; align-items: center; gap: 56px; }
+
+            /* Side by side and aligned to the top, not stretched, so the column of seven
+               is visibly taller than the block of seven. That height difference is the
+               whole point of the picture. */
+            .sx-flows { grid-template-columns: 1fr 1fr; align-items: start; }
+
+            /* Exits takes the full width above the other two, which sit beneath it as a
+               pair. Two sizes rather than three equals. */
+            .sx-tiles { grid-template-columns: 1fr 1fr; }
+            .sx-tile--wide { grid-column: 1 / -1; }
+        }
+
+        @media (min-width: 1100px) {
+            /*
+                On a wide screen the drawn board sits beside the words rather than under
+                them, so the largest tile is a split like the hero and not a tall stack.
+            */
+            .sx-tile--wide {
+                display: grid;
+                grid-template-columns: minmax(0, 27ch) 1fr;
+                gap: 34px;
+                align-items: center;
+                padding: 30px;
+            }
+
+            .sx-tile--wide .sx-board { margin-top: 0; }
+        }
+
+        @media (max-width: 640px) {
+            .sx-bar { padding: 14px 5%; }
+            .sx-wordmark { font-size: 1.2rem; }
+            .sx-wordmark svg { height: 26px; }
+            .sx-door { padding: 22px 20px; }
+            .sx-hero { padding-top: 6vh; padding-bottom: 8vh; }
+            .sx-foot { justify-content: center; text-align: center; }
+
+            /* Status stays beside the department. The department's own second line —
+               the owner, and the reason if it is on hold — is what wraps. */
+            .sx-board-rows li { align-items: start; }
+            .sx-board-dept { min-width: 0; }
+
+            /* The headline's smallest step is set here rather than in the clamp, because a
+               floor low enough for a 390px screen is too small for a tablet. */
+            h1 { font-size: clamp(2rem, 8.8vw, 2.7rem); }
+        }
+    </style>
+</head>
+<body>
+    <nav class="sx-bar">
+        <a href="/" class="sx-wordmark">
+            <x-brand-mark />
+            <span>Start<b>X</b></span>
+        </a>
+
+        <div class="sx-nav-links">
+            <a href="#why">Why it exists</a>
+            <a href="#runs">What it runs</a>
+            <a href="#limits">Honest limits</a>
         </div>
 
-        @if (Route::has('login'))
-            <div class="h-14.5 hidden lg:block"></div>
-        @endif
-    </body>
+        {{--
+            One button, the same address on every page. On a client company's own address
+            it is that company's sign-in page. On the bare domain there is no company yet,
+            so the sign-in page sends the visitor back to the panel beside the headline,
+            which asks which company they are — and that is why the button has no second
+            version here.
+        --}}
+        <a href="{{ url('/admin/login') }}" class="sx-nav-btn">Sign in</a>
+    </nav>
+
+    <main>
+        <section class="sx-hero sx-wrap sx-wrap--wide">
+            <div class="sx-hero-copy">
+                <span class="sx-badge"><i></i>Employee lifecycle platform</span>
+
+                {{--
+                    The space before the line break is not a typo to tidy away: without it the
+                    heading is the single word "requestto" to a screen reader, and to any layout
+                    where the break does not apply.
+                --}}
+                <h1>From the first <em>request</em> <br>to the final <em>clearance</em></h1>
+
+                <p class="sx-lede">
+                    One workspace for hiring requests, onboarding and exits — with
+                    <b>an attributable trail</b> behind every approval and every rupee of a
+                    final settlement.
+                </p>
+
+                <div class="sx-chips">
+                    <span class="sx-chip">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <line x1="19" y1="8" x2="19" y2="14" />
+                            <line x1="22" y1="11" x2="16" y2="11" />
+                        </svg>
+                        Onboarding
+                    </span>
+                    <span class="sx-chip">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M9 11l3 3L22 4" />
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                        </svg>
+                        Approvals
+                    </span>
+                    <span class="sx-chip">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="9" y1="15" x2="15" y2="15" />
+                        </svg>
+                        Clearances
+                    </span>
+                </div>
+            </div>
+
+            <section class="sx-door" id="sign-in">
+                @isset($tenant)
+                    {{-- Already at a company's own address, so there is nothing to ask. --}}
+                    <h2>Sign in to {{ $tenant->name }}</h2>
+                    <p>You are at your company's StartX address.</p>
+
+                    <a href="{{ url('/admin/login') }}" class="sx-cta">
+                        Sign in
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M5 12h14" />
+                            <path d="m12 5 7 7-7 7" />
+                        </svg>
+                    </a>
+                @else
+                    <h2>Sign in to your company</h2>
+                    <p>
+                        Every company has its own StartX address, and that is where signing in
+                        happens. Type yours and we will take you there. Your HR team has it if
+                        you do not.
+                    </p>
+
+                    <form method="POST" action="{{ route('sign-in') }}">
+                        @csrf
+
+                        <label for="company" class="sx-label">Your company's address</label>
+
+                        <div class="sx-address">
+                            <input
+                                id="company"
+                                name="company"
+                                value="{{ old('company') }}"
+                                placeholder="yourcompany"
+                                autocomplete="organization"
+                                spellcheck="false"
+                                autocapitalize="none"
+                                required
+                            >
+                            <span>.{{ config('tenancy.central_domain') }}</span>
+                        </div>
+
+                        @error('company')
+                            <p class="sx-error" role="alert">{{ $message }}</p>
+                        @enderror
+
+                        <button type="submit" class="sx-cta">
+                            Continue
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h14" />
+                                <path d="m12 5 7 7-7 7" />
+                            </svg>
+                        </button>
+                    </form>
+                @endisset
+            </section>
+        </section>
+
+        {{--
+            The statute, once, in one line. Deliberately the shortest section on the page:
+            it is the change of pace directly under the tallest one.
+        --}}
+        <div class="sx-strip">
+            <div class="sx-wrap sx-wrap--wide">
+                <i></i>
+                <span><b>Two working days</b> to pay an employee's final wages</span>
+                <s></s>
+                <span>Section 17(2), Code on Wages 2019</span>
+                <s></s>
+                <span>In force since 21 November 2025</span>
+            </div>
+        </div>
+
+        {{--
+            Why the product exists. Stated as what the law requires and what the arithmetic
+            of a queue makes impossible — not as a threat, because `market-position.md` is
+            explicit that enforcement is softer than a compliance pitch wants and that
+            "you will be fined" is not a true sentence.
+        --}}
+        <section class="sx-band sx-band--tall sx-band--lit" id="why">
+            <div class="sx-wrap sx-wrap--wide">
+                <span class="sx-eyebrow">Why this exists</span>
+
+                <h2>Two working days is not enough time to run clearances <em>in a queue</em></h2>
+
+                <div class="sx-say sx-say--two">
+                    <p>
+                        The long-standing practice of thirty to forty-five days is no longer lawful
+                        on paper, and it is indefensible the moment a settlement is contested.
+                    </p>
+
+                    <p>
+                        Most exit modules were built for the old world: one department signs, then
+                        the next. Under a two-day rule <b>that shape cannot work</b>, however hard
+                        anybody chases it.
+                    </p>
+                </div>
+
+                <div class="sx-flows">
+                    <div class="sx-flow">
+                        <div class="sx-flow-head">
+                            <h3>Clearances in a queue</h3>
+                            <span class="sx-verdict sx-verdict--slow">A week at best</span>
+                        </div>
+
+                        <ul class="sx-steps sx-steps--queue">
+                            <li>Manager <em>day 1</em></li>
+                            <li>Business head <em>day 1</em></li>
+                            <li>Director <em>day 2</em></li>
+                        </ul>
+
+                        <p class="sx-deadline">Two working days end here</p>
+
+                        <ul class="sx-steps sx-steps--queue sx-past">
+                            <li>IT <em>day 3</em></li>
+                            <li>Admin <em>day 4</em></li>
+                            <li>Finance <em>day 5</em></li>
+                            <li>HR <em>day 5</em></li>
+                        </ul>
+
+                        <p class="sx-flow-note">
+                            Four of the seven have not started by the time the wages are due.
+                        </p>
+                    </div>
+
+                    <div class="sx-flow sx-flow--ours">
+                        <div class="sx-flow-head">
+                            <h3>Clearances all at once, from the resignation</h3>
+                            <span class="sx-verdict sx-verdict--fast">Fits two working days</span>
+                        </div>
+
+                        <p class="sx-atonce-day">All seven, day 1</p>
+
+                        <ul class="sx-steps sx-steps--atonce">
+                            <li>Manager</li>
+                            <li>Business head</li>
+                            <li>Director</li>
+                            <li>IT</li>
+                            <li>Admin</li>
+                            <li>Finance</li>
+                            <li>HR</li>
+                        </ul>
+
+                        <p class="sx-deadline">Two working days end here</p>
+
+                        <p class="sx-flow-note">
+                            All seven start the moment somebody resigns, and the slowest one sets
+                            the date rather than the sum of all seven.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {{--
+            One thought, at the largest type below the hero, holding nothing else. The two
+            halves are both defensible: `market-position.md` records the thirty-to-forty-five-day
+            practice and the two-working-day requirement, and neither half claims a penalty.
+        --}}
+        <section class="sx-quote">
+            <div class="sx-wrap">
+                <p class="sx-quote-line">
+                    Thirty to forty-five days was the habit.
+                    <em>Two working days is <b>the rule</b>.</em>
+                </p>
+
+                <p class="sx-quote-src">Section 17(2), Code on Wages 2019 — in force since 21 November 2025</p>
+            </div>
+        </section>
+
+        {{-- What the product actually runs. The three process families from `overview.md`. --}}
+        <section class="sx-band" id="runs">
+            <div class="sx-wrap sx-wrap--wide">
+                <span class="sx-eyebrow">What it runs</span>
+
+                <h2>Three processes, one engine underneath</h2>
+
+                <div class="sx-say">
+                    <p>
+                        Ordered steps with parallel groups, conditions, send-back and hold. The same
+                        engine runs all three, which is why a change to one is
+                        <b>configuration rather than a new screen</b>.
+                    </p>
+                </div>
+
+                <div class="sx-tiles">
+                    <article class="sx-tile sx-tile--wide">
+                        <div>
+                            <div class="sx-tile-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="9" />
+                                    <polyline points="12 7 12 12 16 14" />
+                                </svg>
+                            </div>
+
+                            <h3>Exits and clearances</h3>
+
+                            <p>
+                                Every department at once, each with its own hold reasons and its own
+                                money to declare, <b>chased against the deadline</b> and rolling up
+                                into one settlement statement.
+                            </p>
+                        </div>
+
+                        <div>
+                            <div class="sx-board" role="img" aria-label="A clearance board: one leaver, seven departments running at the same time, each with the person who owns it and where it stands, above a running total for the settlement and a countdown to the deadline.">
+                                <div class="sx-board-top">
+                                    <div class="sx-board-who">
+                                        Rohit Verma — Warehouse Operations
+                                        <small>Resigned 04 Sep · last day 12 Sep</small>
+                                    </div>
+
+                                    <span class="sx-board-clock"><i></i>1 working day left</span>
+                                </div>
+
+                                <ul class="sx-board-rows">
+                                    <li>
+                                        <span class="sx-board-dept"><b>Manager</b> <span>Anjali Nair</span></span>
+                                        <span class="sx-pill sx-pill--done">Cleared</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>Business head</b> <span>Rakesh Menon</span></span>
+                                        <span class="sx-pill sx-pill--done">Cleared</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>Director</b> <span>Deepak Iyer</span></span>
+                                        <span class="sx-pill sx-pill--done">Cleared</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>IT</b> <span>Priya Rao · laptop not returned</span></span>
+                                        <span class="sx-pill sx-pill--hold">On hold</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>Admin</b> <span>Chandni Bose</span></span>
+                                        <span class="sx-pill sx-pill--done">Cleared</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>Finance</b> <span>Rakesh Menon · 2 recovery lines</span></span>
+                                        <span class="sx-pill sx-pill--done">Declared</span>
+                                    </li>
+                                    <li>
+                                        <span class="sx-board-dept"><b>HR</b> <span>Anjali Nair</span></span>
+                                        <span class="sx-pill sx-pill--open">Waiting on IT</span>
+                                    </li>
+                                </ul>
+
+                                <div class="sx-board-foot">
+                                    <span>Settlement so far — <b>6 of 7 declared</b></span>
+                                    <span>Statement goes out when IT clears</span>
+                                </div>
+                            </div>
+
+                            <p class="sx-drawn">
+                                A drawing of that board, not a screenshot. It is the shape the exit
+                                screen has; we will put the real screen here once it is built.
+                            </p>
+                        </div>
+                    </article>
+
+                    <article class="sx-tile">
+                        <div class="sx-tile-icon">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="12" y1="18" x2="12" y2="12" />
+                                <line x1="9" y1="15" x2="15" y2="15" />
+                            </svg>
+                        </div>
+
+                        <h3>Hiring requests</h3>
+
+                        <p>
+                            A manager asks for a role. It goes up the approvals you defined, on
+                            <b>the conditions you set</b> — a salary above a threshold takes a
+                            different route from one below it.
+                        </p>
+                    </article>
+
+                    <article class="sx-tile">
+                        <div class="sx-tile-icon">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                                <circle cx="9" cy="7" r="4" />
+                                <line x1="19" y1="8" x2="19" y2="14" />
+                                <line x1="22" y1="11" x2="16" y2="11" />
+                            </svg>
+                        </div>
+
+                        <h3>Onboarding</h3>
+
+                        <p>
+                            Offer out, documents back, assets issued, statutory identifiers
+                            captured. The candidate fills their own part on
+                            <b>a link, with no account</b> to create first.
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        {{-- The differentiation from `market-position.md`, in the order it argues them. No
+             cards here on purpose: numbered rows on hairlines, so this section does not
+             look like the one above it. --}}
+        <section class="sx-band sx-band--tint">
+            <div class="sx-wrap">
+                <span class="sx-eyebrow">What is different</span>
+
+                <h2>Built to be configured, and to be <em>answerable</em> afterwards</h2>
+
+                <ol class="sx-points">
+                    <li>
+                        <h3>Your process is data, not our code</h3>
+                        <p>
+                            Steps, the form on each one, the conditions that route them and the
+                            letters they produce are yours to change. A new company is
+                            <b>a configuration, not a fork</b> — which is why this does not need
+                            the three-to-six-month implementation the market is used to.
+                        </p>
+                    </li>
+
+                    <li>
+                        <h3>Every approval has a name on it</h3>
+                        <p>
+                            Who decided, when, and on what they could see at the time — kept as
+                            <b>a record that is added to and never rewritten</b>. A contested
+                            exit is answered from the file rather than from memory.
+                        </p>
+                    </li>
+
+                    <li>
+                        <h3>Every rupee is a line somebody put there</h3>
+                        <p>
+                            Recoveries and payables, each with the person who added it and the
+                            reason they gave, adding up to <b>the statement the leaver signs</b>
+                            against a deadline the product is watching.
+                        </p>
+                    </li>
+
+                    <li>
+                        <h3>We are not your payroll</h3>
+                        <p>
+                            We produce the settlement figure and <b>hand it to whoever runs your
+                            payroll</b>. Building payroll would mean a second product and a
+                            compliance surface nobody needs us to take on.
+                        </p>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
+        {{--
+            The limits, said out loud, and the densest block on the page. This section
+            stands where a normal landing page puts customer logos and testimonials: we have
+            neither, and a product selling an audit trail cannot invent proof. What we can
+            do is be the vendor that says what it does not do before month three does.
+        --}}
+        <section class="sx-band sx-band--tight" id="limits">
+            <div class="sx-wrap">
+                <span class="sx-eyebrow">Honest limits</span>
+
+                <h2>What StartX deliberately does not do</h2>
+
+                <div class="sx-say">
+                    <p>
+                        Better said here than found out in month three. Each of these is a decision,
+                        not a gap waiting to be filled.
+                    </p>
+                </div>
+
+                <ul class="sx-limits">
+                    <li>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" />
+                            <line x1="8" y1="12" x2="16" y2="12" />
+                        </svg>
+
+                        <div>
+                            <h3>Payroll, and the statutory calculations inside it</h3>
+                            <p>
+                                Provident fund, insurance, professional tax and the gratuity
+                                figure stay with your payroll. We track that gratuity is owed and
+                                that it has its own thirty-day clock; your payroll works out the
+                                amount.
+                            </p>
+                        </div>
+                    </li>
+
+                    <li>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" />
+                            <line x1="8" y1="12" x2="16" y2="12" />
+                        </svg>
+
+                        <div>
+                            <h3>Attendance, leave, performance and recruitment</h3>
+                            <p>
+                                Not our problem to solve, and we will not pretend otherwise. Where
+                                a process needs something from one of those systems, we integrate
+                                with it.
+                            </p>
+                        </div>
+                    </li>
+
+                    <li>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" />
+                            <line x1="8" y1="12" x2="16" y2="12" />
+                        </svg>
+
+                        <div>
+                            <h3>Native mobile apps</h3>
+                            <p>
+                                The pages work on a phone. An approval on the way to a meeting
+                                does not need an app store in between.
+                            </p>
+                        </div>
+                    </li>
+
+                    <li>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" />
+                            <line x1="8" y1="12" x2="16" y2="12" />
+                        </svg>
+
+                        <div>
+                            <h3>Lifting the history out of your old system</h3>
+                            <p>
+                                StartX starts clean. Keeping the old records where they are, and
+                                readable, is cheaper and safer than translating years of somebody
+                                else's schema.
+                            </p>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="sx-band sx-band--tall sx-band--tint sx-close">
+            <div class="sx-wrap">
+                <span class="sx-eyebrow">Summerhill Technologies</span>
+
+                <h2>Want to see it against your own exit process?</h2>
+
+                <div class="sx-say">
+                    <p>
+                        Bring the clearances you actually run, with the departments and the approvals
+                        in the order they happen today. That conversation is more useful than a demo
+                        of ours.
+                    </p>
+                </div>
+
+                @if ($contact = config('startx.contact_email'))
+                    <a href="mailto:{{ $contact }}?subject=StartX" class="sx-cta sx-close-cta">
+                        Talk to us
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                        </svg>
+                    </a>
+                @endif
+
+                <p class="sx-close-note">
+                    Already using StartX? Signing in happens at your own company's address —
+                    <a href="#sign-in">the panel at the top of this page</a>
+                    will take you there.
+                </p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="sx-foot">
+        <span>&copy; {{ date('Y') }} Summerhill Technologies</span>
+        <a href="{{ url('/admin/login') }}">Sign in</a>
+    </footer>
+</body>
 </html>

@@ -31,6 +31,10 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <!-- The tests build their own addresses from this, so it is pinned here rather
+             than read from .env — otherwise pointing the local machine at a different
+             domain quietly breaks every test that visits a client company's address. -->
+        <env name="TENANT_CENTRAL_DOMAIN" value="localhost"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

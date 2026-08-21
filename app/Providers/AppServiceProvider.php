@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Authorization\PermissionResolver;
 use App\Authorization\TenantPasswordBrokers;
+use App\Models\User;
 use App\Settings\Settings;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Contracts\Foundation\Application;
@@ -53,9 +54,16 @@ class AppServiceProvider extends ServiceProvider
         // What a leaver is still owed after that date — the relieving letter, the
         // settlement statement, the Form 16, a disputed settlement line — travels on
         // signed links to a personal address and needs no account at all.
-        Auth::provider('eloquent', fn (Application $app, array $config): EloquentUserProvider => (new EloquentUserProvider(
-            $app['hash'],
-            $config['model'],
-        ))->withQuery(fn (Builder $query) => $query->where('active', true)));
+        // Named model rather than every table this driver serves: a last working day is
+        // something a client's employee has, and SummerHill's own accounts are not
+        // employed by any client. Left unnamed, this asked a table with no such column
+        // for it and refused every sign-in to our own area with a database error.
+        Auth::provider('eloquent', function (Application $app, array $config): EloquentUserProvider {
+            $provider = new EloquentUserProvider($app['hash'], $config['model']);
+
+            return $config['model'] === User::class
+                ? $provider->withQuery(fn (Builder $query) => $query->where('active', true))
+                : $provider;
+        });
     }
 }

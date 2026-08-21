@@ -51,6 +51,13 @@ class BindTenantToRequest
             ], 403);
         }
 
+        // The sign-in page names the company, which is the only way somebody who has
+        // landed on the wrong company's address can notice. It is handed over here
+        // because this is the one place that has already read the row.
+        if ($tenant !== null) {
+            view()->share('tenant', $tenant);
+        }
+
         return $next($request);
     }
 
