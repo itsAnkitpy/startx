@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -36,9 +37,22 @@ class ProcessTemplateFactory extends Factory
         return $this->state(['version' => $version]);
     }
 
+    /**
+     * A live process, made live the way the product makes one: a draft with a step in
+     * it, then published.
+     *
+     * Rewritten on 22 August 2026 reviewing step 2. Setting the status straight to
+     * published produced a live process with no steps at all — a shape publishing itself
+     * now refuses — so every case built on this state was running against something the
+     * product can never produce.
+     */
     public function published(): static
     {
-        return $this->state(['status' => 'published']);
+        return $this->afterCreating(function (ProcessTemplate $template): void {
+            ProcessStep::factory()->of($template)->at(1, 1)->create();
+
+            $template->publish();
+        });
     }
 
     /** `employee`, `candidate` or `none` — what the process is about. */

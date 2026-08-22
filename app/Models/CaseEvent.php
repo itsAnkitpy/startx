@@ -2,13 +2,13 @@
 
 namespace App\Models;
 
+use App\Exceptions\ProcessRefused;
 use App\Tenancy\BelongsToTenant;
 use Database\Factories\CaseEventFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use RuntimeException;
 
 /**
  * The trail: everything that happened on a case, in the order it happened.
@@ -46,11 +46,11 @@ class CaseEvent extends Model
     protected static function booted(): void
     {
         static::updating(function (): never {
-            throw new RuntimeException('A case history entry cannot be changed once it is written.');
+            throw ProcessRefused::historyCannotChange();
         });
 
         static::deleting(function (): never {
-            throw new RuntimeException('A case history entry cannot be removed once it is written.');
+            throw ProcessRefused::historyCannotBeRemoved();
         });
     }
 

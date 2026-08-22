@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\EmployeeRecordRefused;
+use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\EmploymentRecord;
@@ -49,11 +50,15 @@ function rakeshAndMeridiansExit(): array
         ->effective('2019-06-01')
         ->create(['employment_status' => 'confirmed']);
 
-    $exit = ProcessTemplate::factory()->named('exit', 'Exit')->published()->create();
+    // Written as a draft and then made live, which is the only order step 2 allows: a
+    // live version's steps are frozen at the database.
+    $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
 
     ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->create();
     ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')->clearance()->create();
     ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->create();
+
+    $exit->publish();
 
     return [$rakesh, $job, $exit];
 }
@@ -125,7 +130,7 @@ it('refuses a change to a history entry on the model, before any query runs', fu
 
         $event->update(['type' => 'step_undecided']);
     });
-})->throws(RuntimeException::class, 'cannot be changed once it is written');
+})->throws(ProcessRefused::class, 'cannot be changed once it is written');
 
 it('refuses a removal of a history entry on the model, before any query runs', function () {
     TenantContext::run($this->meridian, function () {
@@ -134,7 +139,7 @@ it('refuses a removal of a history entry on the model, before any query runs', f
 
         CaseEvent::factory()->of($case)->create()->delete();
     });
-})->throws(RuntimeException::class, 'cannot be removed once it is written');
+})->throws(ProcessRefused::class, 'cannot be removed once it is written');
 
 /*
 | A process and its versions
@@ -142,8 +147,9 @@ it('refuses a removal of a history entry on the model, before any query runs', f
 
 it('keeps every version of a process as its own rows', function () {
     TenantContext::run($this->meridian, function () {
-        $first = ProcessTemplate::factory()->named('exit', 'Exit')->published()->create();
+        $first = ProcessTemplate::factory()->named('exit', 'Exit')->create();
         ProcessStep::factory()->of($first)->at(1, 1)->named('Manager approval')->create();
+        $first->publish();
 
         // Anjali changes the approver, which is version 2 as fresh rows.
         $second = ProcessTemplate::factory()->named('exit', 'Exit')->version(2)->create();
@@ -390,6 +396,41 @@ it('refuses to withdraw a job row a case is pinned to, and names the case', func
         // Nothing half-done: the row is still live and still readable through the case.
         expect($job->fresh()->withdrawn_at)->toBeNull();
         expect($case->fresh()->subjectEmploymentRecord->getKey())->toBe($job->getKey());
+
+        // And nothing half-done in memory either. The refusal used to land after the
+        // reason had been written onto the record, so a screen re-rendering from this
+        // same record showed a withdrawal that never happened.
+        expect($job->withdrawn_by)->toBeNull()
+            ->and($job->withdrawn_reason)->toBeNull();
+    });
+});
+
+it('refuses to withdraw a pinned job row straight past the model, at the database', function () {
+    // Withdrawing is a soft delete, so it reaches the table as an ordinary update and
+    // the key from the case never sees it. Without this, a bulk update leaves Rakesh's
+    // closed exit rendering no department, no designation and no manager.
+    TenantContext::run($this->meridian, function () {
+        [$rakesh, $job, $exit] = rakeshAndMeridiansExit();
+
+        ProcessCase::factory()->on($exit)->about($rakesh, $job)->create();
+
+        DB::update(
+            'update employment_records set withdrawn_at = now() where id = ?',
+            [$job->getKey()]
+        );
+    });
+})->throws(QueryException::class, 'cannot be withdrawn');
+
+it('still withdraws a pinned row once the case pointing at it is gone', function () {
+    TenantContext::run($this->meridian, function () {
+        [$rakesh, $job, $exit] = rakeshAndMeridiansExit();
+        $anjali = User::factory()->named('Anjali Rao')->create();
+
+        ProcessCase::factory()->on($exit)->about($rakesh, $job)->create()->delete();
+
+        $job->withdraw($anjali, 'Entered against the wrong person');
+
+        expect(EmploymentRecord::query()->whereKey($job->getKey())->exists())->toBeFalse();
     });
 });
 

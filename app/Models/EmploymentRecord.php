@@ -181,6 +181,13 @@ class EmploymentRecord extends Model
      */
     public function withdraw(User $by, string $reason): void
     {
+        // Checked here as well as on the delete below, so the refusal lands before this
+        // row has been touched. Rolling the transaction back does not undo the two
+        // values already assigned in memory, and Eloquent then reads them as saved — so
+        // a screen re-rendering from this same record after catching the refusal shows
+        // a withdrawal that never happened.
+        $this->refuseWithdrawalWhileACaseIsPinnedToIt();
+
         DB::transaction(function () use ($by, $reason): void {
             $predecessor = $this->predecessor();
 
