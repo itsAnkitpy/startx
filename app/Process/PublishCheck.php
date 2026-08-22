@@ -3,6 +3,7 @@
 namespace App\Process;
 
 use App\Exceptions\ProcessRefused;
+use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Settings\Settings;
@@ -141,8 +142,26 @@ final readonly class PublishCheck
         // request is about a vacant position and about nobody, so a condition on the
         // person's location has no person to read. At run time the snapshot is empty,
         // the condition is false, and the step it guards silently never happens.
-        if ($source === 'subject' && $this->template->subject_kind === 'none') {
-            $problems[] = "{$at} asks about the person this process is about, and this process is about nobody.";
+        //
+        // A candidate fails the same way and was being let through until 22 August 2026:
+        // every one of these questions is read off a dated job row, and somebody who has
+        // not joined yet has none. An onboarding branching on the office would publish
+        // clean and then quietly skip the desk-setup step on every candidate.
+        if ($source === 'subject' && $this->template->subject_kind !== 'employee') {
+            $problems[] = $this->template->subject_kind === 'candidate'
+                ? "{$at} asks about the person this process is about, and a candidate has not joined yet, "
+                    .'so there is nothing on record about their department, designation or office.'
+                : "{$at} asks about the person this process is about, and this process is about nobody.";
+        }
+
+        // The same objection module 01 makes to a permission with no code behind it, and
+        // the same failure as a threshold typed as words: a question nothing can answer
+        // is quietly false on every case, so the step it guards silently never happens.
+        // A grade is the one a client will reach for first, and nothing in this product
+        // holds one.
+        if ($source === 'subject' && is_string($field) && ! array_key_exists($field, ProcessCase::SubjectFacts)) {
+            $problems[] = "{$at} asks [".$this->readable($field).'] about the person, which is not something '
+                .'this system knows about anybody. It knows '.implode(', ', ProcessCase::SubjectFacts).'.';
         }
 
         array_push($problems, ...$this->problemsWithWhatItComparesAgainst($step, $condition));

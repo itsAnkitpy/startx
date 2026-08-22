@@ -59,6 +59,23 @@ class ProcessStepFactory extends Factory
         return $this->state(['allowed_outcomes' => ['approved', 'held']]);
     }
 
+    /** What this step's actor may choose. */
+    public function offering(string ...$outcomes): static
+    {
+        return $this->state(['allowed_outcomes' => $outcomes]);
+    }
+
+    /**
+     * The step happens only when any one of these groups is fully true. Each argument is
+     * one group.
+     *
+     * @param  array<int, array<string, mixed>>  ...$sets
+     */
+    public function happensWhen(array ...$sets): static
+    {
+        return $this->state(['open_conditions' => $sets]);
+    }
+
     /** Somebody with no account, acting through a signed link. */
     public function external(): static
     {

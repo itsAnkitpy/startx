@@ -215,9 +215,11 @@ class EmploymentRecord extends Model
      * most to lose.
      *
      * ponytail: one unindexed read of the case table per withdrawal. Nothing indexes
-     * `cases.subject_employment_record_id`, so this walks every case the client has.
-     * Withdrawals are rare and admin-initiated, so it is left alone until step 3 of module
-     * 02 adds that table's indexes against a measured number rather than a guess.
+     * `cases.subject_employment_record_id`, so this walks every case the client has —
+     * measured at step 3 of module 02 rather than guessed, and left alone: it is a plain
+     * scan taking a tenth of a millisecond over five hundred cases, and a withdrawal is a
+     * rare admin act. Index it the day a client's case table is large enough for that scan
+     * to be felt, which is tens of thousands of cases rather than hundreds.
      */
     private function refuseWithdrawalWhileACaseIsPinnedToIt(): void
     {

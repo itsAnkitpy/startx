@@ -50,6 +50,31 @@ class ProcessCase extends Model
     public const Cancelled = 'cancelled';
 
     /**
+     * The questions a condition may ask about the person the case is about, answered
+     * once when the case opens and read from `subject_facts_snapshot` for ever after.
+     *
+     * The list is here rather than with the code that answers it because two places need
+     * it: the engine, which answers only the ones a process actually asks, and the check
+     * that runs when a process goes live, which refuses a question this list does not
+     * have. Without that refusal a client could branch on a grade — which nothing in this
+     * product holds — and the step behind it would silently never happen.
+     *
+     * Each is paired with how it reads in a refusal, so the sentence a client is shown
+     * when they ask about something else is written from this list rather than from our
+     * column names.
+     *
+     * `manages_anyone` and `equipment_issued` are the two the exit itself changes while
+     * it runs, which is the whole reason these answers are frozen.
+     */
+    public const SubjectFacts = [
+        'org_unit_id' => 'their department',
+        'designation_id' => 'their designation',
+        'office_id' => 'their office',
+        'manages_anyone' => 'whether they manage anybody',
+        'equipment_issued' => 'whether they hold any equipment',
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -118,6 +143,19 @@ class ProcessCase extends Model
     public function steps(): HasMany
     {
         return $this->hasMany(CaseStep::class, 'case_id');
+    }
+
+    /**
+     * The attempt that counts at each step — one per step at most, with any attempt a
+     * send-back replaced left behind.
+     *
+     * Its own relation rather than a filter on the one above, so a set of cases can be
+     * loaded with exactly these rows in one query. That is what lets one person's list
+     * be answered across five hundred open cases without a query per case.
+     */
+    public function liveSteps(): HasMany
+    {
+        return $this->steps()->whereNull('superseded_at');
     }
 
     public function events(): HasMany

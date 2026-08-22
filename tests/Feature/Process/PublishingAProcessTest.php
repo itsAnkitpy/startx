@@ -234,7 +234,7 @@ it("carries a step's whole definition into the new version, not just its name", 
 
         ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')->clearance()->create([
             'sla_hours' => 16,
-            'open_conditions' => [[['source' => 'subject', 'field' => 'has_assets', 'operator' => '=', 'value' => true]]],
+            'open_conditions' => [[['source' => 'subject', 'field' => 'equipment_issued', 'operator' => '=', 'value' => true]]],
         ]);
 
         $exit->publish();
@@ -246,7 +246,7 @@ it("carries a step's whole definition into the new version, not just its name", 
             // Compared loosely on purpose: Postgres sorts a jsonb object's keys, so the
             // copy reads back with them in a different order than they were written.
             ->and($copy->open_conditions)
-            ->toEqual([[['source' => 'subject', 'field' => 'has_assets', 'operator' => '=', 'value' => true]]]);
+            ->toEqual([[['source' => 'subject', 'field' => 'equipment_issued', 'operator' => '=', 'value' => true]]]);
     });
 });
 
@@ -337,6 +337,21 @@ it('refuses a condition about the person on a process that is about nobody', fun
         $hiring->publish();
     });
 })->throws(ProcessRefused::class, 'Step 1 "Director approval" asks about the person this process is about, and this process is about nobody');
+
+it('refuses a condition about the person on a process about a candidate', function () {
+    // Everything this system knows about a person is read off a dated job row, and
+    // somebody who has not joined yet has none. Left through, the desk-setup step would
+    // publish clean and then quietly never happen on a single candidate.
+    TenantContext::run($this->meridian, function () {
+        $onboarding = ProcessTemplate::factory()->named('onboarding', 'Onboarding')->about('candidate')->create();
+
+        ProcessStep::factory()->of($onboarding)->at(1, 1)->named('Gurgaon desk setup')->create([
+            'open_conditions' => [[['source' => 'subject', 'field' => 'office_id', 'operator' => '=', 'value' => 4]]],
+        ]);
+
+        $onboarding->publish();
+    });
+})->throws(ProcessRefused::class, 'a candidate has not joined yet');
 
 it('allows the same condition on a process that is about somebody', function () {
     TenantContext::run($this->meridian, function () {
