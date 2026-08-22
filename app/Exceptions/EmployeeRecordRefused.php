@@ -29,6 +29,23 @@ class EmployeeRecordRefused extends RuntimeException
         );
     }
 
+    /**
+     * A job row a case is pinned to cannot be withdrawn. Withdrawing hides the row, and
+     * a case pointing at a hidden row renders no department, no designation and no
+     * manager — which is the whole thing the case pinned it for.
+     *
+     * @param  list<int>  $caseIds
+     */
+    public static function pinnedByCase(int $recordId, array $caseIds): self
+    {
+        $cases = implode(', ', $caseIds);
+
+        return new self(
+            "Job row [{$recordId}] cannot be withdrawn: case [{$cases}] reads this person's department, "
+            .'designation and manager through it. Correct the job history with a new row instead.'
+        );
+    }
+
     public static function unknownStatutoryType(string $type): self
     {
         $known = implode(', ', EmployeeStatutoryId::Types);

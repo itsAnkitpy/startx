@@ -88,6 +88,13 @@ class EmploymentRecord extends Model
             $record->freezeReferenceLabels();
         });
 
+        // Module 02's rule, enforced here because the pointer is that module's column
+        // and this is the only place a withdrawal happens. Hooked on the delete rather
+        // than inside `withdraw` so a bare `delete()` is covered by the same rule.
+        static::deleting(function (self $record): void {
+            $record->refuseWithdrawalWhileACaseIsPinnedToIt();
+        });
+
         // Who entered the row, stamped rather than submitted. Null where nobody is
         // signed in, which is what an import or a scheduled pass looks like.
         static::creating(function (self $record): void {
@@ -185,6 +192,36 @@ class EmploymentRecord extends Model
 
             $predecessor?->update(['effective_to' => $this->effective_to]);
         });
+    }
+
+    /**
+     * Refuse to withdraw a job row that a case is pinned to, naming the case.
+     *
+     * Withdrawing hides the row from every ordinary query, so a case pointing at it
+     * would afterwards render no department, no designation and no manager — and the
+     * whole reason a case pins a job row is that a tribunal reading it next year sees
+     * what was true at the time. A row a case has already been read against is not a row
+     * entered by mistake.
+     *
+     * Deliberately every case and not only an open one, which is what module 02's plan
+     * first said: a closed case is the one most likely to be read years later and has the
+     * most to lose.
+     *
+     * ponytail: one unindexed read of the case table per withdrawal. Nothing indexes
+     * `cases.subject_employment_record_id`, so this walks every case the client has.
+     * Withdrawals are rare and admin-initiated, so it is left alone until step 3 of module
+     * 02 adds that table's indexes against a measured number rather than a guess.
+     */
+    private function refuseWithdrawalWhileACaseIsPinnedToIt(): void
+    {
+        $caseIds = ProcessCase::query()
+            ->where('subject_employment_record_id', $this->getKey())
+            ->pluck('id')
+            ->all();
+
+        if ($caseIds !== []) {
+            throw EmployeeRecordRefused::pinnedByCase((int) $this->getKey(), $caseIds);
+        }
     }
 
     /**
