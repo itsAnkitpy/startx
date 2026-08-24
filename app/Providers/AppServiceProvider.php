@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Authorization\PermissionResolver;
 use App\Authorization\TenantPasswordBrokers;
 use App\Models\User;
+use App\Process\AssigneeResolver;
+use App\Settings\SettingDeclaration;
 use App\Settings\Settings;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Contracts\Foundation\Application;
@@ -42,6 +44,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->declareTheSwitchesClientsCanChange();
+
         // No account survives its last working day, and that has to be true of
         // authentication itself rather than only of the panel's own door.
         //
@@ -65,5 +69,26 @@ class AppServiceProvider extends ServiceProvider
                 ? $provider->withQuery(fn (Builder $query) => $query->where('active', true))
                 : $provider;
         });
+    }
+
+    /**
+     * The switches a client company can change, assembled from code every time the
+     * process starts.
+     *
+     * Declared here rather than in a list of their own because each belongs to whichever
+     * module reads it, and a switch declared for a module that has not arrived is a
+     * control a client can change to no effect.
+     */
+    private function declareTheSwitchesClientsCanChange(): void
+    {
+        Settings::declare(new SettingDeclaration(
+            key: AssigneeResolver::StandInSetting,
+            type: 'integer',
+            default: null,
+            rule: 'nullable|integer|min:1',
+            help: 'Who holds a step when nobody holds the role it asked for. Left unset, such a step '
+                .'stays open with nobody on it and says so on the case, which is safer than it looks: '
+                .'it can never approve or complete itself.',
+        ));
     }
 }

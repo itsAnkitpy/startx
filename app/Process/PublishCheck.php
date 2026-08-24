@@ -123,7 +123,10 @@ final readonly class PublishCheck
      */
     private function problemsWithStep(ProcessStep $step): array
     {
-        $problems = $this->problemsWithItsChasing($step);
+        $problems = array_merge(
+            $this->problemsWithWhoItBelongsTo($step),
+            $this->problemsWithItsChasing($step),
+        );
 
         foreach ($step->open_conditions ?? [] as $set) {
             // A step carries a list of condition sets and opens when any one set is
@@ -152,6 +155,50 @@ final readonly class PublishCheck
         }
 
         return $problems;
+    }
+
+    /**
+     * Everything wrong with who this step belongs to.
+     *
+     * Invisible in the same way everything else here is. A step naming a way of finding
+     * people that this product does not have would resolve to nobody for ever, and a step
+     * that disagrees with itself about whether its actor has an account at all is worse:
+     * one of the two fields is read when the link is sent and the other when somebody
+     * submits, so a candidate's form could be handed to an employee, or an employee's
+     * approval sent to an outside address as a link.
+     *
+     * @return list<string>
+     */
+    private function problemsWithWhoItBelongsTo(ProcessStep $step): array
+    {
+        $rule = (array) $step->assignee_rule;
+        $kind = $rule['kind'] ?? null;
+
+        if (! in_array($kind, AssigneeResolver::Kinds, true)) {
+            return [
+                $this->at($step).' belongs to ['.$this->readable($kind).'], which is not one of the ways '
+                    .'a step can find its people: '.implode(', ', AssigneeResolver::Kinds).'.',
+            ];
+        }
+
+        $hasNoAccount = $step->participant_kind === 'external';
+
+        if ($kind === 'external' && ! $hasNoAccount) {
+            return [
+                $this->at($step).' says its actor has no account in the system, and also says its actor '
+                    .'is an employee. It has to be one or the other.',
+            ];
+        }
+
+        if ($hasNoAccount && $kind !== 'external') {
+            return [
+                $this->at($step).' says its actor has no account in the system, but then looks for one '
+                    .'by ['.$this->readable($kind).']. A step for somebody with no account belongs to '
+                    .'[external], which is what sends them a link instead.',
+            ];
+        }
+
+        return [];
     }
 
     /**

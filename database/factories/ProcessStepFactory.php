@@ -91,9 +91,40 @@ class ProcessStepFactory extends Factory
         return $this->state(['open_conditions' => $sets]);
     }
 
-    /** Somebody with no account, acting through a signed link. */
+    /**
+     * Somebody with no account, acting through a signed link. Both fields together,
+     * because publishing refuses a step that disagrees with itself about whether its
+     * actor has an account.
+     */
     public function external(): static
     {
-        return $this->state(['participant_kind' => 'external']);
+        return $this->state([
+            'participant_kind' => 'external',
+            'assignee_rule' => ['kind' => 'external'],
+        ]);
+    }
+
+    /** Holders of a role in the subject's own department, or above it. */
+    public function heldByTheRole(string $roleKey): static
+    {
+        return $this->state(['assignee_rule' => ['kind' => 'role_in_scope', 'role' => $roleKey]]);
+    }
+
+    /** Holders of a role anywhere in the client company. */
+    public function heldByTheRoleAnywhere(string $roleKey): static
+    {
+        return $this->state(['assignee_rule' => ['kind' => 'role_global', 'role' => $roleKey]]);
+    }
+
+    /** The manager of whoever opened the case, rather than of the person it is about. */
+    public function heldByTheInitiatorsManager(): static
+    {
+        return $this->state(['assignee_rule' => ['kind' => 'initiators_manager']]);
+    }
+
+    /** One named person, by work address — the escape hatch, discouraged in templates. */
+    public function heldBy(string $workEmail): static
+    {
+        return $this->state(['assignee_rule' => ['kind' => 'specific_user', 'email' => $workEmail]]);
     }
 }

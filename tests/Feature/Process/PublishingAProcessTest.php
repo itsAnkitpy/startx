@@ -28,8 +28,6 @@ use Illuminate\Support\Facades\DB;
 */
 
 beforeEach(function () {
-    Settings::forgetDeclared();
-
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
 });
 

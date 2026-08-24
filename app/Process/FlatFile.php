@@ -50,6 +50,12 @@ final class FlatFile
         'role_in_scope' => 'role',
         'role_global' => 'role',
         'specific_user' => 'email',
+
+        // Takes nothing after it in this step, deliberately. It names a step actioned by
+        // somebody with no account, and where their address comes from arrives with the
+        // signed link that reads it — inventing a name for that cell now would mean the
+        // link either honours a guess or breaks a client's file.
+        'external' => null,
     ];
 
     /** Longest first, so `>=` is not read as `>` followed by rubbish. */
@@ -287,8 +293,8 @@ final class FlatFile
     }
 
     /**
-     * `role_in_scope:hr` and the four beside it — module 03's resolvers, written the way
-     * somebody types them into a spreadsheet.
+     * `role_in_scope:hr` and the five beside it — module 03's ways of finding a step's
+     * people, written the way somebody types them into a spreadsheet.
      *
      * @return array<string, string>
      */
@@ -320,7 +326,7 @@ final class FlatFile
         return ['kind' => $kind, $takes => trim($argument)];
     }
 
-    /** The five resolvers as somebody would type them, for a refusal to show. */
+    /** The six of them as somebody would type them, for a refusal to show. */
     private function theResolversInWords(): string
     {
         $written = [];

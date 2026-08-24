@@ -25,8 +25,6 @@ use App\Tenancy\TenantContext;
 */
 
 beforeEach(function () {
-    Settings::forgetDeclared();
-
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
     $this->files = [];
 });
@@ -67,7 +65,7 @@ function vertexsExitAsTyped(): string
     3,3,Stores clearance,role_in_scope:stores,,"approved,held",24,,,internal,
     4,3,Quality clearance,role_in_scope:quality,,"approved,held",24,,,internal,
     5,4,Director approval,role_global:director,,"approved,rejected",48,,payload.annual_ctc > setting.director_threshold,internal,
-    6,5,Handover note from the leaver,specific_user:rakesh@vertex.example,,approved,,,payload.handover_needed is_set,external,
+    6,5,Handover note from the leaver,external,,approved,,,payload.handover_needed is_set,external,
     7,6,Recovery of company property,role_in_scope:admin,,"approved,held",,,"subject.office_id in 4,7",internal,
     7,6,Recovery of company property,role_in_scope:admin,,"approved,held",,,payload.assets_held = true,internal,
     8,7,Final settlement,role_in_scope:finance,,approved,,,,internal,
@@ -143,9 +141,10 @@ it("reads a client's process out of a flat file as a draft", function () {
             ['source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>', 'setting' => 'director_threshold'],
         ]]);
 
-        // The leaver has no account here, and the step says so.
+        // The leaver has no account here, and both halves of the step say so: nobody is
+        // looked for, and nobody is expected to have an account.
         expect($steps[5]->participant_kind)->toBe('external')
-            ->and($steps[5]->assignee_rule)->toEqual(['kind' => 'specific_user', 'email' => 'rakesh@vertex.example'])
+            ->and($steps[5]->assignee_rule)->toEqual(['kind' => 'external'])
             ->and($steps[5]->open_conditions)->toEqual([[
                 ['source' => 'payload', 'field' => 'handover_needed', 'operator' => 'is_set'],
             ]]);
