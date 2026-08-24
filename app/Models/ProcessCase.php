@@ -139,6 +139,15 @@ class ProcessCase extends Model
         return $this->belongsTo(User::class, 'cancelled_by');
     }
 
+    /**
+     * The job rows this case caused — the reporting lines a succession moved when the
+     * person this exit is about left. Empty on every case that moved nobody.
+     */
+    public function reportingLinesMoved(): HasMany
+    {
+        return $this->hasMany(EmploymentRecord::class, 'caused_by_case_id');
+    }
+
     /** What has been done on this case. A step nobody has touched has no row here. */
     public function steps(): HasMany
     {

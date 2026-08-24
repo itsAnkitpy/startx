@@ -331,4 +331,60 @@ class ProcessRefused extends RuntimeException
     {
         return new self('A case history entry cannot be removed once it is written.');
     }
+
+    /**
+     * A handover asked for on a case that is not about anybody.
+     *
+     * A hiring request for a vacancy has no leaver, so there is no work, no roles and
+     * nobody reporting to anyone for a successor to inherit.
+     */
+    public static function aHandoverNeedsSomebodyLeaving(): self
+    {
+        return new self('A handover can only be settled inside a case about the person leaving.');
+    }
+
+    public static function nobodySucceedsThemselves(string $name): self
+    {
+        return new self("{$name} cannot take over from themselves.");
+    }
+
+    /**
+     * A successor whose account is switched off.
+     *
+     * Nothing resolves to a dead account, so the roles, the reporting lines and the
+     * approvals would all be inherited into a hole and fall to the client's stand-in
+     * without anybody having asked for that.
+     */
+    public static function theSuccessorCannotSignIn(string $name): self
+    {
+        return new self("{$name} cannot take the work on, because their account cannot sign in.");
+    }
+
+    /**
+     * A second handover asked for on somebody whose work has already moved on.
+     *
+     * The first one took the roles, the reporting lines and the open approvals, so a
+     * second finds nothing left to move and would record a handover that did nothing.
+     * Whoever is correcting a wrong successor has to move the work on from the person
+     * who actually holds it now, and is told who that is.
+     */
+    public static function theWorkHasAlreadyBeenHandedOn(string $leaver, string $successor, string $on): self
+    {
+        return new self(
+            "{$leaver}'s work was handed to {$successor} on {$on}. To change that, hand it on from "
+            ."{$successor} rather than starting again from {$leaver}."
+        );
+    }
+
+    /**
+     * A handover dated on or before the day one of the leaver's people started their
+     * current job row, which leaves no room for that row to be closed off in front of it.
+     */
+    public static function theHandoverStartsTooEarly(string $name, string $rowBegan, string $handover): self
+    {
+        return new self(
+            "The handover is dated {$handover}, and {$name}'s current job row already begins on "
+            ."{$rowBegan}. Date the handover after that day."
+        );
+    }
 }

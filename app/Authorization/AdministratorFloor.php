@@ -50,6 +50,19 @@ class AdministratorFloor
             return;
         }
 
+        // Handing a grant to somebody else who can sign in and is not an administrator
+        // already leaves the count exactly where it was — one name swapped for another.
+        // That is what happens when a departing administrator's work is handed to their
+        // successor, and refusing it would block the one exit that most needs authority
+        // moved on. A grant moved onto an account that cannot sign in, or onto somebody
+        // who is an administrator already, does take one away: both fall through to the
+        // count below.
+        if ($assignment->isDirty('user_id')
+            && ! $assignment->isDirty('role_id')
+            && self::wouldBeANewAdministrator((int) $assignment->user_id)) {
+            return;
+        }
+
         $remaining = self::countExcluding(exceptAssignmentId: (int) $assignment->getKey());
 
         if ($remaining < self::Minimum) {
@@ -115,6 +128,20 @@ class AdministratorFloor
         // One person may hold the administrator role over two different units and is
         // still one administrator.
         return $query->distinct()->count('role_assignments.user_id');
+    }
+
+    /**
+     * Whether handing a grant to this account would add an administrator the client did
+     * not already have.
+     */
+    private static function wouldBeANewAdministrator(int $userId): bool
+    {
+        $canSignIn = User::query()->whereKey($userId)->where('active', true)->exists();
+
+        return $canSignIn && ! RoleAssignment::query()
+            ->where('user_id', $userId)
+            ->whereIn('role_id', self::administratorRoleIds())
+            ->exists();
     }
 
     private static function isAdministratorRole(int $roleId): bool

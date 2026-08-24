@@ -147,6 +147,24 @@ class EmploymentRecord extends Model
         return $this->belongsTo(User::class, 'recorded_by');
     }
 
+    /**
+     * The exit that caused this row, where one did.
+     *
+     * A succession writes a fresh row for each of the leaver's direct reports rather
+     * than repointing a column, and this is what ties that row back to the departure
+     * that moved it — so the org chart movement and the exit can be read from either
+     * end. Null on every ordinary row, which is a promotion, a transfer or a change of
+     * manager that somebody entered themselves.
+     *
+     * Not fillable for the same reason as who entered the row and which client company
+     * it belongs to: it answers "where did this row come from", and a submitted field
+     * that answers that can lie about it.
+     */
+    public function causedByCase(): BelongsTo
+    {
+        return $this->belongsTo(ProcessCase::class, 'caused_by_case_id');
+    }
+
     public function withdrawnBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'withdrawn_by');
