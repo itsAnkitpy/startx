@@ -219,6 +219,22 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * A cover being handed on to a third person.
+     *
+     * Priya, holding Rakesh's exits while he is away, cannot name Chandni to hold them
+     * next. The reason is readability rather than trust: the person accountable for an
+     * approval is meant to be findable in one hop.
+     */
+    public static function coverCannotBePassedOn(string $processKey): self
+    {
+        return new self(
+            "Cover for [{$processKey}] would be a chain: over these dates one of these two "
+            .'people is already covering somebody or is already being covered, and '
+            .'cover cannot be passed on to a third person.'
+        );
+    }
+
+    /**
      * @param  array<mixed>  $allowed
      */
     public static function outcomeNotOffered(string $step, string $outcome, array $allowed): self

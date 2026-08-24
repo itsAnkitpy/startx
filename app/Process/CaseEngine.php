@@ -257,6 +257,7 @@ final class CaseEngine
                 'outcome' => $outcome,
                 'reason' => $reason,
                 'sent_back_to' => $target?->sequence,
+                'covering_for' => $this->whoTheyAreCoveringFor($candidates, $by),
             ], fn (mixed $value) => $value !== null));
 
             if ($target !== null) {
@@ -556,6 +557,37 @@ final class CaseEngine
     }
 
     /**
+     * Whom this person is standing in for, if the only reason they are here is a cover.
+     *
+     * Read off the set the gate already worked out rather than asked again, which is the
+     * same reason the row's record of who could have acted is written from that set: the
+     * question "may Priya act" and the question "on whose behalf" have to be answered by
+     * one look at the world, or the record can disagree with the permission that produced
+     * it.
+     *
+     * Null for everybody acting in their own right, and {@see array_filter()} at both call
+     * sites drops the key entirely — an approval that was nobody's cover should read as an
+     * ordinary approval, not as one with an empty cover beside it.
+     *
+     * @param  Collection<int, User>  $candidates
+     * @return array{id: int, name: string}|null
+     */
+    private function whoTheyAreCoveringFor(Collection $candidates, User $person): ?array
+    {
+        $asResolved = $candidates->first(
+            fn (User $candidate) => (int) $candidate->getKey() === (int) $person->getKey()
+        );
+
+        $away = $asResolved?->relationLoaded('coveringFor') === true
+            ? $asResolved->getRelation('coveringFor')
+            : null;
+
+        return $away instanceof User
+            ? ['id' => (int) $away->getKey(), 'name' => $away->name]
+            : null;
+    }
+
+    /**
      * The three acts on a case that sit outside any step, closed to the person the case is
      * about.
      *
@@ -640,7 +672,11 @@ final class CaseEngine
                 'sequence' => $available->step->sequence,
                 'assignee_id' => $by->getKey(),
                 'candidates_at_claim' => $candidates
-                    ->map(fn (User $person) => ['id' => (int) $person->getKey(), 'name' => $person->name])
+                    ->map(fn (User $person) => array_filter([
+                        'id' => (int) $person->getKey(),
+                        'name' => $person->name,
+                        'covering_for' => $this->whoTheyAreCoveringFor($candidates, $person),
+                    ], fn (mixed $value) => $value !== null))
                     ->values()
                     ->all(),
             ]);

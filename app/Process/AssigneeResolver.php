@@ -3,6 +3,7 @@
 namespace App\Process;
 
 use App\Models\CaseEvent;
+use App\Models\Delegation;
 use App\Models\EmploymentRecord;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
@@ -11,6 +12,7 @@ use App\Models\RoleAssignment;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
 use App\Settings\Settings;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -110,6 +112,7 @@ final class AssigneeResolver
 
         foreach ($this->levelsFor($case, $step) as $level) {
             $people = $this->whichOfThemCanAct($level, $subjectId);
+            $people = $this->withWhoeverIsCoveringThem($people, $case, $subjectId);
 
             if ($people->isNotEmpty()) {
                 return $people;
@@ -323,6 +326,69 @@ final class AssigneeResolver
             ->where('active', true)
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * Whoever is covering the people in this level, added beside them.
+     *
+     * Added rather than substituted. Rakesh being away does not mean Rakesh cannot act if
+     * he looks at his mail, and it removes the question of what a cover naming somebody
+     * unusable is supposed to fall back to — Priya passes the same filter everybody passes,
+     * and if she fails it Rakesh is simply still there. Everything the plan asks of a cover
+     * survives: the dates running out stops Priya being resolved, and Rakesh is then
+     * resolved exactly as if there had never been a cover.
+     *
+     * **Cover is only read for people who survived the filter, and that ordering is the
+     * rule rather than a convenience.** Somebody who has left the company does not resolve,
+     * so nobody covers them either — an authority outliving the job it came from is the
+     * thing this module refuses everywhere else, and SAP reverts an in-flight step to its
+     * original holder for the same reason. The person a case is about does not resolve
+     * either, so a cover cannot be used to clear their own exit on their behalf.
+     *
+     * **It looks one hop and stops.** A cover held by somebody who is themselves covered
+     * does not travel: Chandni covering Priya, who is covering Rakesh, does not reach
+     * Rakesh's steps. The model refuses writing that chain at all, and this is the half
+     * that holds even for a row that arrived some other way.
+     *
+     * Each person added carries who they are covering, so an action taken under cover can
+     * be recorded in both names without asking the question a second time.
+     *
+     * @param  Collection<int, User>  $people
+     * @return Collection<int, User>
+     */
+    private function withWhoeverIsCoveringThem(Collection $people, ProcessCase $case, ?int $subjectId): Collection
+    {
+        if ($people->isEmpty()) {
+            return $people;
+        }
+
+        $covers = Delegation::query()
+            ->whereIn('user_id', $people->modelKeys())
+            ->where('process_key', $case->template->key)
+            ->asOf(CarbonImmutable::now())
+            ->orderBy('user_id')
+            ->get();
+
+        if ($covers->isEmpty()) {
+            return $people;
+        }
+
+        $away = $people->keyBy(fn (User $person) => (int) $person->getKey());
+
+        $standingIn = $this->whichOfThemCanAct($covers->pluck('delegate_id')->all(), $subjectId)
+            ->reject(fn (User $delegate) => $away->has((int) $delegate->getKey()))
+            ->each(function (User $delegate) use ($covers, $away): void {
+                // Whose queue this is. Somebody covering two people at once is answered by
+                // the first of them, which keeps the record definite; a second name in the
+                // same breath would read as one approval given twice.
+                $for = $covers->first(
+                    fn (Delegation $cover) => (int) $cover->delegate_id === (int) $delegate->getKey()
+                );
+
+                $delegate->setRelation('coveringFor', $away->get((int) $for->user_id));
+            });
+
+        return $people->concat($standingIn)->values();
     }
 
     /**
