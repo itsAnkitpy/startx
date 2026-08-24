@@ -37,7 +37,7 @@ function exitCarryingDeadlines(string $about = 'employee'): ProcessTemplate
 {
     $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about($about)->create();
 
-    ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
+    ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
 
     $exit->publish();
 
@@ -47,7 +47,7 @@ function exitCarryingDeadlines(string $about = 'employee'): ProcessTemplate
 /** A leaver whose job row names the office his deadlines are counted against. */
 function leaverBasedAt(Office $office, string $joined = '2019-04-01', string $called = 'Rakesh Menon'): User
 {
-    $person = User::factory()->named($called)->create();
+    $person = User::factory()->holdingTheRole('exit_team')->named($called)->create();
 
     EmploymentRecord::factory()->forPerson($person)->basedAt($office)->create([
         'joining_date' => $joined,
@@ -280,7 +280,7 @@ it('refuses a leaving date on a process that is not about a person', function ()
 
 it('refuses a leaving date when the person’s job row names no office', function () {
     TenantContext::run($this->meridian, function () {
-        $rakesh = User::factory()->named('Rakesh Menon')->create();
+        $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
         EmploymentRecord::factory()->forPerson($rakesh)->create();
 
         expect(fn () => (new CaseEngine)->open(exitCarryingDeadlines(), $rakesh, null, '2026-08-14'))
@@ -304,12 +304,12 @@ it('refuses a leaving date when the person’s job row names no office', functio
 /** A leaver whose job row also names the designation and the manager the case will read. */
 function leaverWithADesignationAndAManager(Office $office): User
 {
-    $rakesh = User::factory()->named('Rakesh Menon')->create();
+    $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
 
     EmploymentRecord::factory()->forPerson($rakesh)
         ->basedAt($office)
         ->designated(Designation::factory()->named('Senior Manager')->create())
-        ->reportingTo(User::factory()->named('Anjali Verma')->create())
+        ->reportingTo(User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create())
         ->create(['joining_date' => '2019-04-01']);
 
     return $rakesh;
@@ -324,7 +324,7 @@ it('moves both deadlines when the leaver’s last working day is extended', func
             ->and($case->gratuity_due_at->toDateString())->toBe('2026-09-13');
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-21', User::factory()->named('Anjali Verma')->create(), 'Notice extended by a week'
+            $case, '2026-08-21', User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create(), 'Notice extended by a week'
         );
 
         // Two working days from the new Friday, and thirty ordinary days from it.
@@ -351,7 +351,7 @@ it('leaves the job row the case is pinned to exactly as it was', function () {
         ];
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-21', User::factory()->named('Priya Nair')->create(), 'Notice extended by a week'
+            $case, '2026-08-21', User::factory()->holdingTheRole('exit_team')->named('Priya Nair')->create(), 'Notice extended by a week'
         );
 
         $after = $case->fresh()->subjectEmploymentRecord;
@@ -368,8 +368,8 @@ it('records the reason, both dates before and after, and everyone holding a clea
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
-        ProcessStep::factory()->of($exit)->at(2, 1)->named('Finance clearance')->clearance()->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 1)->named('Finance clearance')->clearance()->create();
         $exit->publish();
 
         $engine = new CaseEngine;
@@ -377,10 +377,10 @@ it('records the reason, both dates before and after, and everyone holding a clea
 
         // Deepak has picked IT up. Nobody has touched Finance, which is exactly the step
         // a chase exists for and the one with no row to find it by.
-        $deepak = User::factory()->named('Deepak Rao')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Rao')->create();
         $engine->claim($case, 1, $deepak);
 
-        $anjali = User::factory()->named('Anjali Verma')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
         $engine->amendTheDateTheClocksCountFrom($case, '2026-08-21', $anjali, 'Notice extended by a week');
 
         $amendment = CaseEvent::query()->where('type', 'case_amended')->sole();
@@ -407,7 +407,7 @@ it('asks again whether gratuity is owed, because the answer is about the same da
         // Chandni's fifth anniversary is 14 August 2026, so leaving that day earns her
         // gratuity and leaving the day before does not.
         $chandni = leaverBasedAt($shimla, joined: '2021-08-14', called: 'Chandni Bhatt');
-        $anjali = User::factory()->named('Anjali Verma')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
 
         $case = (new CaseEngine)->open(exitCarryingDeadlines(), $chandni, null, '2026-08-14');
 
@@ -440,7 +440,7 @@ it('counts the new deadline against the calendar as it stands now, holiday list 
         expect($case->fresh()->statutory_due_at->toDateString())->toBe('2026-08-18');
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-21', User::factory()->named('Anjali Verma')->create(), 'Notice extended by a week'
+            $case, '2026-08-21', User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create(), 'Notice extended by a week'
         );
 
         // Friday 21st, then the weekend, then the Monday is now closed: Tuesday and
@@ -455,7 +455,7 @@ it('says nothing at all when the date handed in is the one the case already has'
         $case = (new CaseEngine)->open(exitCarryingDeadlines(), leaverBasedAt($shimla), null, '2026-08-14');
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-14', User::factory()->named('Anjali Verma')->create(), 'Confirming the date'
+            $case, '2026-08-14', User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create(), 'Confirming the date'
         );
 
         // A line in the record a tribunal reads should mean something moved.
@@ -470,7 +470,7 @@ it('will not move a deadline without saying why', function () {
         $case = (new CaseEngine)->open(exitCarryingDeadlines(), leaverBasedAt($shimla), null, '2026-08-14');
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-21', User::factory()->named('Anjali Verma')->create(), '   '
+            $case, '2026-08-21', User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create(), '   '
         );
     });
 })->throws(ProcessRefused::class, 'Moving the date a case counts its deadlines from has to say why');
@@ -478,7 +478,7 @@ it('will not move a deadline without saying why', function () {
 it('will not move the deadline of an exit that has already ended', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $anjali = User::factory()->named('Anjali Verma')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
         $case = (new CaseEngine)->open(exitCarryingDeadlines(), leaverBasedAt($shimla), null, '2026-08-14');
 
         (new CaseEngine)->cancel($case, $anjali, 'Resignation withdrawn');
@@ -493,7 +493,7 @@ it('will not put a leaving date on a hiring request, which is about nobody', fun
         $case = (new CaseEngine)->open($hiring);
 
         (new CaseEngine)->amendTheDateTheClocksCountFrom(
-            $case, '2026-08-21', User::factory()->named('Anjali Verma')->create(), 'Typed on the wrong case'
+            $case, '2026-08-21', User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create(), 'Typed on the wrong case'
         );
     });
 })->throws(ProcessRefused::class, 'has no office calendar and cannot carry a legal deadline');

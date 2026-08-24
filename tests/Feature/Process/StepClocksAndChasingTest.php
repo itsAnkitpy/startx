@@ -43,10 +43,10 @@ function exitWithATimedClearance(int $hours = 24, ?array $nudgeAt = null): Proce
 {
     $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
 
-    ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+    ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
         ->offering('approved', 'sent_back')->create();
 
-    $clearance = ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn($hours);
+    $clearance = ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn($hours);
 
     if ($nudgeAt !== null) {
         $clearance = $clearance->nudgingAt(...$nudgeAt);
@@ -62,7 +62,7 @@ function exitWithATimedClearance(int $hours = 24, ?array $nudgeAt = null): Proce
 /** The leaver, based at an office whose calendar every clock on his exit answers to. */
 function leaverAt(Office $office, string $called = 'Rakesh Menon'): User
 {
-    $person = User::factory()->named($called)->create();
+    $person = User::factory()->holdingTheRole('exit_team')->named($called)->create();
 
     EmploymentRecord::factory()->forPerson($person)->basedAt($office)->create();
 
@@ -82,7 +82,7 @@ function theOpenStep(ProcessCase $case): AvailableStep
 it('starts a step’s clock when that step became somebody’s turn, not when the case opened', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 24);
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -103,7 +103,7 @@ it('stops a step’s clock for the weekend and for a holiday at the subject’s 
         $shimla = Office::factory()->named('Shimla')->create();
         OfficeHoliday::factory()->at($shimla)->on('2026-08-17', 'A Shimla holiday')->create();
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
         $this->travelTo('2026-08-14 21:00:00');
@@ -124,7 +124,7 @@ it('gives a step the same deadline before and after somebody in another office c
         $gurgaon = Office::factory()->named('Gurgaon')->create();
         $deepak = leaverAt($gurgaon, called: 'Deepak Rao');
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 24);
 
         $this->travelTo('2026-08-14 10:00:00');
@@ -147,7 +147,7 @@ it('gives a step the same deadline before and after somebody in another office c
 it('keeps a held step’s clock running, and the clock of a step waiting on somebody outside', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -177,7 +177,7 @@ it('leaves a step with no target of its own with nothing due and nothing chased'
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('IT clearance')->clearance()->create();
         $exit->publish();
 
         $case = (new CaseEngine)->open($exit, leaverAt($shimla), null, '2026-08-14');
@@ -197,7 +197,7 @@ it('leaves a step with no target of its own with nothing due and nothing chased'
 it('owes one nudge past half the target, two past three-quarters, and the escalation at the end', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
         // Wednesday, so nothing in this test bumps into a weekend.
@@ -236,7 +236,7 @@ it('owes one nudge past half the target, two past three-quarters, and the escala
 it('does not chase somebody over the weekend just because half the calendar has gone by', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
         // The clearance opens at nine on Friday evening: three working hours left in the
@@ -267,7 +267,7 @@ it('does not chase somebody over the weekend just because half the calendar has 
 it('chases at the fractions a step names for itself', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 10, nudgeAt: [0.9]);
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -286,11 +286,11 @@ it('chases at the fractions a step names for itself', function () {
 it('sends the escalation to the manager of whoever is holding the step, looked up now', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
-        $priya = User::factory()->named('Priya Nair')->create();
-        $deepak = User::factory()->named('Deepak Rao')->create();
+        $priya = User::factory()->holdingTheRole('exit_team')->named('Priya Nair')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Rao')->create();
         EmploymentRecord::factory()->forPerson($deepak)->basedAt($shimla)->reportingTo($priya)->create();
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -310,12 +310,12 @@ it('sends the escalation to the manager of whoever is holding the step, looked u
 it('follows a change of manager rather than the manager who was there when the case opened', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
-        $priya = User::factory()->named('Priya Nair')->create();
-        $anjali = User::factory()->named('Anjali Verma')->create();
-        $deepak = User::factory()->named('Deepak Rao')->create();
+        $priya = User::factory()->holdingTheRole('exit_team')->named('Priya Nair')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Rao')->create();
 
         $wasUnderPriya = EmploymentRecord::factory()->forPerson($deepak)->basedAt($shimla)
             ->reportingTo($priya)->effective('2024-04-01')->create();
@@ -341,7 +341,7 @@ it('follows a change of manager rather than the manager who was there when the c
 it('names nobody to escalate to on a step nobody has picked up, leaving the group it was meant for', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -366,10 +366,10 @@ it('names nobody to escalate to on a step nobody has picked up, leaving the grou
 it('names nobody to escalate to when the holder has nobody above them', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
 
-        $chandni = User::factory()->named('Chandni Bhatt')->create();
+        $chandni = User::factory()->holdingTheRole('exit_team')->named('Chandni Bhatt')->create();
         EmploymentRecord::factory()->forPerson($chandni)->basedAt($shimla)->create();
 
         $this->travelTo('2026-08-12 09:00:00');
@@ -386,7 +386,7 @@ it('names nobody to escalate to when the holder has nobody above them', function
 it('finds every overdue step across many cases without asking the database per case', function () {
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
         $rakesh = leaverAt($shimla);
         $record = EmploymentRecord::query()->where('user_id', $rakesh->getKey())->first();
@@ -435,7 +435,7 @@ it('finds every overdue step across many cases without asking the database per c
 it('refuses to publish a step that is chased but has no time limit of its own', function () {
     TenantContext::run($this->meridian, function () {
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')->clearance()
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('IT clearance')->clearance()
             ->nudgingAt(0.5)->create();
 
         expect(fn () => $exit->publish())
@@ -446,7 +446,7 @@ it('refuses to publish a step that is chased but has no time limit of its own', 
 it('refuses to publish a nudge that does not land inside the time limit', function () {
     TenantContext::run($this->meridian, function () {
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')->clearance()
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('IT clearance')->clearance()
             ->dueIn(8)->nudgingAt(1.5)->create();
 
         // A nudge at one and a half times the target lands after the escalation that has

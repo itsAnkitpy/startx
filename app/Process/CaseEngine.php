@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Settings\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -65,9 +66,12 @@ final class CaseEngine
 
     private AvailableSteps $reader;
 
+    private AssigneeResolver $assignees;
+
     public function __construct()
     {
         $this->reader = new AvailableSteps;
+        $this->assignees = new AssigneeResolver;
     }
 
     /**
@@ -176,7 +180,10 @@ final class CaseEngine
     {
         return DB::transaction(function () use ($case, $sequence, $by): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
-            $attempt = $this->attemptToWriteOn($available, $by);
+
+            $candidates = $this->refuseUnlessTheStepIsTheirs($available, $by);
+
+            $attempt = $this->attemptToWriteOn($available, $by, $candidates);
 
             // Picking up a step that is already yours changes nothing, so it says nothing.
             // A second "picked up" line against one pick-up is noise in the one record
@@ -221,6 +228,10 @@ final class CaseEngine
             $available = $this->availableStepOrRefuse($case, $sequence);
             $step = $available->step;
 
+            // Before anything about the step itself is checked, because a person with no
+            // business at this step has no business being told what it offers either.
+            $candidates = $this->refuseUnlessTheStepIsTheirs($available, $by);
+
             if (! in_array($outcome, (array) $step->allowed_outcomes, true)) {
                 throw ProcessRefused::outcomeNotOffered($step->name, $outcome, (array) $step->allowed_outcomes);
             }
@@ -233,7 +244,7 @@ final class CaseEngine
                 ? $this->sendBackTargetOrRefuse($available, $sendBackTo)
                 : null;
 
-            $attempt = $this->attemptToWriteOn($available, $by);
+            $attempt = $this->attemptToWriteOn($available, $by, $candidates);
 
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
@@ -281,6 +292,8 @@ final class CaseEngine
      */
     public function resolveHold(ProcessCase $case, int $sequence, string $outcome, User $by, string $reason): CaseStep
     {
+        $this->refuseIfTheCaseIsAboutThem($case, $by, 'Ending a hold');
+
         if (! in_array($outcome, CaseStep::HoldResolutions, true)) {
             throw ProcessRefused::notAWayOutOfAHold($outcome);
         }
@@ -295,6 +308,18 @@ final class CaseEngine
 
             if ($attempt === null || $attempt->outcome !== 'held') {
                 throw ProcessRefused::thatStepIsNotOnHold($available->step->name, $outcome);
+            }
+
+            // Turning the argument into a disputed settlement line is the holding
+            // department's own decision, so only the person holding it may record it — the
+            // same rule an ordinary action on a claimed step follows. `force_closed` is
+            // deliberately not gated here: it exists precisely for the holder being
+            // unavailable, it keeps them on the row and names whoever overrode it, and the
+            // authority to override belongs to whoever can reach that button. Module 07
+            // builds that screen and owns that check.
+            // ponytail: force_closed reachable by any account holder until module 07 gates it.
+            if ($outcome === 'closed_disputed' && (int) $attempt->assignee_id !== (int) $by->getKey()) {
+                throw ProcessRefused::somebodyElseHasThatStep($available->step->name);
             }
 
             // The reason and whoever gave it go to the history and nowhere else. A step's
@@ -351,6 +376,8 @@ final class CaseEngine
         User $by,
         string $reason,
     ): void {
+        $this->refuseIfTheCaseIsAboutThem($case, $by, 'Moving the date a case counts its deadlines from');
+
         $reason = trim($reason);
 
         if ($reason === '') {
@@ -408,6 +435,8 @@ final class CaseEngine
      */
     public function cancel(ProcessCase $case, User $by, string $reason): void
     {
+        $this->refuseIfTheCaseIsAboutThem($case, $by, 'Cancelling a case');
+
         $reason = trim($reason);
 
         if ($reason === '') {
@@ -482,6 +511,76 @@ final class CaseEngine
     }
 
     /**
+     * The gate: whoever is acting has to be one of the people this step belongs to.
+     *
+     * Worked out here rather than trusted from the request, and worked out again at the
+     * moment of acting rather than when the screen was drawn. A queue page listed at nine
+     * o'clock is not evidence of anything at half past — the role may have moved, the
+     * person may have left, the case's own earlier steps may have changed who its later
+     * ones belong to. This is the same reader {@see self::availableStepOrRefuse()} uses
+     * for whose *turn* it is, for the same reason.
+     *
+     * Every door into a step comes through here, so a step can never be actionable
+     * without being gated: picking one up and acting on one both pass this first. The one
+     * deliberate exception is HR overriding a hold, which exists for the holder being
+     * unavailable and is recorded as an override in both names.
+     *
+     * A step whose set is empty refuses everybody, which is the point rather than a gap:
+     * an exit clearance nobody holds must not be answerable by whoever happens to be
+     * logged in. It stays open, warned on the case, and waits for a person.
+     *
+     * It hands the set back rather than throwing it away, because the row about to be
+     * written wants it: see {@see self::newAttempt()}. Resolving is a query per level, and
+     * the question the row records and the question the gate asks are the same question
+     * asked at the same instant — asking it twice invites two different answers.
+     *
+     * @return Collection<int, User>
+     */
+    private function refuseUnlessTheStepIsTheirs(AvailableStep $available, User $by): Collection
+    {
+        if ($this->assignees->isForSomebodyWithNoAccount($available->step)) {
+            throw ProcessRefused::thatStepBelongsToSomebodyWithNoAccount($available->step->name);
+        }
+
+        $theirs = $this->assignees->resolve($available->case, $available->step);
+
+        $isOneOfThem = $theirs->contains(
+            fn (User $person) => (int) $person->getKey() === (int) $by->getKey()
+        );
+
+        if (! $isOneOfThem) {
+            throw ProcessRefused::thatStepIsNotYours($available->step->name);
+        }
+
+        return $theirs;
+    }
+
+    /**
+     * The three acts on a case that sit outside any step, closed to the person the case is
+     * about.
+     *
+     * Resolution already refuses them every clearance on their own exit, and these reach
+     * the same place by a different door: cancelling the case makes it go away, moving the
+     * date its clocks count from moves the settlement deadline and can hand out a gratuity
+     * that was not owed, and overriding a hold overrules the colleague who raised it. All
+     * three are the signature this product cannot afford to record, arriving without a
+     * step to be gated on.
+     *
+     * Only this half. *Which* other employees may cancel a case, move that date or
+     * override a hold is a permission with no answer in the plan yet and module 07's
+     * screens to own — HR overriding a hold is deliberately not a candidate for the step
+     * it overrides, so the step gate is the wrong question to ask here.
+     *
+     * ponytail: any other account holder still reaches all three until module 07 gates them.
+     */
+    private function refuseIfTheCaseIsAboutThem(ProcessCase $case, User $by, string $act): void
+    {
+        if ($case->subject_user_id !== null && (int) $case->subject_user_id === (int) $by->getKey()) {
+            throw ProcessRefused::theCaseIsAboutThem($act);
+        }
+    }
+
+    /**
      * The row this action is written on.
      *
      * Three shapes. Nobody has touched the step, so a row appears now. Somebody has it
@@ -491,12 +590,15 @@ final class CaseEngine
      * one-live-attempt rule allows. A step being held is not replaced: a hold and its
      * ending are one attempt.
      */
-    private function attemptToWriteOn(AvailableStep $available, User $by): CaseStep
+    /**
+     * @param  Collection<int, User>  $candidates
+     */
+    private function attemptToWriteOn(AvailableStep $available, User $by, Collection $candidates): CaseStep
     {
         $attempt = $available->attempt;
 
         if ($attempt === null) {
-            return $this->newAttempt($available, $by);
+            return $this->newAttempt($available, $by, $candidates);
         }
 
         // An attempt that closed without passing: the step a send-back reopened, or the
@@ -507,7 +609,7 @@ final class CaseEngine
             $attempt->superseded_at = now();
             $attempt->save();
 
-            return $this->newAttempt($available, $by);
+            return $this->newAttempt($available, $by, $candidates);
         }
 
         // Somebody has this step — picked up, or picked up and held — and it stays
@@ -527,13 +629,20 @@ final class CaseEngine
      * the ordinary case rather than as a failed query — the loser is somebody clicking a
      * button, and they are owed a sentence about who has the step, not an error page.
      */
-    private function newAttempt(AvailableStep $available, User $by): CaseStep
+    /**
+     * @param  Collection<int, User>  $candidates
+     */
+    private function newAttempt(AvailableStep $available, User $by, Collection $candidates): CaseStep
     {
         try {
             return CaseStep::create([
                 'case_id' => $available->case->getKey(),
                 'sequence' => $available->step->sequence,
                 'assignee_id' => $by->getKey(),
+                'candidates_at_claim' => $candidates
+                    ->map(fn (User $person) => ['id' => (int) $person->getKey(), 'name' => $person->name])
+                    ->values()
+                    ->all(),
             ]);
         } catch (UniqueConstraintViolationException) {
             throw ProcessRefused::somebodyElseHasThatStep($available->step->name);

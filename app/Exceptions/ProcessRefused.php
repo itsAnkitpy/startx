@@ -175,6 +175,50 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * The gate. Whoever asked is not one of the people this step was worked out to
+     * belong to, so nothing of theirs is recorded against it.
+     *
+     * The message names the step and stops there. It does not say who *does* hold it,
+     * because the person being refused is by definition not entitled to that answer —
+     * and on an exit the names holding the clearances are what somebody guessing at an
+     * organisation's shape would like to be told.
+     */
+    public static function thatStepIsNotYours(string $step): self
+    {
+        return new self("[{$step}] is not yours to act on.");
+    }
+
+    /**
+     * A step whose actor has no account in this system, reached by somebody who has one.
+     *
+     * Refused for everybody with a login, including the client's own HR team: permission
+     * to act on such a step is the signed link sent to the person's address and nothing
+     * else, so an employee acting here would be recording a candidate's answers under an
+     * employee's name.
+     */
+    public static function thatStepBelongsToSomebodyWithNoAccount(string $step): self
+    {
+        return new self(
+            "[{$step}] is answered by somebody with no account in this system, through the "
+            .'link sent to them. Nobody signed in can answer it for them.'
+        );
+    }
+
+    /**
+     * A case-level act attempted by the very person the case is about.
+     *
+     * The same signature resolution already refuses on a step: Rakesh cannot clear his own
+     * exit, so he cannot make it go away, move the date its settlement is counted from, or
+     * overrule a colleague holding one of its clearances either. Which *other* employees
+     * may do those three things is a permission module 07's screens own; this is the half
+     * that is settled and needs nothing built to know it.
+     */
+    public static function theCaseIsAboutThem(string $act): self
+    {
+        return new self("{$act} is not yours to do when the case is about you.");
+    }
+
+    /**
      * @param  array<mixed>  $allowed
      */
     public static function outcomeNotOffered(string $step, string $outcome, array $allowed): self

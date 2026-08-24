@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -49,6 +50,24 @@ class UserFactory extends Factory
     public function unverified(): static
     {
         return $this->state(['email_verified_at' => null]);
+    }
+
+    /**
+     * Somebody holding a role across the whole client company.
+     *
+     * Company-wide rather than over one department, because most tests of the engine are
+     * about what a step does rather than about which branch its people sit in — and a
+     * grant naming no part of the structure is what a client with one HR team actually
+     * has.
+     */
+    public function holdingTheRole(string $roleKey): static
+    {
+        return $this->afterCreating(function (User $person) use ($roleKey): void {
+            $role = Role::query()->where('key', $roleKey)->first()
+                ?? Role::factory()->keyed($roleKey)->create();
+
+            $role->assignments()->create(['user_id' => $person->getKey()]);
+        });
     }
 
     /**

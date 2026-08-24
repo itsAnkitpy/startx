@@ -22,7 +22,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * version the case points at, which cannot change underneath it.
  */
 #[Fillable([
-    'case_id', 'sequence', 'assignee_id', 'external_assignee', 'acted_at', 'outcome', 'payload',
+    'case_id', 'sequence', 'assignee_id', 'external_assignee', 'candidates_at_claim',
+    'acted_at', 'outcome', 'payload',
 ])]
 class CaseStep extends Model
 {
@@ -59,6 +60,7 @@ class CaseStep extends Model
         return [
             'sequence' => 'integer',
             'external_assignee' => 'array',
+            'candidates_at_claim' => 'array',
             'acted_at' => 'datetime',
             'superseded_at' => 'datetime',
             'payload' => 'array',

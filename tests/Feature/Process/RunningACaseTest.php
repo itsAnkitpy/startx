@@ -64,11 +64,11 @@ function liveProcess(callable $addSteps, string $about = 'employee'): ProcessTem
 function meridiansExit(): ProcessTemplate
 {
     return liveProcess(function (ProcessTemplate $exit) {
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
             ->offering('approved', 'rejected', 'sent_back')->create();
-        ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn(24)->create();
-        ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->dueIn(8)->create();
-        ProcessStep::factory()->of($exit)->at(4, 3)->named('Close')->offering('approved')->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn(24)->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->dueIn(8)->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(4, 3)->named('Close')->offering('approved')->create();
     });
 }
 
@@ -78,7 +78,7 @@ function meridiansExit(): ProcessTemplate
  */
 function rakesh(): User
 {
-    $rakesh = User::factory()->named('Rakesh Menon')->create();
+    $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
 
     EmploymentRecord::factory()->forPerson($rakesh)
         ->basedAt(Office::factory()->create())
@@ -102,7 +102,7 @@ function whoseTurn(ProcessCase $case): array
 it('runs a case from end to end, one group at a time', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         expect(whoseTurn($case))->toBe(['Manager approval']);
@@ -128,7 +128,7 @@ it('runs a case from end to end, one group at a time', function () {
 it('keeps a later group shut while any step in the group before it is still open', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -145,7 +145,7 @@ it('keeps a later group shut while any step in the group before it is still open
 it('writes no row at all for a step nobody has touched', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         expect(CaseStep::query()->where('case_id', $case->getKey())->count())->toBe(0);
@@ -161,7 +161,7 @@ it('writes no row at all for a step nobody has touched', function () {
 it('measures a waiting step from when the step blocking it closed, with no row to read it off', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         $this->travelTo('2026-09-07 11:00:00');
@@ -179,13 +179,13 @@ it('measures a waiting step from when the step blocking it closed, with no row t
 it('lets two steps in one group close at the same moment and opens the next group to both', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
 
-        $it = User::factory()->create();
-        $finance = User::factory()->create();
+        $it = User::factory()->holdingTheRole('exit_team')->create();
+        $finance = User::factory()->holdingTheRole('exit_team')->create();
 
         // Both hold their own step, and neither waits for the other to let go of
         // anything: there is no row for them to contend over.
@@ -203,13 +203,13 @@ it('lets two steps in one group close at the same moment and opens the next grou
 it('gives a shared queue exactly one winner and refuses the loser', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
 
-        $first = User::factory()->create();
-        $second = User::factory()->create();
+        $first = User::factory()->holdingTheRole('exit_team')->create();
+        $second = User::factory()->holdingTheRole('exit_team')->create();
 
         engine()->claim($case->fresh(), 2, $first);
 
@@ -221,13 +221,13 @@ it('gives a shared queue exactly one winner and refuses the loser', function () 
 it('refuses the loser of a genuinely simultaneous pick-up in words rather than a database error', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
 
-        $anjali = User::factory()->named('Anjali Rao')->create();
-        $deepak = User::factory()->named('Deepak Iyer')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Rao')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Iyer')->create();
 
         // Both read the queue and both see IT clearance free. Anjali's row lands between
         // Deepak's read and his write, which is the one order the test above cannot
@@ -262,8 +262,8 @@ it('refuses the loser of a genuinely simultaneous pick-up in words rather than a
 it('says nothing in the history when somebody picks up a step that is already theirs', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
-        $deepak = User::factory()->named('Deepak Iyer')->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Iyer')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -284,7 +284,7 @@ it('says nothing in the history when somebody picks up a step that is already th
 it('refuses a rejection on a step that only offers approve and hold', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -297,7 +297,7 @@ it('refuses a rejection on a step that only offers approve and hold', function (
 it('will not record a hold without a reason', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -310,7 +310,7 @@ it('will not record a hold without a reason', function () {
 it('keeps a held step open and keeps the case open behind it', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -325,8 +325,8 @@ it('keeps a held step open and keeps the case open behind it', function () {
 it('records a hold turned into a disputed settlement line as exactly that, and lets the case move on', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
-        $finance = User::factory()->named('Finance Officer')->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $finance = User::factory()->holdingTheRole('exit_team')->named('Finance Officer')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -347,8 +347,8 @@ it('records a hold turned into a disputed settlement line as exactly that, and l
 it('records an override by HR against both HR and the department that was holding', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->named('Anjali Rao')->create();
-        $it = User::factory()->named('Deepak Iyer')->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->named('Anjali Rao')->create();
+        $it = User::factory()->holdingTheRole('exit_team')->named('Deepak Iyer')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -372,8 +372,8 @@ it('records an override by HR against both HR and the department that was holdin
 it('keeps the reason a hold ended out of the answers the case branches on', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->named('Anjali Rao')->create();
-        $it = User::factory()->named('Deepak Iyer')->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->named('Anjali Rao')->create();
+        $it = User::factory()->holdingTheRole('exit_team')->named('Deepak Iyer')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -396,7 +396,7 @@ it('keeps the reason a hold ended out of the answers the case branches on', func
 it('refuses both hold endings on a step that was never held', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -412,7 +412,7 @@ it('refuses both hold endings on a step that was never held', function () {
 it('will not let either hold ending be chosen from an ordinary step form', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         expect(fn () => engine()->decide($case, 1, 'closed_disputed', $hr))
@@ -426,8 +426,8 @@ it('will not let either hold ending be chosen from an ordinary step form', funct
 it('treats an approval on a held step as releasing the hold', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
-        $it = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $it = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -443,9 +443,9 @@ it('treats an approval on a held step as releasing the hold', function () {
 it('will not let a colleague act on a step somebody else is holding', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->named('Anjali Rao')->create();
-        $deepak = User::factory()->named('Deepak Iyer')->create();
-        $colleague = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->named('Anjali Rao')->create();
+        $deepak = User::factory()->holdingTheRole('exit_team')->named('Deepak Iyer')->create();
+        $colleague = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -467,7 +467,7 @@ it('will not let a colleague act on a step somebody else is holding', function (
 it('ends the case when a step is rejected', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'rejected', $hr, reason: 'Resignation not accepted.');
@@ -485,18 +485,18 @@ it('reopens the one step a send-back names and leaves every sibling clearance cl
         // Seven parallel clearances, the shape that made the old rule expensive: Finance
         // is the last of them and sends the case back two groups.
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
                 ->offering('approved', 'rejected', 'sent_back')->create();
 
             foreach (['IT', 'Admin', 'Payroll', 'Legal', 'Facilities', 'Security', 'Finance'] as $index => $department) {
-                ProcessStep::factory()->of($exit)->at($index + 2, 2)->named("{$department} clearance")
+                ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at($index + 2, 2)->named("{$department} clearance")
                     ->offering('approved', 'held', 'sent_back')->create();
             }
 
-            ProcessStep::factory()->of($exit)->at(9, 3)->named('HR verification')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(9, 3)->named('HR verification')->offering('approved')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -529,13 +529,13 @@ it('reopens the one step a send-back names and leaves every sibling clearance cl
 it('brings the step that sent the case back round again once the redo is done', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
                 ->offering('approved', 'sent_back')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -559,14 +559,14 @@ it('brings the step that sent the case back round again once the redo is done', 
 it('re-does a step that had already been claimed', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
                 ->offering('approved', 'sent_back')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
 
-        $hr = User::factory()->create();
-        $manager = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $manager = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->claim($case, 1, $manager);
@@ -585,16 +585,16 @@ it('makes a step the new answer needs appear on its own after a redo', function 
         declareDirectorThresholdForRunning();
 
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
                 ->offering('approved', 'sent_back')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Director approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen([['source' => 'payload', 'field' => 'recovery', 'operator' => '>', 'value' => 100000]])
                 ->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(3, 3)->named('Finance clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(3, 3)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr, payload: ['recovery' => 5000]);
@@ -612,13 +612,13 @@ it('makes a step the new answer needs appear on its own after a redo', function 
 it('will not send the case sideways to a step running at the same time', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')
                 ->offering('approved', 'sent_back')->create();
-            ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(3, 2)->named('Finance clearance')->offering('approved')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -637,17 +637,17 @@ it('will not send the case back to a step this case never needed', function () {
         $gurgaon = Office::factory()->named('Gurgaon')->create();
 
         $exit = liveProcess(function (ProcessTemplate $exit) use ($gurgaon) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Gurgaon facilities')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Gurgaon facilities')
                 ->happensWhen([['source' => 'subject', 'field' => 'office_id', 'operator' => '=', 'value' => $gurgaon->getKey()]])
                 ->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
 
-        $rakesh = User::factory()->named('Rakesh Menon')->create();
+        $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
         EmploymentRecord::factory()->forPerson($rakesh)->basedAt($shimla)->create();
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, $rakesh, $hr);
 
         // Rakesh works in Shimla, so the Gurgaon step never ran on this case. Sending it
@@ -667,15 +667,15 @@ it('will not send the case back to a step this case never needed', function () {
 it('closes an exit at once when every step on it is skipped', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Handover of the leaver\'s team')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Handover of the leaver\'s team')
                 ->happensWhen([['source' => 'subject', 'field' => 'manages_anyone', 'operator' => '=', 'value' => true]])
                 ->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Return the laptop')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Return the laptop')
                 ->happensWhen([['source' => 'subject', 'field' => 'equipment_issued', 'operator' => '=', 'value' => true]])
                 ->offering('approved')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
 
         // Rakesh manages nobody and holds nothing, so this exit is genuinely finished the
         // moment it opens. Left running it would sit in the queue for ever, breach its
@@ -693,10 +693,10 @@ it('closes an exit at once when every step on it is skipped', function () {
 it('will not record anything on a closed case', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Close')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Close')->offering('approved')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($case, 1, 'approved', $hr);
@@ -714,8 +714,8 @@ it('will not record anything on a closed case', function () {
 it('cancels a withdrawn resignation, keeps what was done, and can never close it afterwards', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
-        $manager = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $manager = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->claim($case, 1, $manager);
@@ -736,8 +736,8 @@ it('cancels a withdrawn resignation, keeps what was done, and can never close it
 it('will not record an approval on a case cancelled a moment earlier', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->named('Anjali Rao')->create();
-        $manager = User::factory()->named('Priya Nair')->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->named('Anjali Rao')->create();
+        $manager = User::factory()->holdingTheRole('exit_team')->named('Priya Nair')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         // Priya's screen was drawn while the case was still running. Rakesh withdraws his
@@ -757,7 +757,7 @@ it('will not record an approval on a case cancelled a moment earlier', function 
 it('will not cancel with a reason too long for the record to keep', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         expect(fn () => engine()->cancel($case, $hr, str_repeat('a', 256)))
@@ -770,7 +770,7 @@ it('will not cancel with a reason too long for the record to keep', function () 
 it('keeps a cancellation reason typed with stray spaces around it', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         engine()->cancel($case, $hr, "  Rakesh withdrew his resignation.\n");
@@ -781,9 +781,9 @@ it('keeps a cancellation reason typed with stray spaces around it', function () 
 
 it('will not cancel without a reason', function () {
     TenantContext::run($this->meridian, function () {
-        $case = engine()->open(meridiansExit(), rakesh(), User::factory()->create());
+        $case = engine()->open(meridiansExit(), rakesh(), User::factory()->holdingTheRole('exit_team')->create());
 
-        expect(fn () => engine()->cancel($case, User::factory()->create(), '  '))
+        expect(fn () => engine()->cancel($case, User::factory()->holdingTheRole('exit_team')->create(), '  '))
             ->toThrow(ProcessRefused::class, 'Cancelling a case has to say why.');
     });
 });
@@ -795,7 +795,7 @@ it('will not cancel without a reason', function () {
 it('refuses to open an exit for somebody with no current job row', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $stranger = User::factory()->create();
+        $stranger = User::factory()->holdingTheRole('exit_team')->create();
 
         expect(fn () => engine()->open($exit, $stranger))
             ->toThrow(ProcessRefused::class, 'has no current job row');
@@ -808,7 +808,7 @@ it('refuses to open an exit for somebody with no current job row', function () {
 it('opens a hiring request about nobody with both subject columns empty', function () {
     TenantContext::run($this->meridian, function () {
         $hiring = liveProcess(function (ProcessTemplate $template) {
-            ProcessStep::factory()->of($template)->at(1, 1)->named('Director approval')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($template)->at(1, 1)->named('Director approval')->create();
         }, about: 'none');
 
         $case = engine()->open($hiring);
@@ -824,7 +824,7 @@ it('opens a hiring request about nobody with both subject columns empty', functi
 it('will not open a case on a draft or a retired version', function () {
     TenantContext::run($this->meridian, function () {
         $draft = ProcessTemplate::factory()->named('exit', 'Exit')->create();
-        ProcessStep::factory()->of($draft)->at(1, 1)->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($draft)->at(1, 1)->create();
 
         expect(fn () => engine()->open($draft, rakesh()))
             ->toThrow(ProcessRefused::class, 'a case can only be opened on a live process');
@@ -858,18 +858,18 @@ it('skips a step whose condition about the person is not met, with no form colle
         $gurgaon = Office::factory()->named('Gurgaon')->create();
 
         $exit = liveProcess(function (ProcessTemplate $exit) use ($gurgaon) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Gurgaon facilities clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Gurgaon facilities clearance')
                 ->happensWhen([['source' => 'subject', 'field' => 'office_id', 'operator' => '=', 'value' => $gurgaon->getKey()]])
                 ->offering('approved')->create();
         });
 
-        $rakesh = User::factory()->named('Rakesh Menon')->create();
+        $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
         EmploymentRecord::factory()->forPerson($rakesh)->basedAt($shimla)->create();
 
         $case = engine()->open($exit, $rakesh);
 
-        engine()->decide($case, 1, 'approved', User::factory()->create());
+        engine()->decide($case, 1, 'approved', User::factory()->holdingTheRole('exit_team')->create());
 
         // Shimla, so the Gurgaon step is not wanted and the case is simply finished.
         expect($case->fresh()->state)->toBe(ProcessCase::Closed);
@@ -879,24 +879,24 @@ it('skips a step whose condition about the person is not met, with no form colle
 it('keeps the handover step the case opened with, even after the exit moves the reports away', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Handover of the leaver\'s team')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Handover of the leaver\'s team')
                 ->happensWhen([['source' => 'subject', 'field' => 'manages_anyone', 'operator' => '=', 'value' => true]])
                 ->offering('approved')->create();
         });
 
         $rakesh = rakesh();
-        $chandni = User::factory()->named('Chandni Verma')->create();
+        $chandni = User::factory()->holdingTheRole('exit_team')->named('Chandni Verma')->create();
 
         // Three people report to Rakesh when he resigns.
         foreach (range(1, 3) as $ignored) {
-            $report = User::factory()->create();
+            $report = User::factory()->holdingTheRole('exit_team')->create();
             EmploymentRecord::factory()->forPerson($report)->reportingTo($rakesh)->create();
         }
 
         $case = engine()->open($exit, $rakesh);
 
-        engine()->decide($case, 1, 'approved', User::factory()->create());
+        engine()->decide($case, 1, 'approved', User::factory()->holdingTheRole('exit_team')->create());
 
         expect(whoseTurn($case->fresh()))->toBe(['Handover of the leaver\'s team']);
 
@@ -913,8 +913,8 @@ it('keeps the handover step the case opened with, even after the exit moves the 
 it('keeps the equipment clearance after IT marks the laptop returned', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')
                 ->happensWhen([['source' => 'subject', 'field' => 'equipment_issued', 'operator' => '=', 'value' => true]])
                 ->offering('approved')->create();
         });
@@ -930,7 +930,7 @@ it('keeps the equipment clearance after IT marks the laptop returned', function 
 
         $case = engine()->open($exit, $rakesh);
 
-        engine()->decide($case, 1, 'approved', User::factory()->create());
+        engine()->decide($case, 1, 'approved', User::factory()->holdingTheRole('exit_team')->create());
 
         expect(whoseTurn($case->fresh()))->toBe(['IT clearance']);
 
@@ -945,8 +945,8 @@ it('opens a step when only its second group of conditions holds', function () {
         $senior = Designation::factory()->create(['name' => 'Vice President']);
 
         $exit = liveProcess(function (ProcessTemplate $exit) use ($senior) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Director approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen(
                     [['source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>', 'value' => 1500000]],
                     [['source' => 'subject', 'field' => 'designation_id', 'operator' => '=', 'value' => $senior->getKey()]],
@@ -954,13 +954,13 @@ it('opens a step when only its second group of conditions holds', function () {
                 ->offering('approved')->create();
         });
 
-        $rakesh = User::factory()->named('Rakesh Menon')->create();
+        $rakesh = User::factory()->holdingTheRole('exit_team')->named('Rakesh Menon')->create();
         EmploymentRecord::factory()->forPerson($rakesh)->designated($senior)->create();
 
         $case = engine()->open($exit, $rakesh);
 
         // The pay figure is nowhere near the threshold; the designation carries it.
-        engine()->decide($case, 1, 'approved', User::factory()->create(), payload: ['annual_ctc' => 600000]);
+        engine()->decide($case, 1, 'approved', User::factory()->holdingTheRole('exit_team')->create(), payload: ['annual_ctc' => 600000]);
 
         expect(whoseTurn($case->fresh()))->toBe(['Director approval']);
     });
@@ -971,8 +971,8 @@ it('leaves a running case alone when the client raises a threshold, and follows 
         declareDirectorThresholdForRunning();
 
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
-            ProcessStep::factory()->of($exit)->at(2, 2)->named('Director approval')
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen([[
                     'source' => 'payload', 'field' => 'annual_ctc',
                     'operator' => '>', 'setting' => 'hiring_director_threshold',
@@ -980,7 +980,7 @@ it('leaves a running case alone when the client raises a threshold, and follows 
                 ->offering('approved')->create();
         });
 
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $running = engine()->open($exit, rakesh(), $hr);
 
         engine()->decide($running, 1, 'approved', $hr, payload: ['annual_ctc' => 2000000]);
@@ -1016,7 +1016,7 @@ it('refuses a question about the person that this system cannot answer about any
     TenantContext::run($this->meridian, function () {
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
 
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('Director approval')
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Director approval')
             ->happensWhen([['source' => 'subject', 'field' => 'grade', 'operator' => '=', 'value' => 'M4']])
             ->create();
 
@@ -1030,7 +1030,7 @@ it('refuses a question about the person that this system cannot answer about any
 it('takes the case row before it reads what is still outstanding', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $case = engine()->open($exit, rakesh(), $hr);
 
         $fresh = $case->fresh();
@@ -1062,7 +1062,7 @@ it('takes the case row before it reads what is still outstanding', function () {
 it('answers whose turn it is across five hundred open cases in a fixed number of queries and under 300 milliseconds', function () {
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
-        $hr = User::factory()->create();
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
         $rakesh = rakesh();
         $record = EmploymentRecord::query()->where('user_id', $rakesh->getKey())->first();
 
