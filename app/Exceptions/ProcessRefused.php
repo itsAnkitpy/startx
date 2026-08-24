@@ -34,6 +34,39 @@ class ProcessRefused extends RuntimeException
         );
     }
 
+    /*
+    | Reading a process out of a flat file
+    */
+
+    /**
+     * The file is not a process, with every bad row named at once and nothing written.
+     *
+     * Nothing at all rather than the good rows, which is the same sentence as
+     * {@see cannotPublish} arriving one step earlier. A list of customers missing one
+     * customer is a shorter list; a process missing one step is an exit that reaches the
+     * end with a department never having been asked, and nothing about it looks wrong.
+     * The reasoning is recorded in full in module 02's plan.
+     *
+     * @param  list<string>  $problems
+     */
+    public static function cannotImport(string $path, array $problems): self
+    {
+        $listed = implode("\n  - ", $problems);
+
+        return new self(
+            "Nothing was imported from [{$path}]:\n  - {$listed}"
+        );
+    }
+
+    /**
+     * One row that cannot be turned into a step, in the words of the person who typed
+     * it. Always caught and reported with its line number beside it, never on its own.
+     */
+    public static function thatRowIsWrong(string $why): self
+    {
+        return new self($why);
+    }
+
     /**
      * Publishing is what a draft is for. A version that is already live, or that has
      * been retired, has cases reading it and cannot be handed round the cycle again.
