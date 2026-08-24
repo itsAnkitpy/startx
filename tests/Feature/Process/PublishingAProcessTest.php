@@ -324,6 +324,36 @@ it('refuses a process with no steps', function () {
     });
 })->throws(ProcessRefused::class, 'has no steps');
 
+it('refuses an exit that would ask HR to close it before the manager has seen it', function () {
+    // Anjali writes the manager on the first row and HR on the second, and types the two
+    // group numbers the other way round. The engine runs the groups in order, so HR would
+    // be asked to close the exit first and the manager would be asked to approve it
+    // afterwards — with nothing on any screen saying anything had gone wrong.
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 2)->named('Manager approval')->create();
+        ProcessStep::factory()->of($exit)->at(2, 1)->named('HR close')->create();
+
+        $exit->publish();
+    });
+})->throws(
+    ProcessRefused::class,
+    'Step 2 "HR close" is in group 1, so it runs before Step 1 "Manager approval" in group 2'
+);
+
+it('lets steps written side by side share one group', function () {
+    // The ordinary parallel case, and the one the check above must not catch: IT and
+    // Finance clear at the same time, so the second one repeats the group above it.
+    TenantContext::run($this->meridian, function () {
+        $exit = meridiansExitDraft();
+
+        $exit->publish();
+
+        expect($exit->fresh()->status)->toBe(ProcessTemplate::Published);
+    });
+});
+
 it('refuses a condition about the person on a process that is about nobody', function () {
     // A hiring request is about a vacant position. At run time the subject snapshot is
     // empty, so the condition is false, so the step it guards silently never happens.

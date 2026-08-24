@@ -7,11 +7,13 @@ use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\EmployeeAsset;
 use App\Models\EmploymentRecord;
+use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\User;
 use App\Settings\Settings;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -35,6 +37,32 @@ final class CaseEngine
      */
     private const LongestReason = 255;
 
+    /**
+     * Section 17(2) of the Code on Wages, 2019: everything owed to somebody who leaves is
+     * payable "within two working days" of their leaving. Working days, so it is counted
+     * against the calendar of the office they worked in and not by adding forty-eight
+     * hours.
+     */
+    private const WorkingDaysToSettle = 2;
+
+    /**
+     * Section 7(3) of the Payment of Gratuity Act, 1972: gratuity is payable "within
+     * thirty days from the date it becomes payable". Thirty ordinary days, not thirty
+     * working days, so the office calendar must not touch this one.
+     */
+    private const CalendarDaysToPayGratuity = 30;
+
+    /**
+     * Gratuity is owed on leaving after five years of continuous service. The Act also
+     * waives the five years where the person left by death or disablement, and that is
+     * deliberately not here.
+     *
+     * ponytail: nothing in the product records why somebody left — `employment_status` is
+     * a free string with no agreed words in it yet. Add the waiver when module 07 records
+     * the reason for an exit, which is the module that would set those words.
+     */
+    private const YearsOfServiceForGratuity = 5;
+
     private AvailableSteps $reader;
 
     public function __construct()
@@ -52,9 +80,10 @@ final class CaseEngine
      * handover step his exit was opened with. Only the questions this process actually
      * asks are answered, so a process with no conditions freezes nothing.
      *
-     * The two deadlines are deliberately not worked out here; they arrive with the clocks
-     * and the chasing. `statutory_from` is accepted and stored because it is the date they
-     * both count from.
+     * Both legal deadlines are worked out here and nowhere else. `statutory_from` is the
+     * one date they count from — the leaver's last working day for an exit — and the only
+     * thing allowed to move them afterwards is a recorded amendment to that date. Neither
+     * is ever recomputed because a calendar changed underneath a running case.
      */
     public function open(
         ProcessTemplate $template,
@@ -81,7 +110,21 @@ final class CaseEngine
 
         $conditions = $this->conditionsIn($template);
 
-        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions): ProcessCase {
+        $office = null;
+        $statutoryDueAt = null;
+        $gratuityDueAt = null;
+
+        if ($statutoryFrom !== null) {
+            $office = $this->calendarTheClocksCountAgainst($record, $template);
+
+            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom(
+                CarbonImmutable::parse($statutoryFrom)->startOfDay(),
+                $office,
+                $record,
+            );
+        }
+
+        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
             $case = ProcessCase::create([
                 'template_id' => $template->getKey(),
                 'subject_user_id' => $subject?->getKey(),
@@ -89,14 +132,28 @@ final class CaseEngine
                 'initiated_by' => $by?->getKey(),
                 'opened_at' => now(),
                 'statutory_from' => $statutoryFrom,
+                'statutory_due_at' => $statutoryDueAt,
+                'gratuity_due_at' => $gratuityDueAt,
                 'settings_snapshot' => $this->settingsAsked($conditions),
                 'subject_facts_snapshot' => $this->subjectFactsAsked($conditions, $subject, $record),
             ]);
 
-            $this->record($case, 'case_opened', $by, [
+            $opened = [
                 'process' => $template->name,
                 'version' => $template->version,
-            ]);
+            ];
+
+            // Which calendar a legal date was counted against, and whether that calendar
+            // had any holidays in it at all. The dates themselves are on the case; these
+            // two answer *how* they were arrived at, which is what somebody reading the
+            // case a year later — or a screen warning that nobody filled the holiday list
+            // in — has to be able to see. Holidays added tomorrow do not change either.
+            if ($office !== null) {
+                $opened['deadlines_counted_against'] = $office->name;
+                $opened['counted_from_an_empty_calendar'] = $office->hasNoHolidaysRecorded();
+            }
+
+            $this->record($case, 'case_opened', $by, $opened);
 
             // A process whose every step this case skips has nothing for anybody to do,
             // and left open it would sit in the queue for ever, breach its statutory
@@ -259,6 +316,87 @@ final class CaseEngine
             $this->closeIfNothingIsOutstanding($case, $by);
 
             return $attempt;
+        });
+    }
+
+    /**
+     * Move the date every legal clock on this case counts from, and move both deadlines
+     * with it.
+     *
+     * **This is the only route by which a case's legal deadline ever changes.** Rakesh's
+     * notice is extended by a week, so his last working day moves from Friday 14 August
+     * to Friday 21 August, and everything the statute counts from that date moves behind
+     * it: the two working days to settle what he is owed, and the thirty to pay his
+     * gratuity. A client adding a festival holiday to the Shimla calendar moves neither,
+     * which is the whole reason both were worked out once and frozen — a legal date that
+     * shifts under a running case is worse than one that is stale and visible.
+     *
+     * **The job row the case is pinned to is not touched, and that is the point.** The
+     * case reads Rakesh's department, designation and manager through that row, and
+     * module 01 records a job change by writing a new row rather than editing the old
+     * one — so amending the date that way would silently re-point the case and change
+     * what its trail says he was. The date lives on the case for exactly this reason.
+     *
+     * Whether gratuity is owed at all is asked again, because it is a question about the
+     * same date: an exit brought forward past somebody's fifth anniversary takes the
+     * gratuity deadline away, and one pushed past it gives them one.
+     *
+     * The calendar is read as it stands now rather than as it stood at open. Amending is
+     * a deliberate act with a reason on it, so it is also the one moment a genuinely
+     * wrong holiday list gets to be right.
+     */
+    public function amendTheDateTheClocksCountFrom(
+        ProcessCase $case,
+        string $statutoryFrom,
+        User $by,
+        string $reason,
+    ): void {
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw ProcessRefused::needsAReason('Moving the date a case counts its deadlines from');
+        }
+
+        DB::transaction(function () use ($case, $statutoryFrom, $by, $reason): void {
+            $this->holdTheCaseStill($case);
+
+            if ($case->state !== ProcessCase::Open) {
+                throw ProcessRefused::thisCaseHasAlreadyEnded($case->state);
+            }
+
+            $from = CarbonImmutable::parse($statutoryFrom)->startOfDay();
+
+            // The same date again moves nothing, so it says nothing — the same choice
+            // picking up a step that is already yours makes. A line in the one record
+            // this product asks a tribunal to read should mean something happened.
+            if ($case->statutory_from?->isSameDay($from)) {
+                return;
+            }
+
+            $record = $case->subjectEmploymentRecord;
+            $office = $this->calendarTheClocksCountAgainst($record, $case->template);
+
+            $before = [
+                'counted_from' => $case->statutory_from?->toDateString(),
+                'statutory_due_at' => $case->statutory_due_at?->toDateString(),
+                'gratuity_due_at' => $case->gratuity_due_at?->toDateString(),
+            ];
+
+            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom($from, $office, $record);
+
+            $case->statutory_from = $from;
+            $case->statutory_due_at = $statutoryDueAt;
+            $case->gratuity_due_at = $gratuityDueAt;
+            $case->save();
+
+            $this->record($case, 'case_amended', $by, [
+                'counted_from' => ['was' => $before['counted_from'], 'now' => $from->toDateString()],
+                'statutory_due_at' => ['was' => $before['statutory_due_at'], 'now' => $statutoryDueAt->toDateString()],
+                'gratuity_due_at' => ['was' => $before['gratuity_due_at'], 'now' => $gratuityDueAt?->toDateString()],
+                'reason' => $reason,
+                'counted_against' => $office->name,
+                'open_steps' => $this->stepsWhoseDeadlineJustMoved($case),
+            ]);
         });
     }
 
@@ -573,6 +711,115 @@ final class CaseEngine
                 ->whereNull('returned_at')
                 ->exists(),
         };
+    }
+
+    /**
+     * The one calendar every clock on this case counts against: the office the person
+     * worked in, read once here and never asked again.
+     *
+     * The subject's office and not the office of whoever ends up holding a step. A step
+     * counted against its holder's calendar would be due one date while nobody had
+     * claimed it and another the moment somebody did — Deepak in Gurgaon losing a day by
+     * picking up Rakesh's Shimla clearance over a Shimla-only holiday, and gaining one
+     * when the holiday is Gurgaon's. That is a deadline moving under a running case.
+     *
+     * Loaded with its holidays because {@see Office::closedDates()} reads through the
+     * relation rather than querying, so an office loaded without them costs a query for
+     * every date asked about.
+     */
+    private function calendarTheClocksCountAgainst(?EmploymentRecord $record, ProcessTemplate $template): Office
+    {
+        if ($record === null) {
+            throw ProcessRefused::thisProcessHasNoLegalClock($template->name, $template->subject_kind);
+        }
+
+        $record->loadMissing('office.holidays');
+
+        return $record->office
+            ?? throw ProcessRefused::theirJobRowNamesNoOffice($record->user_id, $template->name);
+    }
+
+    /**
+     * Both legal deadlines, worked out from the one date they count from.
+     *
+     * One method rather than a copy in each place, because opening a case and amending
+     * its date are the same sum and must never drift apart. The amendment exists so that
+     * the date on somebody's screen is the one the statute gives; a second copy of the
+     * arithmetic is exactly how that would quietly stop being true.
+     *
+     * @return array{CarbonImmutable, ?CarbonImmutable} the settlement deadline, and the
+     *                                                  gratuity one where it is owed
+     */
+    private function deadlinesCountedFrom(CarbonImmutable $from, Office $office, EmploymentRecord $record): array
+    {
+        return [
+            $office->addWorkingDays($from, self::WorkingDaysToSettle),
+            $this->gratuityDeadline($from, $record),
+        ];
+    }
+
+    /**
+     * Thirty ordinary days from the same date, where gratuity is owed at all.
+     *
+     * Null where it is not owed, and null is the answer the settlement statement reads to
+     * decide whether to show a gratuity line, so there is nothing else to store. The
+     * office calendar is deliberately absent: thirty days here means thirty days, so a
+     * deadline landing on a Sunday the office also closes for stays on that Sunday.
+     *
+     * Continuous service is measured to the date the person is leaving, from the joining
+     * date module 01 carries forward onto every one of their job rows — so a promotion or
+     * a transfer along the way does not restart it.
+     */
+    private function gratuityDeadline(CarbonImmutable $from, EmploymentRecord $record): ?CarbonImmutable
+    {
+        $joined = $record->joining_date;
+
+        if ($joined === null) {
+            return null;
+        }
+
+        $owed = CarbonImmutable::parse($joined)
+            ->startOfDay()
+            ->addYears(self::YearsOfServiceForGratuity)
+            ->lessThanOrEqualTo($from);
+
+        return $owed ? $from->addDays(self::CalendarDaysToPayGratuity) : null;
+    }
+
+    /**
+     * Every step whose turn it is at the moment the date moved, with whoever is holding
+     * it.
+     *
+     * These are the people the amendment has to reach. Their own step target has not
+     * changed, but the legal deadline running underneath the whole case has, and a
+     * clearance holder who is not told is one planning against a date that is gone.
+     *
+     * Written into the record rather than sent from here, because module 06 owns every
+     * send and its log is the only thing that stops one going out twice. Frozen at this
+     * moment rather than worked out again when that pass runs: somebody who finishes a
+     * minute later was still holding an open step when the date moved, and the record of
+     * who was affected should not depend on how quickly the pass came round.
+     *
+     * A step nobody has claimed names nobody, exactly as an escalation does. That is not
+     * nobody to tell — the step's own rule says which group the work was meant for, and
+     * module 03 is what turns that into people.
+     *
+     * @return list<array{sequence: int, step: string, held_by: int|null}>
+     */
+    private function stepsWhoseDeadlineJustMoved(ProcessCase $case): array
+    {
+        $case->unsetRelation('liveSteps');
+
+        return $this->reader->for($case)
+            ->map(fn (AvailableStep $available) => [
+                'sequence' => (int) $available->step->sequence,
+                'step' => $available->step->name,
+                'held_by' => $available->attempt?->assignee_id === null
+                    ? null
+                    : (int) $available->attempt->assignee_id,
+            ])
+            ->values()
+            ->all();
     }
 
     /** The job row that is true for somebody today — the one with no end date. */

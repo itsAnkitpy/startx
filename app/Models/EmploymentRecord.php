@@ -85,6 +85,7 @@ class EmploymentRecord extends Model
     {
         static::saving(function (self $record): void {
             $record->refuseReportingLoop();
+            $record->refuseARestartedJoiningDate();
             $record->freezeReferenceLabels();
         });
 
@@ -250,7 +251,7 @@ class EmploymentRecord extends Model
 
         return self::query()
             ->where('user_id', $this->user_id)
-            ->whereKeyNot($this->getKey())
+            ->when($this->exists, fn (Builder $query) => $query->whereKeyNot($this->getKey()))
             ->where('effective_to', $dayBefore)
             ->orderByDesc('effective_from')
             ->first();
@@ -299,6 +300,44 @@ class EmploymentRecord extends Model
             $this->recorded_office_country = $office?->country;
             $this->recorded_office_state_code = $office?->state_code;
         }
+    }
+
+    /**
+     * Refuse a new job row that restarts somebody's joining date while they are still
+     * employed.
+     *
+     * The plan says the date is carried on every row on purpose and that only a rehire
+     * begins a new one. Nothing enforced it, and the cost of that lands on module 02: a
+     * promotion row written with the promotion date on it says Rakesh has one year of
+     * service rather than eight, so his exit works out no gratuity deadline and his
+     * settlement shows no gratuity line. Nothing on the record says why, and the figure
+     * is a legal one.
+     *
+     * A rehire is told apart by the gap in front of it — {@see self::predecessor()}
+     * finds only the row that ends the day before this one starts, and somebody who
+     * left has no such row. So a second stint sets its own date and a promotion,
+     * transfer or change of manager carries the first one forward.
+     *
+     * Checked only when the date is being written, so an ordinary save — the end date
+     * being closed off behind a job change — costs nothing.
+     */
+    private function refuseARestartedJoiningDate(): void
+    {
+        if (! $this->isDirty('joining_date') || $this->effective_from === null) {
+            return;
+        }
+
+        $before = $this->predecessor();
+
+        if ($before === null || $before->joining_date->isSameDay($this->joining_date)) {
+            return;
+        }
+
+        throw EmployeeRecordRefused::joiningDateRestarted(
+            (int) $this->user_id,
+            $before->joining_date->toDateString(),
+            $this->joining_date->toDateString(),
+        );
     }
 
     /**

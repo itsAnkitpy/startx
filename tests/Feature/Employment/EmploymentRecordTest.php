@@ -133,6 +133,48 @@ it('reads a person as they were on a past date, not as they are now', function (
     });
 });
 
+it('carries the joining date forward through a promotion rather than letting it restart', function () {
+    // The date is how long somebody has worked here, and how long they have worked here
+    // is what says whether gratuity is owed at all. A promotion row written with the
+    // promotion date on it takes eight years off Rakesh, and the first anybody would hear
+    // of it is his settlement showing no gratuity line.
+    TenantContext::run($this->meridian, function () {
+        [$rakesh, $freight] = [User::factory()->named('Rakesh Iyer')->create(), OrgUnit::factory()->create()];
+
+        EmploymentRecord::factory()
+            ->forPerson($rakesh)
+            ->in($freight)
+            ->effective('2018-04-01', '2025-03-31')
+            ->create(['joining_date' => '2018-04-01']);
+
+        EmploymentRecord::factory()
+            ->forPerson($rakesh)
+            ->in($freight)
+            ->effective('2025-04-01')
+            ->create(['joining_date' => '2025-04-01', 'change_reason' => 'promotion']);
+    });
+})->throws(EmployeeRecordRefused::class, 'joined on 2018-04-01 and has not left since');
+
+it('lets a promotion through once it carries the joining date the person really has', function () {
+    TenantContext::run($this->meridian, function () {
+        [$rakesh, $freight] = [User::factory()->named('Rakesh Iyer')->create(), OrgUnit::factory()->create()];
+
+        EmploymentRecord::factory()
+            ->forPerson($rakesh)
+            ->in($freight)
+            ->effective('2018-04-01', '2025-03-31')
+            ->create(['joining_date' => '2018-04-01']);
+
+        EmploymentRecord::factory()
+            ->forPerson($rakesh)
+            ->in($freight)
+            ->effective('2025-04-01')
+            ->create(['joining_date' => '2018-04-01', 'change_reason' => 'promotion']);
+
+        expect($rakesh->currentEmployment->joining_date->toDateString())->toBe('2018-04-01');
+    });
+});
+
 it('records a rehire as a second sequence of rows with a new joining date', function () {
     TenantContext::run($this->meridian, function () {
         [$rakesh, $freight] = [User::factory()->named('Rakesh Iyer')->create(), OrgUnit::factory()->create()];

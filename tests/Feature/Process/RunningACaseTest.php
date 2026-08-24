@@ -68,18 +68,23 @@ function meridiansExit(): ProcessTemplate
     return liveProcess(function (ProcessTemplate $exit) {
         ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
             ->offering('approved', 'rejected', 'sent_back')->create();
-        ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')->clearance()->create();
-        ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->create();
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn(24)->create();
+        ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->dueIn(8)->create();
         ProcessStep::factory()->of($exit)->at(4, 3)->named('Close')->offering('approved')->create();
     });
 }
 
-/** The leaver, with the job row that is true for him today. */
+/**
+ * The leaver, with the job row that is true for him today and the office whose calendar
+ * every clock on his exit is counted against.
+ */
 function rakesh(): User
 {
     $rakesh = User::factory()->named('Rakesh Menon')->create();
 
-    EmploymentRecord::factory()->forPerson($rakesh)->create();
+    EmploymentRecord::factory()->forPerson($rakesh)
+        ->basedAt(Office::factory()->create())
+        ->create();
 
     return $rakesh;
 }
@@ -1094,8 +1099,11 @@ it('answers whose turn it is across five hundred open cases in a fixed number of
         // 330 cases waiting on the manager, 170 waiting on two clearances each.
         expect($available)->toHaveCount(330 + (170 * 2));
 
-        // Three: the frozen versions, their steps, and the live rows. Not one per case.
-        expect($queries)->toBe(3);
+        // Six, and six however many cases there are: the frozen versions, their steps,
+        // the live rows, and the three that fetch the one calendar the clocks count
+        // against — the job rows the cases are pinned to, their offices, and those
+        // offices' holidays. Not one per case, which is the whole promise.
+        expect($queries)->toBe(6);
 
         // The wall clock is the one that must not be traded away — a fixed query count
         // with the walking done in PHP over five hundred cases is exactly how Airflow's

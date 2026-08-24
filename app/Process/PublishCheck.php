@@ -7,6 +7,7 @@ use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Settings\Settings;
+use Illuminate\Support\Collection;
 
 /**
  * Everything wrong with a process version, in plain sentences, checked at the moment
@@ -70,7 +71,51 @@ final readonly class PublishCheck
             return ['This process has no steps, so a case opened on it would have nothing for anybody to do.'];
         }
 
-        return $steps->flatMap(fn (ProcessStep $step) => $this->problemsWithStep($step))->all();
+        return array_merge(
+            $this->problemsWithTheOrderTheyRunIn($steps),
+            $steps->flatMap(fn (ProcessStep $step) => $this->problemsWithStep($step))->all(),
+        );
+    }
+
+    /**
+     * Whether the list runs in the order it is written in.
+     *
+     * Two numbers describe a step's place: its position in the list, and the group it
+     * shares with whatever runs beside it. The engine runs the groups in order, so a
+     * step further down the list carrying an earlier group number runs *before* the one
+     * above it — and this is exactly the typo a spreadsheet produces. Anjali writes the
+     * manager's approval on row 1 and HR's close on row 2, types the group numbers the
+     * other way round, and the exit goes live happily and then asks HR to close it
+     * before the manager has seen it.
+     *
+     * Invisible in the same way everything else here is: nothing errors, no screen is
+     * missing, and the only sign is an approval arriving after the thing it was meant to
+     * approve.
+     *
+     * A step keeping the group before it is the ordinary parallel case and is fine. Only
+     * going backwards is refused.
+     *
+     * @param  Collection<int, ProcessStep>  $steps
+     * @return list<string>
+     */
+    private function problemsWithTheOrderTheyRunIn(Collection $steps): array
+    {
+        $problems = [];
+        $previous = null;
+
+        // Read in the order the client wrote them, which is what the relation orders by.
+        foreach ($steps as $step) {
+            if ($previous !== null && $step->group_no < $previous->group_no) {
+                $problems[] = $this->at($step).' is in group '.$step->group_no.', so it runs before '
+                    .$this->at($previous).' in group '.$previous->group_no.', which is written above it. '
+                    .'Steps run in the order they are listed, and a step shares its group with whatever '
+                    .'runs beside it rather than going back to an earlier one.';
+            }
+
+            $previous = $step;
+        }
+
+        return $problems;
     }
 
     /**
@@ -78,7 +123,7 @@ final readonly class PublishCheck
      */
     private function problemsWithStep(ProcessStep $step): array
     {
-        $problems = [];
+        $problems = $this->problemsWithItsChasing($step);
 
         foreach ($step->open_conditions ?? [] as $set) {
             // A step carries a list of condition sets and opens when any one set is
@@ -103,6 +148,55 @@ final readonly class PublishCheck
 
             foreach ($set as $condition) {
                 array_push($problems, ...$this->problemsWithCondition($step, $condition));
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Everything wrong with when this step's holder gets chased.
+     *
+     * Both refusals here are the invisible kind this whole check exists for: a reminder
+     * that can never fire looks exactly like a reminder nobody has needed yet, and the
+     * first anybody would hear of it is a statutory breach on a step nobody was chased
+     * about.
+     *
+     * @return list<string>
+     */
+    private function problemsWithItsChasing(ProcessStep $step): array
+    {
+        $rule = $step->reminder_rule;
+
+        if ($rule === null || $rule === []) {
+            return [];
+        }
+
+        // Reminders are fractions of the step's own target, so with no target there is
+        // nothing for them to be a fraction of and not one of them would ever be sent.
+        if ($step->sla_hours === null) {
+            return [
+                $this->at($step).' is set to chase whoever holds it, but has no time limit of its own, '
+                    .'so there is nothing for a reminder to be part of the way through and none would ever be sent.',
+            ];
+        }
+
+        $fractions = $rule['nudge_at'] ?? null;
+
+        if (! is_array($fractions) || ! array_is_list($fractions) || $fractions === []) {
+            return [
+                $this->at($step).' does not say how far through its time limit whoever holds it should be chased.',
+            ];
+        }
+
+        $problems = [];
+
+        foreach ($fractions as $fraction) {
+            if (! is_numeric($fraction) || (float) $fraction <= 0 || (float) $fraction >= 1) {
+                $problems[] = $this->at($step).' chases whoever holds it ['.$this->readable($fraction)
+                    .'] of the way through its time limit, which is not part of the way through it. A nudge '
+                    .'has to land after the step opens and before its time runs out, because the chase at '
+                    .'the end already goes to the holder\'s manager.';
             }
         }
 

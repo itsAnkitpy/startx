@@ -59,6 +59,21 @@ class ProcessStepFactory extends Factory
         return $this->state(['allowed_outcomes' => ['approved', 'held']]);
     }
 
+    /** This step's own service target, in hours. Blank means it is never chased. */
+    public function dueIn(int $hours): static
+    {
+        return $this->state(['sla_hours' => $hours]);
+    }
+
+    /**
+     * Fractions of this step's own target at which whoever holds it gets a nudge,
+     * replacing the usual half and three-quarters.
+     */
+    public function nudgingAt(float ...$fractions): static
+    {
+        return $this->state(['reminder_rule' => ['nudge_at' => $fractions]]);
+    }
+
     /** What this step's actor may choose. */
     public function offering(string ...$outcomes): static
     {

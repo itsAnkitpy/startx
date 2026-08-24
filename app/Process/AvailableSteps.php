@@ -3,6 +3,8 @@
 namespace App\Process;
 
 use App\Models\CaseStep;
+use App\Models\EmploymentRecord;
+use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use Carbon\CarbonImmutable;
@@ -36,6 +38,14 @@ use Illuminate\Support\Collection;
 final class AvailableSteps
 {
     /**
+     * The default staged reminders, as fractions of a step's own target: a nudge halfway
+     * through and another three-quarters of the way through, with the escalation above
+     * the holder at the end. A step may name its own in `reminder_rule` and almost none
+     * will.
+     */
+    public const NudgeAt = [0.5, 0.75];
+
+    /**
      * @return Collection<int, AvailableStep>
      */
     public function for(ProcessCase $case): Collection
@@ -49,12 +59,22 @@ final class AvailableSteps
      */
     public function forAll(CaseCollection $cases): Collection
     {
-        // Three queries for any number of cases: the frozen versions, their steps, and
-        // the live rows. Loaded together rather than per case, which is the whole reason
-        // one person's list can be answered while they watch the page load.
-        $cases->loadMissing(['template.steps', 'liveSteps']);
+        // A fixed number of queries for any number of cases: the frozen versions, their
+        // steps, the live rows, and the one calendar each case's clocks count against.
+        // Loaded together rather than per case, which is the whole reason one person's
+        // list can be answered while they watch the page load — and the holidays are
+        // loaded with the office because {@see Office::closedDates()} reads through the
+        // relation rather than querying, so an office without them costs a query for
+        // every date asked about.
+        $cases->loadMissing([
+            'template.steps',
+            'liveSteps',
+            'subjectEmploymentRecord.office.holidays',
+        ]);
 
-        return $cases->flatMap(fn (ProcessCase $case) => $this->forOneCase($case));
+        return $this->withManagersToEscalateTo(
+            $cases->flatMap(fn (ProcessCase $case) => $this->forOneCase($case))
+        );
     }
 
     /**
@@ -81,6 +101,7 @@ final class AvailableSteps
 
         $live = $case->liveSteps->keyBy('sequence');
         $answers = $this->answersOn($live);
+        $calendar = $this->calendarOf($case);
 
         $available = [];
 
@@ -109,7 +130,10 @@ final class AvailableSteps
                 }
 
                 $groupPasses = false;
-                $available[] = new AvailableStep($case, $step, $since, $attempt);
+                $available[] = $this->withItsClock(
+                    new AvailableStep($case, $step, $since, $attempt),
+                    $calendar
+                );
             }
 
             // Everything after an unfinished group is blocked by it, including a group
@@ -122,6 +146,162 @@ final class AvailableSteps
         }
 
         return $available;
+    }
+
+    /**
+     * The one calendar every clock on this case counts against: the office the person the
+     * case is about worked in, read through the job row the case is pinned to.
+     *
+     * The subject's office and not the office of whoever holds a step. A step counted
+     * against its holder's calendar is due one date while nobody has claimed it and
+     * another the moment somebody does — Deepak in Gurgaon losing a day by picking up
+     * Rakesh's Shimla clearance over a Shimla-only holiday, and gaining one when the
+     * holiday is Gurgaon's. So a step's target is the same date whoever is holding it,
+     * and reassigning it moves nothing.
+     *
+     * Null on a case about nobody or about a candidate, neither of whom has a job row and
+     * therefore an office. Those cases get no step targets at all — see the note in module
+     * 02's plan; a hiring process wanting one is module 05's question to answer, and
+     * inventing a fallback calendar here would be answering it for them.
+     */
+    private function calendarOf(ProcessCase $case): ?Office
+    {
+        $record = $case->subjectEmploymentRecord;
+
+        return $record instanceof EmploymentRecord ? $record->office : null;
+    }
+
+    /**
+     * The same step with its own service clock worked out: when it is due, how many
+     * staged reminders have fallen due, and whether the chase is owed above the holder.
+     *
+     * A step with no target of its own, or a case with no calendar to count one against,
+     * comes back untouched — nothing is due and nothing is ever chased.
+     *
+     * **Nothing here pauses.** A held step is not a passing outcome, so it is still this
+     * case's turn and its clock is still running; so is the clock of a step waiting on a
+     * candidate who has stopped replying. Every service-desk product in evidence offers a
+     * pause and we refuse one, because a paused step still burns the case's statutory
+     * clock underneath and a step showing green on a case running red is a lie told by the
+     * dashboard the client bought this product for.
+     */
+    private function withItsClock(AvailableStep $available, ?Office $calendar): AvailableStep
+    {
+        $hours = $available->step->sla_hours;
+
+        if ($calendar === null || $hours === null) {
+            return $available;
+        }
+
+        $since = $available->availableSince;
+        $dueAt = $calendar->addWorkingHours($since, $hours);
+        $now = CarbonImmutable::now();
+
+        return new AvailableStep(
+            case: $available->case,
+            step: $available->step,
+            availableSince: $since,
+            attempt: $available->attempt,
+            dueAt: $dueAt,
+            nudgesOwed: $this->nudgesOwedBy($available->step, $calendar, $since, $hours, $now, $dueAt),
+            escalationOwed: $now->greaterThanOrEqualTo($dueAt),
+        );
+    }
+
+    /**
+     * How many staged reminders have fallen due by now.
+     *
+     * The shipped shape everywhere in evidence is a nudge at half the target and another
+     * at three-quarters, and it replaced a rule shaped as "remind every N hours" — against
+     * a two-working-day clock, a reminder that lands after the deadline is worth nothing,
+     * so the stages have to be fractions of the target rather than a fixed interval. A step
+     * may name its own fractions in `reminder_rule` and almost none will.
+     *
+     * **A fraction is a fraction of the working time allowed, not of the days between now
+     * and the deadline, and the difference is a person chased on their day off.** A step
+     * that opens at nine on Friday evening with eight hours to run is due at five on Monday
+     * morning; half the ordinary time between those two moments is Sunday lunchtime, and
+     * half the *work* is one hour into Monday. Dividing the calendar would have nudged
+     * somebody at Sunday lunchtime for a step they had lost three hours of. So each stage
+     * is worked out with the same calendar the deadline was, and compared against now.
+     *
+     * This is what is owed in total, not what is new. What has already gone out is the
+     * notification log's answer to give, and it is the only thing that stops a reminder
+     * repeating.
+     */
+    private function nudgesOwedBy(
+        ProcessStep $step,
+        Office $calendar,
+        CarbonImmutable $since,
+        int $hours,
+        CarbonImmutable $now,
+        CarbonImmutable $dueAt,
+    ): int {
+        $fractions = collect($step->reminder_rule['nudge_at'] ?? self::NudgeAt);
+
+        // Past the target, every stage before it has fallen due — publishing refuses a
+        // fraction that is not short of the whole target. Worth its own line because the
+        // scheduled pass that chases people reads mostly overdue steps.
+        if ($now->greaterThanOrEqualTo($dueAt)) {
+            return $fractions->count();
+        }
+
+        return $fractions
+            ->filter(fn (mixed $fraction) => $now->greaterThanOrEqualTo(
+                $calendar->addWorkingHours($since, $hours * (float) $fraction)
+            ))
+            ->count();
+    }
+
+    /**
+     * Fill in the manager each overdue step's chase goes above, in one query for the
+     * whole list rather than one per step.
+     *
+     * Resolved here rather than when the step was built because it is asked at the moment
+     * of sending — who is above somebody today, not who was above them when the case
+     * opened. Usually nothing owes an escalation at all, and then nothing is read.
+     *
+     * @param  Collection<int, AvailableStep>  $available
+     * @return Collection<int, AvailableStep>
+     */
+    private function withManagersToEscalateTo(Collection $available): Collection
+    {
+        $holders = $available
+            ->filter(fn (AvailableStep $step) => $step->escalationOwed)
+            ->map(fn (AvailableStep $step) => $step->attempt?->assignee_id)
+            ->filter()
+            ->unique();
+
+        if ($holders->isEmpty()) {
+            return $available;
+        }
+
+        $above = EmploymentRecord::query()
+            ->whereIn('user_id', $holders->all())
+            ->whereNull('effective_to')
+            ->whereNotNull('reports_to_id')
+            ->with('reportsTo')
+            ->get()
+            ->keyBy('user_id');
+
+        return $available->map(function (AvailableStep $step) use ($above) {
+            if (! $step->escalationOwed || $step->attempt?->assignee_id === null) {
+                return $step;
+            }
+
+            $manager = $above->get($step->attempt->assignee_id)?->reportsTo;
+
+            return $manager === null ? $step : new AvailableStep(
+                case: $step->case,
+                step: $step->step,
+                availableSince: $step->availableSince,
+                attempt: $step->attempt,
+                dueAt: $step->dueAt,
+                nudgesOwed: $step->nudgesOwed,
+                escalationOwed: true,
+                escalateTo: $manager,
+            );
+        });
     }
 
     /**

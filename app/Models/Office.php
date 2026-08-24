@@ -117,6 +117,60 @@ class Office extends Model
     }
 
     /**
+     * The moment that is a given number of this office's working hours after another
+     * moment.
+     *
+     * A step's own service target is set in hours rather than in days, because a
+     * clearance due in four hours is an ordinary thing to promise and a clearance due in
+     * one working day is not the same promise. But the calendar underneath is still whole
+     * days: a working day contributes twenty-four hours here and a closed day contributes
+     * none. So four hours from Friday at nine in the evening has three hours left when
+     * the weekend stops the clock, and finishes at one o'clock on Monday morning.
+     *
+     * Unlike {@see self::addWorkingDays()} the time of day is kept, because the whole
+     * point of an hourly target is that it lands part-way through a day. Part of an hour
+     * is accepted for the same reason: a reminder halfway through a five-hour target is
+     * two and a half working hours in.
+     *
+     * ponytail: a working day is twenty-four hours, not the hours an office is open. The
+     * approximation is the same one {@see self::isWorkingDay()} already makes and it errs
+     * towards giving the holder more time. Add opening and closing hours here and there
+     * together, the day a client says it costs them something.
+     *
+     * @throws InvalidArgumentException when no time at all is asked for
+     */
+    public function addWorkingHours(DateTimeInterface $from, int|float $hours): CarbonImmutable
+    {
+        if ($hours <= 0) {
+            throw new InvalidArgumentException(
+                "A target must be some working time away, and [{$hours}] was asked for."
+            );
+        }
+
+        $closed = $this->closedDates();
+        $at = CarbonImmutable::instance($from);
+        $remaining = (int) round($hours * 3600);
+
+        // Ends for the same reason `addWorkingDays` does: the database refuses an office
+        // with no working weekday, and a holiday list is finite.
+        while (true) {
+            $nextMidnight = $at->startOfDay()->addDay();
+
+            if ($this->isWorkingDate($at, $closed)) {
+                $secondsLeftToday = $nextMidnight->getTimestamp() - $at->getTimestamp();
+
+                if ($remaining <= $secondsLeftToday) {
+                    return $at->addSeconds($remaining);
+                }
+
+                $remaining -= $secondsLeftToday;
+            }
+
+            $at = $nextMidnight;
+        }
+    }
+
+    /**
      * Whether this office has no holidays recorded at all.
      *
      * A deadline counted against an empty calendar gets weekends off and nothing else,

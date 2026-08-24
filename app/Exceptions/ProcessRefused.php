@@ -101,6 +101,32 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * A legal deadline is counted in working days against the office the person worked
+     * in, so a process about anything other than a person has no calendar to count
+     * against. Refused rather than stored with no deadlines beside it, which would put a
+     * date on the case that nothing was ever worked out from.
+     */
+    public static function thisProcessHasNoLegalClock(string $name, string $subjectKind): self
+    {
+        return new self(
+            "[{$name}] is about {$subjectKind} rather than a person, so it has no office "
+            .'calendar and cannot carry a legal deadline.'
+        );
+    }
+
+    /**
+     * No office on the job row means no working-day calendar, and a settlement deadline
+     * counted against no calendar is a wrong legal date rather than a missing one.
+     */
+    public static function theirJobRowNamesNoOffice(int $userId, string $name): self
+    {
+        return new self(
+            "Person {$userId} has no office on their current job row, so a case on [{$name}] "
+            .'has no working-day calendar to count their legal deadline against.'
+        );
+    }
+
+    /**
      * Whose turn it is, refused in one sentence. A step in a group nothing has reached, a
      * step that has already closed, and a step that this case skipped are the same answer
      * from where the person acting is standing.

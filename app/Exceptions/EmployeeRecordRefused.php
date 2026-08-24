@@ -46,6 +46,24 @@ class EmployeeRecordRefused extends RuntimeException
         );
     }
 
+    /**
+     * A job change carries the joining date forward; only a rehire starts a new one.
+     *
+     * The date is the length of somebody's service, and the length of their service is
+     * what says whether gratuity is owed at all. A promotion row written with the
+     * promotion date on it takes eight years off Rakesh and his settlement shows no
+     * gratuity line, with nothing anywhere saying why. A rehire is the one case that
+     * genuinely starts again, and it is told apart by the gap in front of it: the person
+     * really did leave.
+     */
+    public static function joiningDateRestarted(int $userId, string $carriedForward, string $written): self
+    {
+        return new self(
+            "Person [{$userId}] joined on {$carriedForward} and has not left since, so a new job row "
+            ."for them carries that date rather than [{$written}]. Only a rehire starts a new joining date."
+        );
+    }
+
     public static function unknownStatutoryType(string $type): self
     {
         $known = implode(', ', EmployeeStatutoryId::Types);
