@@ -283,6 +283,12 @@ class MeridianSeeder extends Seeder
      * Both money questions are `money` rather than `number` on purpose: module 08 turns a
      * money question on a clearance step into a line of the settlement statement, and a
      * plain number cannot become one because nothing says whether it is rupees or laptops.
+     *
+     * Two of the five are asked only in some cases, which is what the whole hiding rule is
+     * for and is why they are on the demo. Nobody is asked how much to recover until they
+     * say the imprest card did not come back, and nobody is asked what the recovery is for
+     * until there is a figure to explain. Chandni holds this step for the company, so this
+     * is the card the behaviour can actually be seen on.
      */
     private function financeClearanceForm(): FormDefinition
     {
@@ -292,10 +298,12 @@ class MeridianSeeder extends Seeder
             ->asking('imprest_card_returned', 'Imprest card returned', FormField::Boolean)->create();
 
         FormField::factory()->on($form)->at(2)
-            ->asking('recover_from_them', 'Amount to recover from them', FormField::Money)->create();
+            ->asking('recover_from_them', 'Amount to recover from them', FormField::Money)
+            ->askedWhen('imprest_card_returned', '=', false)->create();
 
         FormField::factory()->on($form)->at(3)
             ->asking('recovery_reason', 'What the recovery is for', FormField::Select)
+            ->askedWhen('recover_from_them', 'is_set')
             ->choosing([
                 'advance' => 'Salary advance',
                 'imprest' => 'Imprest not settled',

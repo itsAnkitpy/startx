@@ -151,7 +151,7 @@ it('builds the rules for each kind of question out of the client rows', function
             ['key' => 'cleared_on', 'label' => 'Cleared on', 'type' => FormField::Date],
         ]);
 
-        $rules = (new StepForm)->rules($step);
+        $rules = (new StepForm)->rules($step, []);
 
         // A required yes/no uses `present` rather than `required`, because "no" is a real
         // answer and Laravel counts a false as nothing at all. Asking whether the mailbox
@@ -183,7 +183,7 @@ it('never lets a client row become a rule of its own', function () {
             ]],
         ]);
 
-        expect((new StepForm)->rules($step)['notes'])
+        expect((new StepForm)->rules($step, [])['notes'])
             ->toBe(['nullable', 'string', 'max:'.StepForm::DefaultTextLength]);
     });
 });
@@ -230,8 +230,11 @@ it('stores what was answered against the step that asked it', function () {
         $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
         (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
 
+        // The imprest card did not come back, which is what makes finance's other two
+        // questions asked at all — the demo form does not ask what to recover from
+        // somebody who returned the card.
         Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '1')
+            ->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '0')
             ->set("answers.{$anjalis->getKey()}.2.recover_from_them", '2500.50')
             ->set("answers.{$anjalis->getKey()}.2.recovery_reason", 'advance')
             ->call('decide', $anjalis->getKey(), 2, 'approved')
@@ -242,7 +245,7 @@ it('stores what was answered against the step that asked it', function () {
         // Postgres sorts a jsonb object's keys, so this is compared as a map and not as
         // the text it was written as.
         expect((array) $answered->payload)->toEqual([
-            'imprest_card_returned' => '1',
+            'imprest_card_returned' => '0',
             'recover_from_them' => '2500.50',
             'recovery_reason' => 'advance',
         ]);
@@ -289,8 +292,9 @@ it('shows the client own questions on the card, in their own words', function ()
         // point is that each card carries the questions of its own step.
         Livewire::actingAs($chandni)->test(MyQueue::class)
             ->assertSee('Imprest card returned')
-            ->assertSee('Amount to recover from them')
-            ->assertSee('Imprest not settled');
+            // Not asked until she says the card did not come back — the next test is the
+            // one that watches it appear.
+            ->assertDontSee('Amount to recover from them');
     });
 });
 
@@ -329,7 +333,7 @@ it('keeps a picker inside the client own rows', function () {
             ['key' => 'replacing', 'label' => 'Designation being vacated', 'type' => FormField::DesignationPicker],
         ]);
 
-        $rules = (new StepForm)->rules($step);
+        $rules = (new StepForm)->rules($step, []);
 
         // The number is another company's designation. Nothing in this rule says so —
         // the tenant wall on the table does, which is exactly why these are pickers and
@@ -465,5 +469,269 @@ it('keeps what somebody typed when the engine refuses what they pressed', functi
         // And nothing was recorded on the way to being refused.
         expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
             ->whereNotNull('acted_at')->count())->toBe(0);
+    });
+});
+
+/*
+| Step 2: a question hidden by an earlier answer on the same form.
+|
+| One rule, three places, and the whole point is that they cannot disagree: a question the
+| screen is not showing is not in the rules and is not stored. ServiceNow spent years
+| hiding a field in the browser while the server went on demanding it, which is a step
+| nobody can complete — the box is not there and the refusal says it is required.
+*/
+
+it('stops asking a question once an earlier answer makes it pointless', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean, 'required' => true],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money, 'required' => true,
+                'visible_if' => [[['field' => 'imprest_returned', 'operator' => '=', 'value' => false]]]],
+        ]);
+
+        $forms = new StepForm;
+
+        // The card came back, so there is nothing to recover and nobody is asked for a
+        // figure. Required or not is beside the point: an unasked question is not required,
+        // and demanding it would leave the clearance impossible to finish with nothing on
+        // the screen saying why.
+        expect($forms->asking($step, ['imprest_returned' => '1'])->pluck('key')->all())
+            ->toBe(['imprest_returned']);
+
+        expect(array_keys($forms->rules($step, ['imprest_returned' => '1'])))
+            ->toBe(['imprest_returned']);
+
+        // It did not come back, so the figure is asked for and is required.
+        expect($forms->asking($step, ['imprest_returned' => '0'])->pluck('key')->all())
+            ->toBe(['imprest_returned', 'recover']);
+
+        expect($forms->rules($step, ['imprest_returned' => '0'])['recover'])
+            ->toContain('required');
+
+        // Nothing answered yet, so the question that depends on an answer is not asked
+        // either. A comparison against an answer nobody has given is false, which is the
+        // same reading a step's own opening conditions get.
+        expect($forms->asking($step, [])->pluck('key')->all())->toBe(['imprest_returned']);
+    });
+});
+
+it('does not store an answer to a question it has stopped asking', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'imprest_returned', 'operator' => '=', 'value' => false]]]],
+        ]);
+
+        // Chandni types a figure, then says the card came back after all. The box she typed
+        // in is no longer on the screen, so the figure goes with it — and it goes at the
+        // engine, so it goes whichever of the three ways in the answer arrived by.
+        expect((new StepForm)->onlyWhatThisStepAsks($step, [
+            'imprest_returned' => '1',
+            'recover' => '2500',
+        ]))->toBe(['imprest_returned' => '1']);
+
+        // Storing it would not be untidiness. Every live step's answers are read together
+        // when the case works out which steps it still wants, so a figure nobody was asked
+        // for can decide whether the director's approval happens.
+        expect((new StepForm)->onlyWhatThisStepAsks($step, [
+            'imprest_returned' => '0',
+            'recover' => '2500',
+        ]))->toEqual(['imprest_returned' => '0', 'recover' => '2500']);
+    });
+});
+
+it('hides what a hidden question would have decided, all the way down', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'imprest_returned', 'operator' => '=', 'value' => false]]]],
+            ['key' => 'recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Text,
+                'visible_if' => [[['field' => 'recover', 'operator' => 'is_set']]]],
+        ]);
+
+        $forms = new StepForm;
+
+        // The middle question is not asked, so the figure that was typed into it decides
+        // nothing below it. Without that, Chandni says the card came back and is still
+        // asked to explain a recovery that is not happening.
+        expect($forms->asking($step, ['imprest_returned' => '1', 'recover' => '2500'])->pluck('key')->all())
+            ->toBe(['imprest_returned']);
+
+        expect($forms->asking($step, ['imprest_returned' => '0', 'recover' => '2500'])->pluck('key')->all())
+            ->toBe(['imprest_returned', 'recover', 'recovery_reason']);
+
+        // And the whole chain is dropped from what is stored, not only the middle of it.
+        expect($forms->onlyWhatThisStepAsks($step, [
+            'imprest_returned' => '1', 'recover' => '2500', 'recovery_reason' => 'Salary advance',
+        ]))->toBe(['imprest_returned' => '1']);
+    });
+});
+
+it('still refuses an answer to a question no version of the form asks', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean],
+        ]);
+
+        // The difference that matters. A question the form has and is not asking is dropped,
+        // because somebody genuinely typed into a box that has since gone. A question no
+        // version of the form ever had is somebody reaching past the screen.
+        expect(fn () => (new StepForm)->onlyWhatThisStepAsks($step, ['settlement_cleared' => true]))
+            ->toThrow(ProcessRefused::class, 'does not ask settlement_cleared');
+    });
+});
+
+it('asks finance what to recover only once it says the card did not come back', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $chandni = User::query()->where('work_email', 'chandni@meridian.test')->sole();
+
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // HR clears it first, so the finance clearance is Chandni's turn.
+        $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
+        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+
+        $screen = Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->assertSee('Imprest card returned')
+            ->assertDontSee('Amount to recover from them')
+            ->assertDontSee('What the recovery is for')
+            // The half a `set` in a test cannot prove: the boxes really do carry the
+            // binding that sends the answer as it is given. Without it every assertion
+            // below still passes and nothing appears or disappears in a browser, because
+            // Livewire's own default is to send nothing until a button is pressed. A
+            // Filament component that quietly dropped the attribute would look identical
+            // from here.
+            ->assertSee('wire:model.live="answers.'.$anjalis->getKey().'.2.imprest_card_returned"', escape: false)
+            ->assertSee('wire:model.live.blur="answers.'.$anjalis->getKey().'.2.pay_to_them"', escape: false);
+
+        // She says it did not come back. This is the whole thing Ankit can watch happen on
+        // the card: one answer, two more questions.
+        $screen->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '0')
+            ->assertSee('Amount to recover from them')
+            ->assertDontSee('What the recovery is for');
+
+        // A figure, and the reason for it is asked as well.
+        $screen->set("answers.{$anjalis->getKey()}.2.recover_from_them", '2500')
+            ->assertSee('What the recovery is for')
+            ->assertSee('Imprest not settled');
+
+        // And back again — she was wrong, the card is on her desk. Both questions go.
+        $screen->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '1')
+            ->assertDontSee('Amount to recover from them')
+            ->assertDontSee('What the recovery is for');
+
+        // The figure she typed is not stored against the clearance, even though it is still
+        // held on the page.
+        $screen->call('decide', $anjalis->getKey(), 2, 'approved')->assertHasNoErrors();
+
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)->sole();
+
+        expect((array) $answered->payload)->toEqual(['imprest_card_returned' => '1']);
+    });
+});
+
+/*
+| And what going live refuses, because every failure above is the silent kind.
+|
+| A question hidden by a condition that can never be true is simply not on the screen:
+| nothing errors, nobody is refused, and the finance clearance quietly stops collecting the
+| recovery figure. If a later step opens on that figure, the director's approval never
+| appears either, and the exit closes as though it had been given.
+*/
+
+/** A draft exit whose one step asks the given questions on a form that is already live. */
+function aDraftExitAsking(array $questions): ProcessTemplate
+{
+    $form = draftFormAsking($questions);
+    $form->publish();
+
+    $template = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
+
+    ProcessStep::factory()->of($template)->at(1, 1)->named('Finance clearance')
+        ->asking($form)->create();
+
+    return $template;
+}
+
+it('refuses a question hidden by an answer nobody on the form is asked for', function () {
+    TenantContext::run($this->meridian, function () {
+        // The usual way a client gets here: the question was renamed on the new version of
+        // the form and what pointed at it was not.
+        $exit = aDraftExitAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'imprest_card_back', 'operator' => '=', 'value' => false]]]],
+        ]);
+
+        expect(fn () => $exit->publish())->toThrow(
+            ProcessRefused::class,
+            'question [Amount to recover] depends on the answer to [imprest_card_back], which is not one '
+                .'of the questions asked before it on this form',
+        );
+    });
+});
+
+it('refuses a question hidden by an answer given after it, or by its own', function () {
+    TenantContext::run($this->meridian, function () {
+        // Both are the same dead question. A condition can only read an answer already
+        // given, so a question waiting on one below it — or on itself — is never asked at
+        // all, and that is also what stops two questions hiding each other for ever.
+        $exit = aDraftExitAsking([
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'imprest_returned', 'operator' => '=', 'value' => false]]]],
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean,
+                'visible_if' => [[['field' => 'imprest_returned', 'operator' => 'is_set']]]],
+        ]);
+
+        expect(fn () => $exit->publish())
+            ->toThrow(ProcessRefused::class, 'question [Amount to recover] depends on the answer to [imprest_returned]')
+            ->toThrow(ProcessRefused::class, 'It is the first question on the form, so there is no earlier answer')
+            ->toThrow(ProcessRefused::class, 'question [Imprest card returned] depends on the answer to [imprest_returned]');
+    });
+});
+
+it('refuses a question hidden by a comparison that cannot be made', function () {
+    TenantContext::run($this->meridian, function () {
+        // The same three things a step's own condition is refused for, arriving through a
+        // question: a comparison this system does not have, a threshold typed as words, and
+        // asking whether something was answered at all while also comparing it.
+        $exit = aDraftExitAsking([
+            ['key' => 'shortfall_days', 'label' => 'Notice short by', 'type' => FormField::Number],
+            ['key' => 'waiver', 'label' => 'Notice waived', 'type' => FormField::Boolean,
+                'visible_if' => [[['field' => 'shortfall_days', 'operator' => 'contains', 'value' => 7]]]],
+            ['key' => 'waiver_reason', 'label' => 'Why it was waived', 'type' => FormField::Text,
+                'visible_if' => [[['field' => 'shortfall_days', 'operator' => '>', 'value' => 'thirty']]]],
+            ['key' => 'approved_by', 'label' => 'Who approved the waiver', 'type' => FormField::Text,
+                'visible_if' => [[['field' => 'shortfall_days', 'operator' => 'is_set', 'value' => 7]]]],
+        ]);
+
+        expect(fn () => $exit->publish())
+            ->toThrow(ProcessRefused::class, 'question [Notice waived] depends on an earlier answer using [contains]')
+            ->toThrow(ProcessRefused::class, 'question [Why it was waived] compares with [>] against [thirty], which is not a number')
+            ->toThrow(ProcessRefused::class, 'question [Who approved the waiver] depends on whether an earlier question was answered at all, and gives something to compare it against as well');
+    });
+});
+
+it('refuses a question said to be hidden by nothing at all', function () {
+    TenantContext::run($this->meridian, function () {
+        // An empty group is true by definition, so the question is asked on every case and
+        // the client believes it is conditional. Same sentence a step gets for the same
+        // shape, and it reads as nonsense unless it says so plainly.
+        $exit = aDraftExitAsking([
+            ['key' => 'imprest_returned', 'label' => 'Imprest card returned', 'type' => FormField::Boolean],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[]]],
+        ]);
+
+        expect(fn () => $exit->publish())->toThrow(
+            ProcessRefused::class,
+            'question [Amount to recover] is asked only in certain cases, and one of those cases says nothing',
+        );
     });
 });

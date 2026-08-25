@@ -70,6 +70,22 @@ class FormFieldFactory extends Factory
     }
 
     /**
+     * Asked only when an earlier question on the same form was answered a certain way.
+     *
+     * One comparison, which is every case any form in this product has needed. A question
+     * hidden by two things at once is written straight onto `visible_if` as the list of
+     * sets it is.
+     */
+    public function askedWhen(string $earlierQuestion, string $operator, mixed $value = null): static
+    {
+        $condition = ['field' => $earlierQuestion, 'operator' => $operator];
+
+        return $this->state(['visible_if' => [[
+            $operator === 'is_set' ? $condition : [...$condition, 'value' => $value],
+        ]]]);
+    }
+
+    /**
      * Named limits only — `min`, `max`, `max_length`. Never a rule string; see the
      * comment on the column.
      *

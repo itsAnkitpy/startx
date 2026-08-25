@@ -35,13 +35,16 @@ final readonly class PublishCheck
     /** What a condition may ask about. `subject` facts are frozen onto the case at open. */
     private const Sources = ['payload', 'subject'];
 
-    private const Operators = ['=', '!=', '>', '>=', '<', '<=', 'in', 'not_in', 'is_set'];
+    /*
+     * The operators, the four that need a number and the two that need a list all live on
+     * {@see Comparison} with the code that runs them, so this cannot come to allow an
+     * operator the engine does not understand.
+     */
+    private const Operators = Comparison::Operators;
 
-    /** The four that only mean anything against a number. */
-    private const OrderingOperators = ['>', '>=', '<', '<='];
+    private const OrderingOperators = Comparison::Ordering;
 
-    /** The two that only mean anything against a list of values. */
-    private const ListOperators = ['in', 'not_in'];
+    private const ListOperators = Comparison::AgainstAList;
 
     /**
      * How each declared kind of client setting reads in a refusal. No entry for a whole
@@ -184,16 +187,111 @@ final readonly class PublishCheck
 
         $form = $step->form;
 
-        if ($form === null || $form->status === FormDefinition::Published) {
+        if ($form === null) {
             return [];
         }
 
-        return [$form->status === FormDefinition::Draft
-            ? $this->at($step)." asks the questions on the form [{$form->name}], which is still a draft. "
-                .'A draft can be edited, so the questions on this step could still change after somebody '
-                .'has answered them. Make the form live first.'
-            : $this->at($step)." asks the questions on the form [{$form->name}], which has been replaced "
-                .'by a newer version. Point the step at the version that is live.'];
+        $problems = match ($form->status) {
+            FormDefinition::Published => [],
+            FormDefinition::Draft => [$this->at($step)." asks the questions on the form [{$form->name}], which is still "
+                .'a draft. A draft can be edited, so the questions on this step could still change after '
+                .'somebody has answered them. Make the form live first.'],
+            default => [$this->at($step)." asks the questions on the form [{$form->name}], which has been replaced "
+                .'by a newer version. Point the step at the version that is live.'],
+        };
+
+        return array_merge($problems, $this->problemsWithWhenItAsksThem($step, $form));
+    }
+
+    /**
+     * A question that can never be asked, because of what hides it.
+     *
+     * The same invisible kind as everything else here, and the sharpest of them. A
+     * question hidden by a condition that can never be true is simply not on the screen:
+     * nothing errors, nobody is refused, and the finance clearance quietly stops
+     * collecting the recovery figure. If a later step opens on that figure, the director's
+     * approval never appears either, and the exit closes as though it had been given.
+     *
+     * Three ways a client gets there. A condition naming a question this form does not
+     * ask — the usual cause is renaming a question on the new version and forgetting what
+     * pointed at it. A condition naming a question *below* it, which cannot be answered
+     * in time to decide anything, including a question naming itself. And a condition
+     * with nothing usable on the right-hand side, checked the same way a step's is.
+     *
+     * A question may be hidden only by one above it, so the client's own order is the
+     * rule, and it is also what stops two questions hiding each other for ever.
+     *
+     * @return list<string>
+     */
+    private function problemsWithWhenItAsksThem(ProcessStep $step, FormDefinition $form): array
+    {
+        $problems = [];
+        $above = [];
+
+        foreach ($form->fields as $field) {
+            $at = $this->at($step)."'s question [{$field->label}]";
+
+            foreach ((array) ($field->visible_if ?? []) as $set) {
+                if (! is_array($set) || ! array_is_list($set) || $set === []) {
+                    $problems[] = "{$at} is asked only in certain cases, and one of those cases says "
+                        .'nothing, so it is asked on every case. Take it out or say what it depends on.';
+
+                    continue;
+                }
+
+                foreach ($set as $condition) {
+                    array_push($problems, ...$this->problemsWithWhatHidesIt($at, $condition, $above));
+                }
+            }
+
+            $above[$field->key] = $field->label;
+        }
+
+        return $problems;
+    }
+
+    /**
+     * @param  array<string, string>  $above  key => label of the questions asked before this one
+     * @return list<string>
+     */
+    private function problemsWithWhatHidesIt(string $at, mixed $condition, array $above): array
+    {
+        if (! is_array($condition)) {
+            return ["{$at} is asked only in certain cases, and one of them is not written as a condition."];
+        }
+
+        $problems = [];
+        $named = $condition['field'] ?? null;
+        $operator = $condition['operator'] ?? null;
+
+        if (! is_string($named) || ! array_key_exists($named, $above)) {
+            $problems[] = "{$at} depends on the answer to [".$this->readable($named).'], which is not one '
+                .'of the questions asked before it on this form. A question can only depend on an answer '
+                .'already given, so this one would never be asked at all. '
+                .($above === []
+                    ? 'It is the first question on the form, so there is no earlier answer to depend on.'
+                    : 'The questions before it are: '.implode(', ', $above).'.');
+        }
+
+        if (! in_array($operator, self::Operators, true)) {
+            $problems[] = "{$at} depends on an earlier answer using [".$this->readable($operator)
+                .'], which is not one of: '.implode(' ', self::Operators).'.';
+        }
+
+        // Exactly as a step's own condition is read: whether a question was answered at
+        // all is the one comparison with no other side, and every other one needs a value.
+        if ($operator === 'is_set') {
+            return array_key_exists('value', $condition)
+                ? [...$problems, "{$at} depends on whether an earlier question was answered at all, and "
+                    .'gives something to compare it against as well. It takes one or the other.']
+                : $problems;
+        }
+
+        if (! array_key_exists('value', $condition)) {
+            return [...$problems, "{$at} depends on an earlier answer with nothing to compare it against."];
+        }
+
+        return [...$problems, ...$this->problemsWithTheValueTyped($at, $operator, $condition['value'])];
     }
 
     /**

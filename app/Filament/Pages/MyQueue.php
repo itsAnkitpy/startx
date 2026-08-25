@@ -145,13 +145,29 @@ class MyQueue extends Page
     }
 
     /**
-     * What one step asks, in the order the client put the questions in.
+     * What one step is asking, in the order the client put the questions in.
+     *
+     * Read against what has been typed into this card so far, because a question can be
+     * hidden by an earlier answer on the same form — finance is not asked what it is
+     * recovering until it says the imprest card did not come back. The server decides it,
+     * once, and the same decision drops the question from the rules and from what is
+     * stored, so a question off the screen can never still be demanded.
      *
      * @return Collection<int, FormField>
      */
     public function questionsOn(AvailableStep $waiting): Collection
     {
-        return (new StepForm)->fields($waiting->step);
+        return (new StepForm)->asking($waiting->step, $this->typedInto($waiting));
+    }
+
+    /**
+     * What has been typed into one card's form, which is nothing until somebody types.
+     *
+     * @return array<string, mixed>
+     */
+    private function typedInto(AvailableStep $waiting): array
+    {
+        return $this->answers[$waiting->case->getKey()][$waiting->step->sequence] ?? [];
     }
 
     /**
@@ -204,7 +220,7 @@ class MyQueue extends Page
             // Rewritten under the property path the inputs are bound to, so a refusal
             // lands beside the box it is about instead of at the top of the page.
             $this->validate(
-                collect($forms->rules($waiting->step))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
+                collect($forms->rules($waiting->step, $this->typedInto($waiting)))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
                 [],
                 collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
             );

@@ -55,15 +55,108 @@ class StepForm
     }
 
     /**
+     * The questions this step is actually asking, given what has been answered so far.
+     *
+     * A question can be hidden by an earlier answer on the same form: finance is not
+     * asked what it is recovering until it says the imprest card did not come back. The
+     * condition is the same flat one-comparison shape a step's own opening conditions
+     * use, and it reads only the answers on this form — not the case's other steps, not
+     * the person's details, not a client setting. Those are a step's business, and a
+     * question that needed them would be a step of its own.
+     *
+     * **Hidden is decided here and nowhere else.** ServiceNow spent years hiding fields
+     * in the browser while the server went on demanding them, which is a step nobody can
+     * complete: the box is not on the screen and the refusal says it is required. So the
+     * rules below, the answers kept, and the questions the screen draws all come through
+     * this one method.
+     *
+     * Read in the client's own order, and each question can only be hidden by one above
+     * it — the rule publishing enforces. That is what makes one pass enough: by the time
+     * a question is reached, every answer its condition can name has already been decided
+     * visible or dropped, so hiding cascades on its own. Finance says the card came back,
+     * the recovery amount goes, and the reason for the recovery goes with it.
+     *
+     * @param  array<string, mixed>  $answers
+     * @return Collection<int, FormField>
+     */
+    public function asking(ProcessStep $step, array $answers): Collection
+    {
+        $given = $this->answered($answers);
+
+        // Only the answers to questions already decided visible, which is what makes a
+        // hidden question's answer unable to decide anything below it.
+        $thatCount = [];
+        $asking = [];
+
+        foreach ($this->fields($step) as $field) {
+            if (! $this->shown($field, $thatCount)) {
+                continue;
+            }
+
+            $asking[] = $field;
+
+            if (array_key_exists($field->key, $given)) {
+                $thatCount[$field->key] = $given[$field->key];
+            }
+        }
+
+        return collect($asking);
+    }
+
+    /**
+     * Whether one question is asked, given the answers above it that count.
+     *
+     * A list of sets, asked at all when any one set is fully true — the same shape and
+     * the same reading as a step's opening conditions. Nothing written means always.
+     *
+     * @param  array<string, mixed>  $thatCount
+     */
+    private function shown(FormField $field, array $thatCount): bool
+    {
+        // Cast, because this is a column a client's own editor writes and anything that is
+        // not a list of sets would otherwise be walked as one.
+        $sets = (array) ($field->visible_if ?? []);
+
+        if ($sets === []) {
+            return true;
+        }
+
+        foreach ($sets as $set) {
+            $holds = true;
+
+            foreach ((array) $set as $condition) {
+                $named = ((array) $condition)['field'] ?? null;
+
+                $holds = $holds && Comparison::holds(
+                    is_string($named) ? ($thatCount[$named] ?? null) : null,
+                    ((array) $condition)['operator'] ?? null,
+                    ((array) $condition)['value'] ?? null,
+                );
+            }
+
+            if ($holds) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * The Laravel rules for one step's answers, keyed by question.
      *
+     * Only the questions actually being asked. A required question that is hidden is not
+     * required — it is not asked — and demanding it would leave the step impossible to
+     * complete with nothing on the screen saying why.
+     *
+     * @param  array<string, mixed>  $answers
      * @return array<string, mixed>
      */
-    public function rules(ProcessStep $step): array
+    public function rules(ProcessStep $step, array $answers): array
     {
         $rules = [];
 
-        foreach ($this->fields($step) as $field) {
+        foreach ($this->asking($step, $answers) as $field) {
             $rules[$field->key] = [...$this->presence($field), ...$this->forType($field)];
 
             if ($field->type === FormField::Multiselect) {
@@ -102,7 +195,14 @@ class StepForm
      * answer arrives: the queue screen, a link sent to somebody with no account, and a
      * console command. A guard on one of them is a guard on none.
      *
-     * An empty box is dropped rather than stored: see the comment on the filter below.
+     * An empty box is dropped rather than stored: see {@see answered()}.
+     *
+     * **A question the form does not have is refused; a question it has but is not asking
+     * is dropped.** The difference is not a detail. Chandni types a recovery amount, then
+     * says the imprest card came back after all, and the box she typed in is no longer on
+     * the screen — the figure has to go, and refusing it would be a refusal she has
+     * nothing to do about. An answer to a question no version of the form ever asked is
+     * somebody reaching past the screen, and that is refused.
      *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -113,20 +213,42 @@ class StepForm
             return [];
         }
 
-        $asked = $this->fields($step)->pluck('key')->all();
-
-        $unasked = array_values(array_diff(array_keys($payload), $asked));
+        $unasked = array_values(array_diff(
+            array_keys($payload),
+            $this->fields($step)->pluck('key')->all(),
+        ));
 
         if ($unasked !== []) {
             throw ProcessRefused::thatStepDoesNotAskThat($step->name, $unasked);
         }
 
-        // A box left empty is not an answer, and filing it as one is not harmless. A
-        // later step that opens when the recovery amount was answered at all reads an
-        // empty box as an answer, so the director's approval appears on an exit where
-        // nobody entered a figure — and a threshold compared against an empty box is
-        // quietly false on every case, which is the same failure the other way round.
-        // Not answered is recorded by the answer not being there.
+        $given = $this->answered($payload);
+
+        // Hidden here as well as on the screen and in the rules, in the one pass. A
+        // question hidden on the screen and still stored is how a figure nobody was
+        // asked for ends up deciding a later step.
+        return array_intersect_key(
+            $given,
+            array_flip($this->asking($step, $given)->pluck('key')->all()),
+        );
+    }
+
+    /**
+     * What was actually answered.
+     *
+     * A box left empty is not an answer, and filing it as one is not harmless. A later
+     * step that opens when the recovery amount was answered at all reads an empty box as
+     * an answer, so the director's approval appears on an exit where nobody entered a
+     * figure — and a threshold compared against an empty box is quietly false on every
+     * case, which is the same failure the other way round. Not answered is recorded by
+     * the answer not being there, and it is what decides whether the question below it is
+     * asked.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function answered(array $payload): array
+    {
         return array_filter(
             $payload,
             fn (mixed $answer): bool => $answer !== null && $answer !== '' && $answer !== [],

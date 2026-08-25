@@ -13,6 +13,15 @@
 @php($id = "q-{$caseId}-{$sequence}-{$field->key}")
 @php($valid = ! $errors->has($path))
 
+{{--
+    Every answer reaches the server as it is given, because the server is what decides
+    which questions are asked at all: finance says the imprest card came back and the
+    question about what it is recovering goes, which cannot happen in the browser. A list
+    sends on the change, a typed box when the person leaves it — per-keystroke would be a
+    request a letter for nothing. `.live` before `.blur` is not optional in Livewire 4: on
+    its own, `.blur` holds the value in the browser and never sends it at all.
+--}}
+
 <x-filament-forms::field-wrapper
     :id="$id"
     :label="$field->label"
@@ -27,7 +36,7 @@
                  its own twenty-character box inside ours. A paragraph box is styled through
                  the wrapper instead, which is what Filament's own does. --}}
             <x-filament::input.wrapper :valid="$valid" class="fi-fo-textarea">
-                <textarea id="{{ $id }}" rows="3" wire:model="{{ $path }}"></textarea>
+                <textarea id="{{ $id }}" rows="3" wire:model.live.blur="{{ $path }}"></textarea>
             </x-filament::input.wrapper>
             @break
 
@@ -39,14 +48,14 @@
                     :id="$id"
                     :step="$field->type === \App\Models\FormField::Money ? '0.01' : 'any'"
                     :min="$field->type === \App\Models\FormField::Money ? '0' : null"
-                    wire:model="{{ $path }}"
+                    wire:model.live.blur="{{ $path }}"
                 />
             </x-filament::input.wrapper>
             @break
 
         @case (\App\Models\FormField::Date)
             <x-filament::input.wrapper :valid="$valid">
-                <x-filament::input type="date" :id="$id" wire:model="{{ $path }}" />
+                <x-filament::input type="date" :id="$id" wire:model.live="{{ $path }}" />
             </x-filament::input.wrapper>
             @break
 
@@ -56,7 +65,7 @@
                  and "was the mailbox switched off" is exactly the question where that
                  difference is the whole point. --}}
             <x-filament::input.wrapper :valid="$valid">
-                <x-filament::input.select :id="$id" wire:model="{{ $path }}">
+                <x-filament::input.select :id="$id" wire:model.live="{{ $path }}">
                     <option value="">Not answered</option>
                     <option value="1">Yes</option>
                     <option value="0">No</option>
@@ -66,7 +75,7 @@
 
         @case (\App\Models\FormField::Select)
             <x-filament::input.wrapper :valid="$valid">
-                <x-filament::input.select :id="$id" wire:model="{{ $path }}">
+                <x-filament::input.select :id="$id" wire:model.live="{{ $path }}">
                     <option value="">Not answered</option>
                     @foreach ($field->options ?? [] as $option)
                         <option value="{{ $option['value'] ?? '' }}">{{ $option['label'] ?? ($option['value'] ?? '') }}</option>
@@ -82,7 +91,7 @@
                         <x-filament::input.checkbox
                             :valid="$valid"
                             value="{{ $option['value'] ?? '' }}"
-                            wire:model="{{ $path }}"
+                            wire:model.live="{{ $path }}"
                         />
                         {{ $option['label'] ?? ($option['value'] ?? '') }}
                     </label>
@@ -97,7 +106,7 @@
                  one designation into "Sr. Manager", "Senior Manager" and "Sr Manager"
                  inside a year, at which point no report works. --}}
             <x-filament::input.wrapper :valid="$valid">
-                <x-filament::input.select :id="$id" wire:model="{{ $path }}">
+                <x-filament::input.select :id="$id" wire:model.live="{{ $path }}">
                     <option value="">Not answered</option>
                     @foreach ($this->optionsFor($field) as $value => $label)
                         <option value="{{ $value }}">{{ $label }}</option>
@@ -108,7 +117,7 @@
 
         @default
             <x-filament::input.wrapper :valid="$valid">
-                <x-filament::input type="text" :id="$id" wire:model="{{ $path }}" />
+                <x-filament::input type="text" :id="$id" wire:model.live.blur="{{ $path }}" />
             </x-filament::input.wrapper>
     @endswitch
 </x-filament-forms::field-wrapper>

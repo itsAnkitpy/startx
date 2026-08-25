@@ -430,10 +430,9 @@ final class AvailableSteps
      * behind it silently never happens. Wiring that refusal is module 04's, and this is
      * the sentence that says why it cannot be skipped.
      *
-     * The comparisons are deliberately loose. A designation id arrives from the client's
-     * flat file as text and from a picker as a number, and both mean the same
-     * designation; PHP 8's loose comparison no longer treats text as zero, which is what
-     * made the old objection to it fair.
+     * Only the two sides are worked out here. The comparison itself is {@see Comparison},
+     * shared with the conditions on a question, so `is_set` cannot come to mean one thing
+     * on a step and another on a question.
      *
      * @param  array<mixed>  $condition
      * @param  array<string, mixed>  $answers
@@ -446,31 +445,14 @@ final class AvailableSteps
             ? (array) ($case->subject_facts_snapshot ?? [])
             : $answers;
 
-        $left = is_string($field) ? ($asked[$field] ?? null) : null;
-        $operator = $condition['operator'] ?? null;
-
-        if ($operator === 'is_set') {
-            return $left !== null;
-        }
-
         $right = array_key_exists('setting', $condition)
             ? ((array) ($case->settings_snapshot ?? []))[$condition['setting']] ?? null
             : $condition['value'] ?? null;
 
-        if ($left === null || $right === null) {
-            return false;
-        }
-
-        return match ($operator) {
-            '=' => $left == $right,
-            '!=' => $left != $right,
-            '>' => $left > $right,
-            '>=' => $left >= $right,
-            '<' => $left < $right,
-            '<=' => $left <= $right,
-            'in' => in_array($left, (array) $right),
-            'not_in' => ! in_array($left, (array) $right),
-            default => false,
-        };
+        return Comparison::holds(
+            is_string($field) ? ($asked[$field] ?? null) : null,
+            $condition['operator'] ?? null,
+            $right,
+        );
     }
 }
