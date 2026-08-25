@@ -279,6 +279,94 @@ final class CaseEngine
     }
 
     /**
+     * Record what somebody with no account chose, through the link sent to them.
+     *
+     * **The token is the whole permission and it is checked here, on the server, on every
+     * submission.** There is no resolved set behind an external step and no queue it
+     * appears in, so nothing else exists to check — which is why this is a door of its own
+     * rather than a flag on the ordinary one. The reverse holds just as hard: every
+     * employee is refused this step by {@see self::refuseUnlessTheStepIsTheirs()}, so the
+     * two doors between them let exactly one person answer, and it is the person the link
+     * was sent to.
+     *
+     * The token is checked again inside the lock and not only before it. The row is read
+     * back through the same reader that answers whose turn it is, so a second submission
+     * of the same link finds a step that has already been answered and is refused with the
+     * step's own words — an employee who obtains the link after the fact cannot replay it
+     * either, for the same reason and by the same check.
+     *
+     * The answer is recorded against the address, never against a user. Nothing in the
+     * history reads as though an employee did it, which is what `case_events.actor_id`
+     * being allowed to be empty has always been for.
+     *
+     * @param  array<string, mixed>  $payload  what was typed on the step's form
+     */
+    public function decideThroughALink(string $token, string $outcome, array $payload = []): CaseStep
+    {
+        $links = new StepLink;
+
+        $link = $links->find($token) ?? throw ProcessRefused::thatLinkNoLongerOpens();
+
+        return DB::transaction(function () use ($link, $links, $outcome, $payload): CaseStep {
+            $available = $this->availableStepOrRefuse($link->case, (int) $link->sequence);
+            $step = $available->step;
+
+            if (! $this->assignees->isForSomebodyWithNoAccount($step)) {
+                throw ProcessRefused::thatStepIsNotAnsweredByALink($step->name);
+            }
+
+            // The live attempt read back under the case's own lock, rather than the row
+            // that was found a moment ago outside it. A link replaced by a fresh one
+            // between the page being drawn and the answer being sent is refused here.
+            $attempt = $available->attempt;
+
+            if ($attempt === null || (int) $attempt->getKey() !== (int) $link->getKey()) {
+                throw ProcessRefused::thatLinkNoLongerOpens();
+            }
+
+            $links->refuseUnlessItStillWorks($attempt);
+
+            // Holding a step and sending the case back are an employee's moves: one is an
+            // argument between departments that HR resolves later, the other names an
+            // earlier step this person has never seen.
+            if (in_array($outcome, ['held', 'sent_back'], true)) {
+                throw ProcessRefused::aLinkOnlyAnswers($step->name, $outcome);
+            }
+
+            if (! in_array($outcome, (array) $step->allowed_outcomes, true)) {
+                throw ProcessRefused::outcomeNotOffered($step->name, $outcome, (array) $step->allowed_outcomes);
+            }
+
+            $answered = (array) $attempt->external_assignee;
+            $answered['used_at'] = now()->toIso8601String();
+
+            $attempt->external_assignee = $answered;
+            $attempt->outcome = $outcome;
+            $attempt->acted_at = now();
+            $attempt->payload = array_merge((array) $attempt->payload, $payload);
+            $attempt->save();
+
+            $this->record($link->case, 'step_acted', null, [
+                'step' => $step->name,
+                'sequence' => $step->sequence,
+                'outcome' => $outcome,
+                'answered_by' => [
+                    'name' => $answered['name'] ?? null,
+                    'email' => $answered['email'] ?? null,
+                ],
+            ]);
+
+            if ($outcome === 'rejected') {
+                $this->close($link->case, null, 'rejected', $step->name);
+            } else {
+                $this->closeIfNothingIsOutstanding($link->case, null);
+            }
+
+            return $attempt;
+        });
+    }
+
+    /**
      * End a hold, by the only two routes there are.
      *
      * Neither is a button on a step's form, which is why they are here rather than in
@@ -526,6 +614,10 @@ final class CaseEngine
      * deliberate exception is HR overriding a hold, which exists for the holder being
      * unavailable and is recorded as an override in both names.
      *
+     * A step past its own target is asked with that fact, so whoever it escalates to may
+     * act on it — and everybody who could act before still can. The set the row records is
+     * the widened one, because the widened one is who was being asked at that moment.
+     *
      * A step whose set is empty refuses everybody, which is the point rather than a gap:
      * an exit clearance nobody holds must not be answerable by whoever happens to be
      * logged in. It stays open, warned on the case, and waits for a person.
@@ -543,7 +635,7 @@ final class CaseEngine
             throw ProcessRefused::thatStepBelongsToSomebodyWithNoAccount($available->step->name);
         }
 
-        $theirs = $this->assignees->resolve($available->case, $available->step);
+        $theirs = $this->assignees->resolve($available->case, $available->step, $available->escalationOwed);
 
         $isOneOfThem = $theirs->contains(
             fn (User $person) => (int) $person->getKey() === (int) $by->getKey()

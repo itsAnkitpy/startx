@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\StepLinkController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -39,3 +40,23 @@ Route::post('sign-in', function (Request $request) {
 
     return redirect()->away($request->getScheme().'://'.$company.'.'.$central.'/admin/login');
 })->name('sign-in');
+
+/*
+| The one way into this product for somebody who has no account: a candidate, or a leaver
+| whose sign-in has already been switched off. The token in the address is the whole
+| permission — there is no session, no queue and no resolved set behind an external step —
+| and it is checked again on the server every time one of these three is asked for.
+|
+| Outside the panel and outside every sign-in, because the person opening it cannot sign
+| in. Still inside the client company's own subdomain, so the wall that scopes every query
+| is already in place and a token can only ever open a step at the address it was sent for.
+|
+| Asking for a new link is held to a few tries an hour. It sends mail to an address the
+| person pressing it cannot choose, which is exactly the shape of button that gets used to
+| flood somebody's inbox if it is left open.
+*/
+Route::get('step/{token}', [StepLinkController::class, 'show'])->name('step-link');
+Route::post('step/{token}', [StepLinkController::class, 'submit'])->name('step-link.submit');
+Route::post('step/{token}/again', [StepLinkController::class, 'again'])
+    ->middleware('throttle:5,60')
+    ->name('step-link.again');

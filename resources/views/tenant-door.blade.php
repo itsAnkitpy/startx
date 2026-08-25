@@ -84,6 +84,22 @@
             font-size: 0.92rem;
             line-height: 1.65;
         }
+
+        form { margin-top: 22px; }
+
+        button {
+            width: 100%;
+            padding: 12px 18px;
+            border: 1px solid var(--sx-hair);
+            border-radius: 12px;
+            background: var(--sx-primary-bright);
+            color: var(--sx-ground);
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:hover { filter: brightness(1.08); }
     </style>
 </head>
 <body>
@@ -95,6 +111,16 @@
 
         <h1>{{ $heading }}</h1>
         <p>{{ $message }}</p>
+
+        {{-- A link that has run out of time or opens is the one refusal with a way
+             forward, and the way forward is always a new link to the address already on
+             the record — never to one typed here. --}}
+        @isset($askAgainFor)
+            <form method="POST" action="{{ route('step-link.again', $askAgainFor) }}">
+                @csrf
+                <button type="submit">Send me a new link</button>
+            </form>
+        @endisset
     </main>
 </body>
 </html>

@@ -8,6 +8,7 @@
 <x-filament-panels::page>
     @php($queue = $this->queue())
     @php($heldByNobody = $this->heldByNobody($queue))
+    @php($byEscalation = $this->cameByEscalation($queue))
 
     @if ($queue->isEmpty())
         <x-filament::section>
@@ -25,6 +26,7 @@
                 @php($step = $waiting->step)
                 @php($mine = $waiting->attempt?->assignee_id === auth()->id())
                 @php($nobodyHolds = in_array($case->getKey().':'.$step->sequence, $heldByNobody, true))
+                @php($escalated = in_array($case->getKey().':'.$step->sequence, $byEscalation, true))
 
                 <x-filament::section>
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -44,6 +46,17 @@
                                     <x-filament::badge color="info">You picked this up</x-filament::badge>
                                 @endif
                             </div>
+
+                            {{-- Escalation adds people and removes nobody, so this card has
+                                 to say it arrived rather than let it read as a job that
+                                 has been moved onto this person. --}}
+                            @if ($escalated)
+                                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
+                                    This came to you because it is past its deadline. It is still open to
+                                    the people it belonged to, and it stays theirs — you have been added,
+                                    not handed it.
+                                </p>
+                            @endif
 
                             {{-- The whole reason this is marked: a step that reached this
                                  list because the company named a stand-in looks exactly

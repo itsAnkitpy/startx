@@ -41,6 +41,12 @@ use Carbon\CarbonImmutable;
  *   step's own `assignee_rule` names the group the work was meant for, and module 03
  *   turns that into people. Every product that runs a clock escalates into that group
  *   rather than to whoever opened the case; see section 28 of module 02's research.
+ *
+ * **`escalateTo` and a step's own `escalate_to` rule answer different questions and must
+ * not be confused.** This one is who gets *told* the step is late — the person above
+ * whoever is holding it, which is the shape every chase-up takes. The rule on the step is
+ * who may then *act* on it, added beside the people it already belonged to. A step can
+ * have one, both or neither.
  */
 final readonly class AvailableStep
 {

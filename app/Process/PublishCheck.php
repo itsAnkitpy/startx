@@ -126,6 +126,7 @@ final readonly class PublishCheck
         $problems = array_merge(
             $this->problemsWithWhoItBelongsTo($step),
             $this->problemsWithItsChasing($step),
+            $this->problemsWithWhereItEscalates($step),
         );
 
         foreach ($step->open_conditions ?? [] as $set) {
@@ -195,6 +196,69 @@ final readonly class PublishCheck
                 $this->at($step).' says its actor has no account in the system, but then looks for one '
                     .'by ['.$this->readable($kind).']. A step for somebody with no account belongs to '
                     .'[external], which is what sends them a link instead.',
+            ];
+        }
+
+        return [];
+    }
+
+    /**
+     * Everything wrong with who a late step widens to.
+     *
+     * The same invisible kind as everything else here. An escalation naming a way of
+     * finding people this product does not have would widen to nobody for ever, and the
+     * only sign of it would be a clearance sitting overdue with the one person who was
+     * always going to be too busy to do it.
+     *
+     * An escalation on a step with no target of its own can never fire, because there is
+     * no moment at which the step becomes late. And a step cannot escalate to somebody
+     * with no account: permission there is the link sent to their address, so widening to
+     * `external` would be widening to nobody at all while reading as though somebody had
+     * been brought in.
+     *
+     * @return list<string>
+     */
+    private function problemsWithWhereItEscalates(ProcessStep $step): array
+    {
+        $rule = (array) ($step->escalate_to ?? []);
+
+        if ($rule === []) {
+            return [];
+        }
+
+        $kind = $rule['kind'] ?? null;
+
+        if (! in_array($kind, AssigneeResolver::Kinds, true)) {
+            return [
+                $this->at($step).' goes to ['.$this->readable($kind).'] when it runs late, which is not '
+                    .'one of the ways a step can find its people: '.implode(', ', AssigneeResolver::Kinds).'.',
+            ];
+        }
+
+        if ($kind === 'external') {
+            return [
+                $this->at($step).' goes to somebody with no account when it runs late. A late step '
+                    .'widens to people who can sign in and act on it; somebody with no account acts '
+                    .'only through the link sent to their own address.',
+            ];
+        }
+
+        // The other direction, and the same reason read backwards. Permission on a step
+        // answered by somebody with no account is the link sent to them and nothing else,
+        // so naming employees for it to widen to when it runs late would name people the
+        // engine then refuses — a chase that reads as configured and does nothing.
+        if ($step->participant_kind === 'external' || ($step->assignee_rule['kind'] ?? null) === 'external') {
+            return [
+                $this->at($step).' is answered by somebody with no account, and says it goes to '
+                    .'somebody else when it runs late. Only the person the link was sent to can answer '
+                    .'it, however long it takes, so it cannot go to anybody else.',
+            ];
+        }
+
+        if ($step->sla_hours === null) {
+            return [
+                $this->at($step).' says who it goes to when it runs late, but has no time limit of its '
+                    .'own, so there is no moment at which it is late and it would never go to them.',
             ];
         }
 

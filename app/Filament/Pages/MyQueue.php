@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\ProcessCase;
 use App\Models\User;
@@ -13,7 +14,6 @@ use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
-use Throwable;
 
 /**
  * What is waiting on the person signed in, and the two buttons that act on it.
@@ -85,6 +85,35 @@ class MyQueue extends Page
     }
 
     /**
+     * Which of these only reached this person because the step ran past its deadline.
+     *
+     * The difference is the whole rule underneath it: an overdue step widens to whoever it
+     * escalates to and takes nobody away, so Chandni seeing Anjali's clearance does not
+     * mean Rakesh has stopped seeing it, and it does not mean it stopped being his. A card
+     * that said nothing would read as "this is now your job", which is exactly the
+     * laundering the rule exists to prevent.
+     *
+     * Worked out by asking the same question twice — once as though the deadline had not
+     * passed — and only for steps that are actually late, which is a handful at most.
+     *
+     * @param  Collection<int, AvailableStep>  $queue
+     * @return list<string>
+     */
+    public function cameByEscalation(Collection $queue): array
+    {
+        $resolver = new AssigneeResolver;
+        $person = (int) $this->person()->getKey();
+
+        return $queue
+            ->filter(fn (AvailableStep $waiting) => $waiting->escalationOwed)
+            ->reject(fn (AvailableStep $waiting) => $resolver->resolve($waiting->case, $waiting->step)
+                ->contains(fn (User $candidate) => (int) $candidate->getKey() === $person))
+            ->map(fn (AvailableStep $waiting) => $waiting->case->getKey().':'.$waiting->step->sequence)
+            ->values()
+            ->all();
+    }
+
+    /**
      * Pick a step up, which is what stops two people in a shared queue both working on
      * it. The engine refuses if it is not theirs; the refusal is shown as written.
      */
@@ -128,7 +157,13 @@ class MyQueue extends Page
             $act(new CaseEngine, $case);
 
             Notification::make()->success()->title($said)->send();
-        } catch (Throwable $refused) {
+        } catch (ProcessRefused $refused) {
+            // Only the engine's own refusals, which are written for the person being
+            // refused. Anything else is a fault rather than an answer, and putting its
+            // message on the screen would show an employee the inside of a database error
+            // — two colleagues claiming one step at the same instant already arrives here
+            // as a refusal in words, so nothing a person can cause is lost by narrowing
+            // this.
             Notification::make()->danger()->title($refused->getMessage())->send();
         }
     }

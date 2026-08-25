@@ -43,10 +43,18 @@ function waitingOnThem(User $person): array
 it('seeds a company worth looking at', function () {
     TenantContext::run($this->meridian, function () {
         expect(User::query()->count())->toBe(6)
-            ->and(ProcessCase::query()->whereNull('closed_at')->count())->toBe(3)
-            // Nobody has touched anything yet, so not one of those waiting steps has a
-            // row anywhere. That is the whole point of the list below.
-            ->and(CaseStep::query()->count())->toBe(0);
+            // Three exits nobody has touched, and Rakesh's, which everybody who works
+            // here has already cleared and which now waits on Rakesh himself through a
+            // link, because his sign-in is gone.
+            ->and(ProcessCase::query()->whereNull('closed_at')->count())->toBe(4);
+
+        // Nobody has touched any of the three, so not one of their waiting steps has a row
+        // anywhere. That is the whole point of the lists below.
+        $untouched = ProcessCase::query()
+            ->whereRelation('subject', 'first_name', '!=', 'Rakesh')
+            ->pluck('id');
+
+        expect(CaseStep::query()->whereIn('case_id', $untouched)->count())->toBe(0);
     });
 });
 
@@ -62,10 +70,12 @@ it('shows each person only the steps that are theirs', function () {
             ->toBe(['HR clearance — Anjali Rao', 'HR clearance — Deepak Iyer']);
 
         // Nobody holds HR head over Pune, so Rohit's clearance falls to the stand-in the
-        // client named. Chandni's own finance clearance is a later group and is not her
-        // turn yet.
+        // client named. Anjali's is there for a different reason — it is five days past a
+        // two-day deadline, and a late step widens to the HR director without ever leaving
+        // the two people it already belonged to. Chandni's own finance clearance is a
+        // later group and is not her turn yet.
         expect(waitingOnThem(atMeridianCalled('chandni')))
-            ->toBe(['HR clearance — Rohit Menon']);
+            ->toBe(['HR clearance — Anjali Rao', 'HR clearance — Rohit Menon']);
 
         // Deepak holds nothing, and his own exit can never be his own to clear.
         expect(waitingOnThem(atMeridianCalled('deepak')))->toBe([]);
@@ -117,7 +127,7 @@ it('refuses a step that is not yours, in words', function () {
             ->call('decide', $anjalisExit->getKey(), 1, 'approved')
             ->assertOk();
 
-        expect(CaseStep::query()->count())->toBe(0);
+        expect(CaseStep::query()->where('case_id', $anjalisExit->getKey())->count())->toBe(0);
     });
 });
 
@@ -141,6 +151,25 @@ it('marks a step that has blown its deadline', function () {
         Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
             ->assertOk()
             ->assertSee('Past its deadline');
+    });
+});
+
+it('says on the card when a step arrived only because it is overdue', function () {
+    TenantContext::run($this->meridian, function () {
+        // Anjali's clearance is five days past a two-day target, so it widens to Chandni
+        // as HR director. Her card has to say it arrived that way, or it reads as work
+        // that has been moved onto her and off the two people who still hold it.
+        Livewire::actingAs(atMeridianCalled('chandni'))->test(MyQueue::class)
+            ->assertOk()
+            ->assertSee('Anjali Rao')
+            ->assertSee('This came to you because it is past its deadline');
+
+        // Rakesh holds the same overdue clearance in his own right, and his card carries
+        // no such line. A marker on every card would be worth nothing.
+        Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
+            ->assertOk()
+            ->assertSee('Anjali Rao')
+            ->assertDontSee('This came to you because it is past its deadline');
     });
 });
 
@@ -207,7 +236,9 @@ it('leaves the card unmarked once somebody actually holds the role', function ()
             'includes_descendants' => false,
         ]);
 
-        expect(waitingOnThem($chandni))->toBe([])
+        // Rohit's clearance leaves her list the moment Pune has its own HR head. Anjali's
+        // stays, for the unrelated reason that it is overdue and escalates to her.
+        expect(waitingOnThem($chandni))->toBe(['HR clearance — Anjali Rao'])
             ->and(waitingOnThem(atMeridianCalled('priya')))
             ->toContain('HR clearance — Rohit Menon');
     });

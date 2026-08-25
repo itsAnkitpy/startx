@@ -12,6 +12,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Process\AssigneeResolver;
 use App\Process\CaseEngine;
+use App\Process\StepLink;
 use App\Settings\Settings;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
@@ -151,6 +152,11 @@ class MeridianSeeder extends Seeder
             ->named($name)
             ->create([
                 'work_email' => strtolower($first).'@meridian.test',
+
+                // The address that outlives the account, and the one a link for somebody
+                // with no login is sent to. A leaver whose sign-in has been switched off
+                // still has to confirm their own handover.
+                'personal_email' => strtolower($first).'@personal.example',
                 'password' => self::Password,
             ]);
 
@@ -175,6 +181,11 @@ class MeridianSeeder extends Seeder
         $administrator = Role::factory()->keyed(Role::AdministratorKey, 'Administrator')->create();
         $financeHead = Role::factory()->keyed('finance_head', 'Finance head')->create();
 
+        // Where every step of the exit goes when it runs past its own deadline. Held over
+        // the whole company by one person, so a late Shimla clearance can be watched
+        // appearing in her list beside the branch's own people rather than instead of them.
+        $hrDirector = Role::factory()->keyed('hr_director', 'HR director')->create();
+
         $grant = function (Role $role, User $person, ?OrgUnit $unit) use (&$grant): void {
             $role->assignments()->create([
                 'user_id' => $person->getKey(),
@@ -186,28 +197,47 @@ class MeridianSeeder extends Seeder
         $grant($hrHead, $people['rakesh'], $units['shimla']);
         $grant($hrHead, $people['priya'], $units['shimla']);
         $grant($financeHead, $people['chandni'], null);
+        $grant($hrDirector, $people['chandni'], null);
         $grant($administrator, $people['chandni'], null);
         $grant($administrator, $people['priya'], null);
     }
 
     /**
-     * A three-step exit: HR clears it, then finance, then the leaver's own manager signs
-     * it off. Three groups rather than one so that a later step can be watched staying
-     * out of everybody's list until the step in front of it closes.
+     * A four-step exit: HR clears it, then finance, then the leaver's own manager signs it
+     * off, and last the leaver themselves confirms the handover. Four groups rather than
+     * one so that a later step can be watched staying out of everybody's list until the
+     * step in front of it closes.
+     *
+     * **Every step an employee answers says where it goes when it runs late,** which is
+     * the HR director over the whole company. It is on all three even though no client
+     * asked for it: a process without it is an email chain with extra steps, and the
+     * escalation is only visible at all on a step that has actually gone past its target.
+     *
+     * The last step is answered by somebody with no account, at their personal address,
+     * because by then their sign-in is gone. It says nothing about running late on
+     * purpose — the only permission on such a step is the link sent to that address, so
+     * widening it to an employee would name people who would then be refused.
      */
     private function exitProcess(): ProcessTemplate
     {
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
 
+        $lateItGoesTo = ['kind' => 'role_global', 'role' => 'hr_director'];
+
         ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
-            ->heldByTheRole('hr_head')->offering('approved', 'rejected')->dueIn(48)->create();
+            ->heldByTheRole('hr_head')->offering('approved', 'rejected')->dueIn(48)
+            ->escalatingTo($lateItGoesTo)->create();
 
         ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
-            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected')->dueIn(48)->create();
+            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected')->dueIn(48)
+            ->escalatingTo($lateItGoesTo)->create();
 
         ProcessStep::factory()->of($exit)->at(3, 3)->named('Manager sign-off')
-            ->offering('approved')->dueIn(24)
+            ->offering('approved')->dueIn(24)->escalatingTo($lateItGoesTo)
             ->state(['assignee_rule' => ['kind' => 'reporting_manager']])->create();
+
+        ProcessStep::factory()->of($exit)->at(4, 4)->named('Leaver confirms the handover')
+            ->external()->offering('approved', 'rejected')->dueIn(72)->create();
 
         $exit->publish();
 
@@ -237,5 +267,38 @@ class MeridianSeeder extends Seeder
         $anjalis->forceFill(['opened_at' => now()->subDays(5)])->save();
         $engine->open($exit, $people['deepak'], $people['chandni']);
         $engine->open($exit, $people['rohit'], $people['chandni']);
+
+        $this->rakeshsExitWaitingOnHisOwnAnswer($engine, $exit, $people);
+    }
+
+    /**
+     * A fourth exit, Rakesh's, already cleared by everybody who works here and waiting on
+     * the one person who does not: Rakesh himself, at his personal address, through a link.
+     *
+     * Driven forward by actually deciding the three steps as the people who hold them,
+     * rather than by writing rows — so the state it leaves behind is a state the engine
+     * can produce, and the link is issued exactly the way module 06's scheduled pass will
+     * issue it when a step opens.
+     *
+     * It appears in nobody's queue, which is the point of it: a step answered by somebody
+     * with no account has no resolved set at all, so the whole company can see the exit is
+     * waiting and not one of them can answer it.
+     *
+     * @param  array<string, User>  $people
+     */
+    private function rakeshsExitWaitingOnHisOwnAnswer(CaseEngine $engine, ProcessTemplate $exit, array $people): void
+    {
+        $rakeshs = $engine->open($exit, $people['rakesh'], $people['chandni']);
+
+        // Priya, because Rakesh holds HR head over Shimla himself and can never clear his
+        // own exit. Then finance, then his own manager.
+        $engine->decide($rakeshs, 1, 'approved', $people['priya']);
+        $engine->decide($rakeshs, 2, 'approved', $people['chandni']);
+        $engine->decide($rakeshs, 3, 'approved', $people['chandni']);
+
+        $address = (new StepLink)->issue($rakeshs, 4);
+
+        $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link:');
+        $this->command?->line($address);
     }
 }

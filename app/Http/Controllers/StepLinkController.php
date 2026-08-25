@@ -1,0 +1,144 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Exceptions\ProcessRefused;
+use App\Models\CaseStep;
+use App\Process\AvailableStep;
+use App\Process\AvailableSteps;
+use App\Process\CaseEngine;
+use App\Process\StepLink;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+
+/**
+ * The three things somebody with no account can do: look at the step they were sent,
+ * answer it, and ask for a new link when the one they have has stopped working.
+ *
+ * There is no session, no account and no queue behind any of it. The token in the address
+ * is the entire permission and every one of the three checks it again on the server —
+ * this class holds no rule of its own, it only chooses which page to draw.
+ *
+ * Every refusal is drawn on the same page a wrong company address is drawn on, in the
+ * same words the engine wrote, and carries the one way forward there is: ask for another
+ * link, sent to the address already on the record.
+ */
+class StepLinkController extends Controller
+{
+    /** The step, and the answers it allows. Opening it costs one of the link's opens. */
+    public function show(string $token, StepLink $links): Response
+    {
+        $link = $links->find($token);
+
+        if ($link === null) {
+            return $this->refused(ProcessRefused::thatLinkNoLongerOpens()->getMessage());
+        }
+
+        try {
+            $links->refuseUnlessItStillWorks($link);
+
+            $waiting = $this->stepStillWaiting($link);
+        } catch (ProcessRefused $refused) {
+            return $this->refused($refused->getMessage(), $token);
+        }
+
+        $links->opened($link);
+
+        return response()->view('step-link', [
+            'token' => $token,
+            'case' => $link->case,
+            'step' => $waiting->step,
+            'lastsHours' => StepLink::LastsHours,
+            'opens' => StepLink::Opens,
+        ]);
+    }
+
+    /**
+     * Record the answer.
+     *
+     * The outcome is not trusted from the form: the engine checks it against what the step
+     * actually offers, and checks the token again before writing anything.
+     */
+    public function submit(Request $request, string $token): Response
+    {
+        $typed = $request->validate([
+            'outcome' => ['required', 'string', 'max:40'],
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        try {
+            (new CaseEngine)->decideThroughALink(
+                $token,
+                $typed['outcome'],
+                array_filter(['note' => $typed['note'] ?? null]),
+            );
+        } catch (ProcessRefused $refused) {
+            return $this->refused($refused->getMessage(), $token);
+        }
+
+        return $this->door(
+            'Thank you — your answer is recorded',
+            'There is nothing else for you to do. The company can see your answer and will carry on '
+                .'from here. This link has now been used and will not open again.',
+        );
+    }
+
+    /**
+     * Send another link for the same step, to the address it was sent to before.
+     *
+     * The address is never read from this request. Somebody holding a dead link may ask
+     * for a live one and that is the whole of it — choosing where the next one goes would
+     * turn a finished link into a way of having it delivered somewhere else. For the same
+     * reason the page that follows does not name the address back: whoever pressed the
+     * button is not necessarily the person it belongs to.
+     */
+    public function again(string $token, StepLink $links): Response
+    {
+        $link = $links->find($token);
+
+        if ($link === null) {
+            return $this->refused(ProcessRefused::thatLinkNoLongerOpens()->getMessage());
+        }
+
+        try {
+            $links->issueAgain($link);
+        } catch (ProcessRefused $refused) {
+            return $this->refused($refused->getMessage());
+        }
+
+        return $this->door(
+            'A new link is on its way',
+            'It has gone to the same address as the last one, and works for the next '
+                .StepLink::LastsHours.' hours.',
+        );
+    }
+
+    /**
+     * The step this link was for, if it is still waiting for an answer.
+     *
+     * Read through the same reader every other door in the product reads through, so a
+     * case that was cancelled or answered by some other route closes this page too rather
+     * than showing a form that would be refused on submission.
+     */
+    private function stepStillWaiting(CaseStep $link): AvailableStep
+    {
+        return (new AvailableSteps)->for($link->case)->first(
+            fn (AvailableStep $waiting) => $waiting->step->sequence === (int) $link->sequence
+        ) ?? throw ProcessRefused::thatLinkNoLongerOpens();
+    }
+
+    /** A refusal, with the offer of a new link where there is a link to re-issue. */
+    private function refused(string $message, ?string $askAgainFor = null): Response
+    {
+        return $this->door('This link no longer opens', $message, $askAgainFor, 403);
+    }
+
+    private function door(string $heading, string $message, ?string $askAgainFor = null, int $status = 200): Response
+    {
+        return response()->view('tenant-door', array_filter([
+            'heading' => $heading,
+            'message' => $message,
+            'askAgainFor' => $askAgainFor,
+        ]), $status);
+    }
+}

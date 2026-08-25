@@ -104,6 +104,17 @@ class ProcessStepFactory extends Factory
         ]);
     }
 
+    /**
+     * Who this step widens to once its own target has run out, written in the same shape
+     * as who it belongs to — they are the same six ways of finding people.
+     *
+     * @param  array<string, mixed>  $rule
+     */
+    public function escalatingTo(array $rule): static
+    {
+        return $this->state(['escalate_to' => $rule]);
+    }
+
     /** Holders of a role in the subject's own department, or above it. */
     public function heldByTheRole(string $roleKey): static
     {

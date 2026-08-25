@@ -95,9 +95,17 @@ final class AssigneeResolver
      * Empty means nobody may, and the case's record says so. It never means the step is
      * finished, approved or skipped.
      *
+     * `$itsTimeHasRunOut` is the only thing that widens the answer. A step past its own
+     * target adds whoever its `escalate_to` rule names **beside** the people it already
+     * belonged to, and takes nobody away — so an overdue clearance cannot be escaped by
+     * escalating it, and the person who was always meant to do it is still the person the
+     * record names as having been asked. Whoever reads the queue passes it in, because
+     * whether a target has run out is a fact about the clock rather than about the rule,
+     * and this class has never looked at a clock.
+     *
      * @return Collection<int, User>
      */
-    public function resolve(ProcessCase $case, ProcessStep $step): Collection
+    public function resolve(ProcessCase $case, ProcessStep $step, bool $itsTimeHasRunOut = false): Collection
     {
         // A step for somebody with no account has no resolved set at all, and that is the
         // point of it rather than a gap in it: permission to act is the signed link sent
@@ -110,7 +118,58 @@ final class AssigneeResolver
 
         $subjectId = $case->subject_user_id === null ? null : (int) $case->subject_user_id;
 
-        foreach ($this->levelsFor($case, $step) as $level) {
+        $people = $this->nearestLevelThatCanAct($case, (array) $step->assignee_rule, $subjectId)
+            ?? $this->theStandIn($case, $step, $subjectId);
+
+        if (! $itsTimeHasRunOut) {
+            return $people;
+        }
+
+        return $people
+            ->concat($this->whoItEscalatesTo($case, $step, $subjectId))
+            ->unique(fn (User $person) => (int) $person->getKey())
+            ->values();
+    }
+
+    /**
+     * Whoever a step widens to once its own target has run out.
+     *
+     * The same six ways of finding people, read from `escalate_to` instead of from
+     * `assignee_rule`, which is why there is no seventh mechanism here and no second
+     * vocabulary for a client to learn.
+     *
+     * **No stand-in at the end of it.** When the escalation rule finds nobody the step
+     * simply does not widen — it is still held by the people it was always held by, and
+     * handing an overdue clearance to the company's stand-in on top of them would put a
+     * branch matter in front of head office for no reason other than lateness. The
+     * stand-in exists for a step nobody holds, and this is not one.
+     *
+     * @return Collection<int, User>
+     */
+    private function whoItEscalatesTo(ProcessCase $case, ProcessStep $step, ?int $subjectId): Collection
+    {
+        $rule = (array) ($step->escalate_to ?? []);
+
+        if ($rule === [] || ($rule['kind'] ?? null) === 'external') {
+            return new Collection;
+        }
+
+        return $this->nearestLevelThatCanAct($case, $rule, $subjectId) ?? new Collection;
+    }
+
+    /**
+     * The first level of candidates with anybody usable in it, or null when no level has.
+     *
+     * Null and an empty collection are different answers here and the difference is what
+     * the stand-in hangs off: nothing found at any level is the vacancy the stand-in
+     * exists for, and an escalation finding nothing is simply a step that does not widen.
+     *
+     * @param  array<string, mixed>  $rule
+     * @return Collection<int, User>|null
+     */
+    private function nearestLevelThatCanAct(ProcessCase $case, array $rule, ?int $subjectId): ?Collection
+    {
+        foreach ($this->levelsFor($case, $rule) as $level) {
             $people = $this->whichOfThemCanAct($level, $subjectId);
             $people = $this->withWhoeverIsCoveringThem($people, $case, $subjectId);
 
@@ -119,7 +178,7 @@ final class AssigneeResolver
             }
         }
 
-        return $this->theStandIn($case, $step, $subjectId);
+        return null;
     }
 
     public function isForSomebodyWithNoAccount(ProcessStep $step): bool
@@ -139,12 +198,12 @@ final class AssigneeResolver
      * case to be quietly answered with nobody, and publishing refuses one before a case
      * can ever run on it.
      *
+     * @param  array<string, mixed>  $rule  one of the six, read from `assignee_rule` or from
+     *                                      `escalate_to` — they are the same vocabulary
      * @return iterable<int, list<int>>
      */
-    private function levelsFor(ProcessCase $case, ProcessStep $step): iterable
+    private function levelsFor(ProcessCase $case, array $rule): iterable
     {
-        $rule = (array) $step->assignee_rule;
-
         return match ($rule['kind'] ?? null) {
             'reporting_manager' => $this->reportingLineAbove($case->subject_user_id),
             'initiators_manager' => $this->reportingLineAbove($case->initiated_by),

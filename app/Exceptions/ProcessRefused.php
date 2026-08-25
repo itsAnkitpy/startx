@@ -400,4 +400,74 @@ class ProcessRefused extends RuntimeException
             ."{$rowBegan}. Date the handover after that day."
         );
     }
+
+    /**
+     * A link that answers no step in this client company.
+     *
+     * Deliberately the same sentence as a link that has been used, has run out of time or
+     * has been opened too often. A different one for each would let anybody holding a
+     * guessed address learn which guesses were nearly right, and none of the four is worth
+     * more to the person actually holding a real link — they all mean "ask for a new one".
+     */
+    public static function thatLinkNoLongerOpens(): self
+    {
+        return new self(
+            'This link does not open anything any more. Links last a couple of days and stop '
+            .'working once the answer has been given. Ask for a new one below.'
+        );
+    }
+
+    /**
+     * Sending the link somewhere it can never arrive.
+     *
+     * The address is the one thing about an external step that the client has to have got
+     * right in advance, and a step waiting on a link nobody was sent is indistinguishable
+     * from a step somebody is simply slow to answer.
+     */
+    public static function thereIsNowhereToSendTheLink(string $step, string $about): self
+    {
+        return new self(
+            "[{$step}] is answered by somebody with no account, and there is no personal email "
+            ."address recorded for {$about} to send the link to."
+        );
+    }
+
+    /**
+     * A new link asked for from an older link that has already been replaced.
+     *
+     * Only the newest link may ask for another, and the newest link is always the one the
+     * person the step is waiting on is holding. Every older copy belongs to somebody else
+     * by then — forwarded on, sitting in an archive, read out of a mailbox — and letting
+     * one of those ask again would let whoever holds it replace the recipient's working
+     * link as fast as they could press the button.
+     *
+     * Its own sentence rather than the shared one, because the person reading it has done
+     * nothing wrong and the useful thing to tell them is where their live link is.
+     */
+    public static function aNewerLinkHasAlreadyGoneOut(): self
+    {
+        return new self(
+            'A newer link for this step has already been sent to the same address. Look for the '
+            .'most recent message — older links stop working as soon as a new one goes out.'
+        );
+    }
+
+    /** A link asked for on a step that an employee answers by signing in. */
+    public static function thatStepIsNotAnsweredByALink(string $step): self
+    {
+        return new self("[{$step}] is answered by an employee signing in, not by a link.");
+    }
+
+    /**
+     * A link used to hold a step or send the case back.
+     *
+     * Both are an employee's moves and neither means anything from the outside: holding is
+     * an argument between two departments that HR later resolves, and sending the case back
+     * names an earlier step the person has never seen. Somebody with no account answers the
+     * question they were asked and nothing else.
+     */
+    public static function aLinkOnlyAnswers(string $step, string $outcome): self
+    {
+        return new self("[{$outcome}] is not something the person answering [{$step}] can choose.");
+    }
 }

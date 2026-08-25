@@ -94,7 +94,9 @@ final class AvailableSteps
                     return false;
                 }
 
-                return $resolver->resolve($available->case, $available->step)
+                // Past its own target the step widens to whoever it escalates to, and
+                // widening is all it does — the people it already belonged to keep it.
+                return $resolver->resolve($available->case, $available->step, $available->escalationOwed)
                     ->contains(fn (User $candidate) => (int) $candidate->getKey() === (int) $person->getKey());
             })
             ->values();

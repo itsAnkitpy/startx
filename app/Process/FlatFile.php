@@ -38,7 +38,7 @@ final class FlatFile
      */
     public const Columns = [
         'sequence', 'group', 'step_name', 'assignee', 'form_key', 'outcomes',
-        'sla_hours', 'nudge_at', 'open_when', 'participant', 'notify',
+        'sla_hours', 'nudge_at', 'escalate_to', 'open_when', 'participant', 'notify',
     ];
 
     private const Required = ['sequence', 'group', 'step_name', 'assignee'];
@@ -227,6 +227,11 @@ final class FlatFile
             'allowed_outcomes' => $this->outcomes($at('outcomes')),
             'sla_hours' => $at('sla_hours') === '' ? null : $this->countingNumber($at('sla_hours'), 'sla_hours'),
             'reminder_rule' => $this->nudges($at('nudge_at')),
+
+            // Who a late step widens to, written exactly as `assignee` is, because it is
+            // the same six ways of finding people and a client should not have to learn a
+            // second way of typing them. Left empty, the step widens to nobody.
+            'escalate_to' => $at('escalate_to') === '' ? null : $this->assignee($at('escalate_to')),
             'open_conditions' => [],
             'on_open' => [],
             'on_complete' => [],
@@ -518,6 +523,7 @@ final class FlatFile
             'outcomes' => implode(',', $step->allowed_outcomes ?? []),
             'sla_hours' => $step->sla_hours === null ? '' : (string) $step->sla_hours,
             'nudge_at' => implode(',', array_map($this->writtenValue(...), $step->reminder_rule['nudge_at'] ?? [])),
+            'escalate_to' => $step->escalate_to === null ? '' : $this->writtenAssignee($step->escalate_to),
             'open_when' => $set === null ? '' : $this->writtenConditionSet($set),
             'participant' => $step->participant_kind,
         ];

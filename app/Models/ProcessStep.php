@@ -24,7 +24,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'template_id', 'sequence', 'group_no', 'name', 'participant_kind', 'assignee_rule',
-    'open_conditions', 'allowed_outcomes', 'sla_hours', 'reminder_rule', 'on_open', 'on_complete',
+    'open_conditions', 'allowed_outcomes', 'sla_hours', 'reminder_rule', 'escalate_to',
+    'on_open', 'on_complete',
 ])]
 class ProcessStep extends Model
 {
@@ -65,6 +66,7 @@ class ProcessStep extends Model
             'open_conditions' => 'array',
             'allowed_outcomes' => 'array',
             'reminder_rule' => 'array',
+            'escalate_to' => 'array',
             'on_open' => 'array',
             'on_complete' => 'array',
         ];
