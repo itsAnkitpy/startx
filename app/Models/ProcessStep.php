@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * runs is itself what decides whether they adopt it.
  */
 #[Fillable([
-    'template_id', 'sequence', 'group_no', 'name', 'participant_kind', 'assignee_rule',
+    'template_id', 'sequence', 'group_no', 'name', 'form_definition_id', 'participant_kind', 'assignee_rule',
     'open_conditions', 'allowed_outcomes', 'sla_hours', 'reminder_rule', 'escalate_to',
     'on_open', 'on_complete',
 ])]
@@ -75,5 +75,14 @@ class ProcessStep extends Model
     public function template(): BelongsTo
     {
         return $this->belongsTo(ProcessTemplate::class, 'template_id');
+    }
+
+    /**
+     * What this step asks. Null is the default and means it asks nothing — a manager
+     * sign-off that is only a decision needs no form.
+     */
+    public function form(): BelongsTo
+    {
+        return $this->belongsTo(FormDefinition::class, 'form_definition_id');
     }
 }

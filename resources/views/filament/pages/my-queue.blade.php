@@ -82,6 +82,28 @@
                                 Became yours {{ $waiting->availableSince->diffForHumans() }}@if ($waiting->dueAt),
                                     due {{ $waiting->dueAt->diffForHumans() }}@endif.
                             </p>
+
+                            {{-- What this step asks. A step with no form asks nothing and
+                                 shows nothing, which is right for a sign-off that is only
+                                 a decision. --}}
+                            @php($questions = $this->questionsOn($waiting))
+
+                            @if ($questions->isNotEmpty())
+                                {{-- Spaced with a plain style rather than utility classes:
+                                     this project has no front-end build, so only the
+                                     classes Filament ships compiled reach the browser. --}}
+                                <x-filament::fieldset label="What this step asks">
+                                    <div style="display: grid; row-gap: 1rem;">
+                                        @foreach ($questions as $field)
+                                            @include('filament.pages.partials.step-question', [
+                                                'field' => $field,
+                                                'caseId' => $case->getKey(),
+                                                'sequence' => $step->sequence,
+                                            ])
+                                        @endforeach
+                                    </div>
+                                </x-filament::fieldset>
+                            @endif
                         </div>
 
                         <div class="flex shrink-0 flex-wrap items-center gap-2">

@@ -78,6 +78,78 @@ class ProcessRefused extends RuntimeException
         );
     }
 
+    /**
+     * The same rule as a process version, for the same reason: a live form has closed
+     * steps reading it and cannot be handed round the cycle again.
+     */
+    public static function onlyADraftFormGoesLive(string $name, int $version, string $status): self
+    {
+        return new self(
+            "The form [{$name}] version {$version} is {$status}, and only a draft can be made live."
+        );
+    }
+
+    /**
+     * A form with nothing on it would let a step claim to ask something and ask nothing,
+     * and the step would then close on a decision nobody had to justify.
+     */
+    public static function aFormWithNoQuestionsCannotGoLive(string $name, int $version): self
+    {
+        return new self(
+            "The form [{$name}] version {$version} has no questions on it yet, so there is "
+            .'nothing for a step to ask.'
+        );
+    }
+
+    /**
+     * An answer to a question this step does not ask.
+     *
+     * The reason it is refused rather than dropped: a case reads all its live steps'
+     * answers together, so an answer written at the wrong step is an answer at every
+     * step. The person holding IT's clearance writing finance's answer switches off the
+     * finance clearance behind them, and the exit closes as though it happened.
+     *
+     * @param  list<string>  $unasked
+     */
+    public static function thatStepDoesNotAskThat(string $step, array $unasked): self
+    {
+        return new self(
+            "[{$step}] does not ask ".implode(', ', $unasked)
+            .', so that answer cannot be recorded against it.'
+        );
+    }
+
+    /**
+     * A list to choose from with nothing on it.
+     *
+     * The same invisible failure as everything else caught at publishing: the form goes
+     * live, the step opens, and the one question on it cannot be answered by anybody, so
+     * a required one leaves the exit open for ever with nothing on any screen to say why.
+     *
+     * @param  list<string>  $questions
+     */
+    public static function aQuestionWithNoChoicesCannotGoLive(string $name, array $questions): self
+    {
+        return new self(
+            "The form [{$name}] asks ".implode(', ', $questions).' as a list to choose from, and no '
+            .'choices have been written on it, so there would be nothing for anybody to pick.'
+        );
+    }
+
+    /**
+     * ponytail: temporary. Attaching a document is its own step and its own security
+     * review; until it lands, a form carrying one cannot go live rather than going live
+     * and quietly refusing every answer. Delete with the upload path.
+     */
+    public static function fileQuestionsAreNotBuiltYet(string $name, array $questions): self
+    {
+        return new self(
+            "The form [{$name}] asks for a document on ".implode(', ', $questions)
+            .', and attaching a document is not built yet. Take those questions off the form '
+            .'or wait for uploads.'
+        );
+    }
+
     /** A draft is edited in place; there is nothing yet for a new version to protect. */
     public static function aDraftIsEditedInPlace(string $name, int $version): self
     {

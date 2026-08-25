@@ -2,6 +2,8 @@
 
 namespace Database\Factories;
 
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -51,6 +53,34 @@ class ProcessStepFactory extends Factory
     public function named(string $name): static
     {
         return $this->state(['name' => $name]);
+    }
+
+    /** What the step asks. A step with no form asks nothing, which is the default. */
+    public function asking(FormDefinition $form): static
+    {
+        return $this->state(['form_definition_id' => $form->getKey()]);
+    }
+
+    /**
+     * A step that asks one question, built and made live on the spot.
+     *
+     * For the shape that comes up over and over: a step whose whole purpose is the figure
+     * a later step branches on. A condition can only read an answer some step actually
+     * collects, so the form has to exist before the condition means anything.
+     */
+    public function collecting(string $key, string $type = FormField::Money): static
+    {
+        return $this->state(function () use ($key, $type): array {
+            $form = FormDefinition::factory()->create(['name' => ucfirst(str_replace('_', ' ', $key))]);
+
+            FormField::factory()->on($form)
+                ->asking($key, ucfirst(str_replace('_', ' ', $key)), $type)
+                ->create();
+
+            $form->publish();
+
+            return ['form_definition_id' => $form->getKey()];
+        });
     }
 
     /** A clearance: approve or hold with a reason, and no authority to reject. */

@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\EmploymentRecord;
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\Office;
 use App\Models\OrgUnit;
 use App\Models\ProcessStep;
@@ -225,10 +227,12 @@ class MeridianSeeder extends Seeder
         $lateItGoesTo = ['kind' => 'role_global', 'role' => 'hr_director'];
 
         ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
+            ->asking($this->hrClearanceForm())
             ->heldByTheRole('hr_head')->offering('approved', 'rejected')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
 
         ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+            ->asking($this->financeClearanceForm())
             ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
 
@@ -237,11 +241,98 @@ class MeridianSeeder extends Seeder
             ->state(['assignee_rule' => ['kind' => 'reporting_manager']])->create();
 
         ProcessStep::factory()->of($exit)->at(4, 4)->named('Leaver confirms the handover')
+            ->asking($this->handoverConfirmationForm())
             ->external()->offering('approved', 'rejected')->dueIn(72)->create();
 
         $exit->publish();
 
         return $exit;
+    }
+
+    /**
+     * What HR asks when it clears an exit.
+     *
+     * Drawn from the old tool's own HR clearance screen — the ID card, what is being
+     * recovered and why — but as five rows in two tables rather than as columns on the
+     * exit itself, which is the whole difference this module exists to make. Vertex Foods
+     * will ask something different on the same step and nobody will write a migration.
+     */
+    private function hrClearanceForm(): FormDefinition
+    {
+        $form = FormDefinition::factory()->named('hr_clearance', 'HR clearance')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('id_card_returned', 'ID card returned', FormField::Boolean)->create();
+
+        FormField::factory()->on($form)->at(2)
+            ->asking('notice_shortfall_days', 'Notice period short by (days)', FormField::Number)
+            ->limitedBy(['min' => 0, 'max' => 180])->create();
+
+        FormField::factory()->on($form)->at(3)
+            ->asking('remarks', 'Anything HR wants on the record', FormField::Textarea)->create();
+
+        $form->publish();
+
+        return $form;
+    }
+
+    /**
+     * What finance asks. Chandni holds this step for the whole company, so this is the
+     * form on the card she opens — the imprest card back, what is owed each way, and why.
+     *
+     * Both money questions are `money` rather than `number` on purpose: module 08 turns a
+     * money question on a clearance step into a line of the settlement statement, and a
+     * plain number cannot become one because nothing says whether it is rupees or laptops.
+     */
+    private function financeClearanceForm(): FormDefinition
+    {
+        $form = FormDefinition::factory()->named('finance_clearance', 'Finance clearance')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('imprest_card_returned', 'Imprest card returned', FormField::Boolean)->create();
+
+        FormField::factory()->on($form)->at(2)
+            ->asking('recover_from_them', 'Amount to recover from them', FormField::Money)->create();
+
+        FormField::factory()->on($form)->at(3)
+            ->asking('recovery_reason', 'What the recovery is for', FormField::Select)
+            ->choosing([
+                'advance' => 'Salary advance',
+                'imprest' => 'Imprest not settled',
+                'asset' => 'Asset not returned',
+                'other' => 'Something else',
+            ])->create();
+
+        FormField::factory()->on($form)->at(4)
+            ->asking('pay_to_them', 'Amount payable to them', FormField::Money)->create();
+
+        FormField::factory()->on($form)->at(5)
+            ->asking('remarks', 'Anything finance wants on the record', FormField::Textarea)->create();
+
+        $form->publish();
+
+        return $form;
+    }
+
+    /**
+     * The one question the leaver is asked through their link.
+     *
+     * A form of its own rather than a box the link page invented, because an answer that
+     * no step asked for is refused everywhere else in the product and this must not be
+     * the exception. The link page still draws one fixed box; giving it the step's real
+     * form is module 10's screen and is written down there.
+     */
+    private function handoverConfirmationForm(): FormDefinition
+    {
+        $form = FormDefinition::factory()->named('handover_note', 'Handover confirmation')->create();
+
+        FormField::factory()->on($form)->at(1)
+            ->asking('note', 'Anything you want on the record', FormField::Textarea)
+            ->limitedBy(['max_length' => 2000])->create();
+
+        $form->publish();
+
+        return $form;
     }
 
     /**

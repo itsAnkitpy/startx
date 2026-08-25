@@ -4,12 +4,16 @@ namespace App\Filament\Pages;
 
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
+use App\Models\Designation;
+use App\Models\FormField;
+use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\User;
 use App\Process\AssigneeResolver;
 use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
 use App\Process\CaseEngine;
+use App\Process\StepForm;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -40,6 +44,20 @@ class MyQueue extends Page
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-inbox-stack';
 
     protected static ?int $navigationSort = -1;
+
+    /**
+     * What has been typed into the forms on this page, as
+     * `[case id][step position][question] => answer`.
+     *
+     * Held on the component rather than posted, because the page shows several steps at
+     * once and each carries its own form. Nothing here is trusted: it is checked against
+     * the client's own question definitions on the server before it reaches the engine,
+     * and the engine refuses an answer to a question the step does not ask no matter
+     * which of the three ways in it arrived by.
+     *
+     * @var array<int, array<int, array<string, mixed>>>
+     */
+    public array $answers = [];
 
     /**
      * The steps waiting on whoever is signed in, worked out fresh on every render.
@@ -126,22 +144,102 @@ class MyQueue extends Page
         );
     }
 
-    /** Record a decision on a step. */
+    /**
+     * What one step asks, in the order the client put the questions in.
+     *
+     * @return Collection<int, FormField>
+     */
+    public function questionsOn(AvailableStep $waiting): Collection
+    {
+        return (new StepForm)->fields($waiting->step);
+    }
+
+    /**
+     * The rows a picker offers, as `id => name`.
+     *
+     * Only the three picker types have any, and each reads the client's own table. The
+     * tenant wall does the scoping, so this is the client's own people, their own
+     * departments and their own designations without a word here saying so.
+     *
+     * @return array<int, string>
+     */
+    public function optionsFor(FormField $field): array
+    {
+        return match ($field->type) {
+            FormField::UserPicker => User::query()->orderBy('name')->pluck('name', 'id')->all(),
+            FormField::OrgUnitPicker => OrgUnit::query()->orderBy('name')->pluck('name', 'id')->all(),
+            FormField::DesignationPicker => Designation::query()->where('active', true)
+                ->orderBy('name')->pluck('name', 'id')->all(),
+            default => [],
+        };
+    }
+
+    /**
+     * Record a decision on a step, with whatever its form asked for.
+     *
+     * The answers are checked here against the client's own definitions, which is what
+     * puts "Imprest card returned is required" under the right box. That is not the only
+     * check and is not the important one — the engine refuses an answer to a question the
+     * step does not ask, and it refuses it whether it came from this page, from a link
+     * sent to somebody with no account, or from a console command.
+     */
     public function decide(int $caseId, int $sequence, string $outcome): void
     {
-        $this->run(
-            fn (CaseEngine $engine, $case) => $engine->decide($case, $sequence, $outcome, $this->person()),
+        // Whether this step is actually waiting on this person is settled before a word
+        // of their answers is looked at, for the reason the engine gives where it checks
+        // the same thing: somebody with no business at this step has no business being
+        // told what it asks either. Read from the same list the page is drawn from, so
+        // the screen and the check cannot disagree.
+        //
+        // Anything else falls straight through to the engine, whose refusal is written to
+        // be read by the person it refuses — a colleague already holding the step, a case
+        // in another company, a step that is not part of this process.
+        $waiting = $this->queue()->first(fn (AvailableStep $step): bool => (int) $step->case->getKey() === $caseId
+            && (int) $step->step->sequence === $sequence);
+
+        if ($waiting !== null) {
+            $forms = new StepForm;
+            $under = "answers.{$caseId}.{$sequence}.";
+
+            // Rewritten under the property path the inputs are bound to, so a refusal
+            // lands beside the box it is about instead of at the top of the page.
+            $this->validate(
+                collect($forms->rules($waiting->step))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
+                [],
+                collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
+            );
+        }
+
+        $recorded = $this->run(
+            fn (CaseEngine $engine, $found) => $engine->decide(
+                $found,
+                $sequence,
+                $outcome,
+                $this->person(),
+                $this->answers[$caseId][$sequence] ?? [],
+            ),
             $caseId,
             'Recorded.',
         );
+
+        // Only once it is actually recorded. A refusal is a sentence asking the person to
+        // do something differently — a colleague took the step first, or the outcome is
+        // not one this step offers — and clearing the boxes underneath it would make them
+        // type the whole clearance again to read the same refusal.
+        if ($recorded) {
+            unset($this->answers[$caseId][$sequence]);
+        }
     }
 
     /**
      * Every refusal the engine makes is written to be read by the person it refuses, so
      * it is shown as it stands rather than replaced with a screen-level apology. That is
      * also the point of the page: a step that is not yours says so in words.
+     *
+     * Returns whether the act went through, so that a caller holding what somebody typed
+     * knows whether it is safe to clear.
      */
-    private function run(callable $act, int $caseId, string $said): void
+    private function run(callable $act, int $caseId, string $said): bool
     {
         // Scoped to the client company by the wall every query carries, so an id from
         // another company's case simply is not found.
@@ -150,13 +248,15 @@ class MyQueue extends Page
         if ($case === null) {
             Notification::make()->danger()->title('That case is not one of yours.')->send();
 
-            return;
+            return false;
         }
 
         try {
             $act(new CaseEngine, $case);
 
             Notification::make()->success()->title($said)->send();
+
+            return true;
         } catch (ProcessRefused $refused) {
             // Only the engine's own refusals, which are written for the person being
             // refused. Anything else is a fault rather than an answer, and putting its
@@ -165,6 +265,8 @@ class MyQueue extends Page
             // as a refusal in words, so nothing a person can cause is lost by narrowing
             // this.
             Notification::make()->danger()->title($refused->getMessage())->send();
+
+            return false;
         }
     }
 

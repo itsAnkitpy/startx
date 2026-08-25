@@ -248,7 +248,10 @@ final class CaseEngine
 
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
-            $attempt->payload = array_merge((array) $attempt->payload, $payload);
+            $attempt->payload = array_merge(
+                (array) $attempt->payload,
+                (new StepForm)->onlyWhatThisStepAsks($step, $payload),
+            );
             $attempt->save();
 
             $this->record($case, 'step_acted', $by, array_filter([
@@ -343,7 +346,10 @@ final class CaseEngine
             $attempt->external_assignee = $answered;
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
-            $attempt->payload = array_merge((array) $attempt->payload, $payload);
+            $attempt->payload = array_merge(
+                (array) $attempt->payload,
+                (new StepForm)->onlyWhatThisStepAsks($step, $payload),
+            );
             $attempt->save();
 
             $this->record($link->case, 'step_acted', null, [

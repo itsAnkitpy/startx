@@ -6,6 +6,7 @@ use App\Models\CaseStep;
 use App\Models\Designation;
 use App\Models\EmployeeAsset;
 use App\Models\EmploymentRecord;
+use App\Models\FormField;
 use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
@@ -66,7 +67,8 @@ function meridiansExit(): ProcessTemplate
     return liveProcess(function (ProcessTemplate $exit) {
         ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
             ->offering('approved', 'rejected', 'sent_back')->create();
-        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')->clearance()->dueIn(24)->create();
+        ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('IT clearance')
+            ->collecting('assets_out', FormField::Number)->clearance()->dueIn(24)->create();
         ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->dueIn(8)->create();
         ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(4, 3)->named('Close')->offering('approved')->create();
     });
@@ -530,7 +532,7 @@ it('brings the step that sent the case back round again once the redo is done', 
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
-                ->offering('approved', 'sent_back')->create();
+                ->collecting('recovery')->offering('approved', 'sent_back')->create();
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
@@ -560,7 +562,7 @@ it('re-does a step that had already been claimed', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
-                ->offering('approved', 'sent_back')->create();
+                ->collecting('recovery')->offering('approved', 'sent_back')->create();
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
                 ->offering('approved', 'sent_back')->create();
         });
@@ -586,7 +588,7 @@ it('makes a step the new answer needs appear on its own after a redo', function 
 
         $exit = liveProcess(function (ProcessTemplate $exit) {
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')
-                ->offering('approved', 'sent_back')->create();
+                ->collecting('recovery')->offering('approved', 'sent_back')->create();
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen([['source' => 'payload', 'field' => 'recovery', 'operator' => '>', 'value' => 100000]])
                 ->offering('approved')->create();
@@ -945,7 +947,7 @@ it('opens a step when only its second group of conditions holds', function () {
         $senior = Designation::factory()->create(['name' => 'Vice President']);
 
         $exit = liveProcess(function (ProcessTemplate $exit) use ($senior) {
-            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->collecting('annual_ctc')->offering('approved')->create();
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen(
                     [['source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>', 'value' => 1500000]],
@@ -971,7 +973,7 @@ it('leaves a running case alone when the client raises a threshold, and follows 
         declareDirectorThresholdForRunning();
 
         $exit = liveProcess(function (ProcessTemplate $exit) {
-            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->collecting('annual_ctc')->offering('approved')->create();
             ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Director approval')
                 ->happensWhen([[
                     'source' => 'payload', 'field' => 'annual_ctc',

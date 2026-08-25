@@ -104,8 +104,12 @@ it('lets the holder decide a step, and opens the next group to somebody else', f
         $chandni = atMeridianCalled('chandni');
         $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
+        // HR's clearance asks whether the ID card came back, and it is a required
+        // question, so a decision without it is refused on the server.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
             ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->assertHasNoErrors()
             ->assertOk();
 
         // Gone from Rakesh's list, and the finance clearance behind it is now Chandni's —
@@ -123,8 +127,14 @@ it('refuses a step that is not yours, in words', function () {
 
         // Deepak can reach the page but the clearance is not his, and the engine says so
         // rather than the screen quietly doing nothing.
+        //
+        // Nothing is asserted about the form on purpose: a step that is not his is never
+        // checked against its questions at all, because somebody with no business at a
+        // step has no business being told what it asks. So this refusal is the ownership
+        // one and not a required question he was never shown.
         Livewire::actingAs($deepak)->test(MyQueue::class)
             ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->assertHasNoErrors()
             ->assertOk();
 
         expect(CaseStep::query()->where('case_id', $anjalisExit->getKey())->count())->toBe(0);
@@ -195,7 +205,9 @@ it('says on the card when a step only reached somebody because nobody holds the 
         // Clearing Anjali's HR step puts the finance clearance — genuinely Chandni's job —
         // in her list beside Rohit's, which only reached her because Pune has no HR head.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->call('decide', $anjalisExit->getKey(), 1, 'approved');
+            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
+            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
 
         Livewire::actingAs($chandni)->test(MyQueue::class)
             ->assertOk()

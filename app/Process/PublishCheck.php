@@ -3,6 +3,7 @@
 namespace App\Process;
 
 use App\Exceptions\ProcessRefused;
+use App\Models\FormDefinition;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -127,6 +128,7 @@ final readonly class PublishCheck
             $this->problemsWithWhoItBelongsTo($step),
             $this->problemsWithItsChasing($step),
             $this->problemsWithWhereItEscalates($step),
+            $this->problemsWithWhatItAsks($step),
         );
 
         foreach ($step->open_conditions ?? [] as $set) {
@@ -156,6 +158,42 @@ final readonly class PublishCheck
         }
 
         return $problems;
+    }
+
+    /**
+     * A step asking questions that can still be changed underneath it.
+     *
+     * The only protection a closed step has is that the questions it asked cannot change,
+     * and that protection *is* the form being live: the database refuses a change to a
+     * live form's questions, and lets a draft be edited freely, which is the whole point
+     * of a draft. So a live process whose step points at a draft has no protection at
+     * all — Chandni answers the finance clearance in March, Anjali renames and removes
+     * questions on the draft in April, and the answers on Anjali's closed exit are now
+     * filed against questions nobody was ever asked.
+     *
+     * Invisible in the same way everything else here is: nothing errors and no screen is
+     * missing. The step asks the draft's questions of the day, whatever they are.
+     *
+     * @return list<string>
+     */
+    private function problemsWithWhatItAsks(ProcessStep $step): array
+    {
+        if ($step->form_definition_id === null) {
+            return [];
+        }
+
+        $form = $step->form;
+
+        if ($form === null || $form->status === FormDefinition::Published) {
+            return [];
+        }
+
+        return [$form->status === FormDefinition::Draft
+            ? $this->at($step)." asks the questions on the form [{$form->name}], which is still a draft. "
+                .'A draft can be edited, so the questions on this step could still change after somebody '
+                .'has answered them. Make the form live first.'
+            : $this->at($step)." asks the questions on the form [{$form->name}], which has been replaced "
+                .'by a newer version. Point the step at the version that is live.'];
     }
 
     /**
