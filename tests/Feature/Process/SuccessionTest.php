@@ -412,3 +412,19 @@ it('writes the handover onto the exit\'s own history', function () {
             ->toEqual(['approvals' => 1, 'roles' => 1, 'reporting_lines' => 2]);
     });
 });
+
+it('refuses the leaver settling their own handover, and the successor confirming their own', function () {
+    TenantContext::run($this->meridian, function () {
+        $world = rakeshsDeparture();
+        $exit = $world['rakeshsExit'];
+
+        // The plan has Rakesh's manager nominating and HR confirming, which is two other
+        // people. One person taking a branch's roles, approvals and reporting lines on
+        // their own say-so is the signature this product exists to make impossible.
+        expect(fn () => Succession::handOver($exit, $world['priya'], $world['rakesh']))
+            ->toThrow(ProcessRefused::class, 'not yours to do when the case is about you');
+
+        expect(fn () => Succession::handOver($exit, $world['priya'], $world['priya']))
+            ->toThrow(ProcessRefused::class, 'cannot be the one confirming that the work passes to them');
+    });
+});

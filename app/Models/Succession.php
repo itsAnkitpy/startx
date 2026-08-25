@@ -3,8 +3,6 @@
 namespace App\Models;
 
 use App\Exceptions\ProcessRefused;
-use App\Process\AssigneeResolver;
-use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
 use App\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
@@ -120,21 +118,8 @@ class Succession extends Model
      */
     public static function whatWouldMove(User $leaver): array
     {
-        $open = ProcessCase::query()
-            ->whereNull('closed_at')
-            ->whereNull('cancelled_at')
-            ->get();
-
-        $resolver = new AssigneeResolver;
-
-        $waiting = (new AvailableSteps)->forAll($open)
-            ->filter(fn (AvailableStep $available) => $resolver
-                ->resolve($available->case, $available->step)
-                ->contains(fn (User $person) => (int) $person->getKey() === (int) $leaver->getKey()))
-            ->count();
-
         return [
-            'approvals_waiting' => $waiting,
+            'approvals_waiting' => (new AvailableSteps)->waitingOn($leaver)->count(),
             'direct_reports' => EmploymentRecord::query()
                 ->where('reports_to_id', $leaver->getKey())
                 ->whereNull('effective_to')
@@ -176,6 +161,24 @@ class Succession extends Model
 
         if ((int) $leaver->getKey() === (int) $successor->getKey()) {
             throw ProcessRefused::nobodySucceedsThemselves($leaver->name);
+        }
+
+        // The same rule the three acts outside a step already carry: the person the case
+        // is about does not settle it, and nobody hands the work to themselves. Rakesh
+        // confirming who inherits his own branch, or the successor confirming their own
+        // inheritance, is the signature this product cannot afford to record. The plan
+        // has the manager nominating and HR confirming, and both of those are somebody
+        // else.
+        //
+        // ponytail: *which* other employees may confirm a handover is the same open
+        // permission as cancelling a case or overriding a hold, and module 07's screens
+        // own it. Until then any other account holder still reaches this.
+        if ((int) $leaver->getKey() === (int) $by->getKey()) {
+            throw ProcessRefused::theCaseIsAboutThem('Settling who takes the work on');
+        }
+
+        if ((int) $successor->getKey() === (int) $by->getKey()) {
+            throw ProcessRefused::nobodyHandsTheWorkToThemselves($successor->name);
         }
 
         // Somebody's work only moves on once. A second handover finds no claimed steps,

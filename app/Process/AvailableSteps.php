@@ -7,6 +7,7 @@ use App\Models\EmploymentRecord;
 use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as CaseCollection;
 use Illuminate\Support\Collection;
@@ -51,6 +52,52 @@ final class AvailableSteps
     public function for(ProcessCase $case): Collection
     {
         return $this->forAll(new CaseCollection([$case]));
+    }
+
+    /**
+     * Every step across the client company that is this person's turn right now.
+     *
+     * The queue screen's whole answer, and the same one the handover preview counts.
+     * Open cases are read, each one is asked which of its steps is waiting, and each of
+     * those is put through the rule that works out who it belongs to — a step nobody has
+     * touched has no row with anybody's name on it, so there is nothing to look up and
+     * the only way to know is to work it out.
+     *
+     * A step somebody else has already picked up is not this person's turn even where
+     * they could have taken it, which is what keeps a shared queue from showing five
+     * people the same piece of work after one of them has started it.
+     *
+     * ponytail: who a waiting step belongs to is worked out one step at a time, so a
+     * client with a great many open cases pays a handful of reads per waiting step.
+     * Measured on a seeded company rather than guessed, and left alone: storing who each
+     * step belongs to is the thing this whole module exists to avoid. Narrow the open
+     * cases — by department, or by the processes this person's roles ever appear in —
+     * the day a real client's list is slow.
+     *
+     * @return Collection<int, AvailableStep>
+     */
+    public function waitingOn(User $person, ?AssigneeResolver $resolver = null): Collection
+    {
+        $resolver ??= new AssigneeResolver;
+
+        $open = ProcessCase::query()
+            ->whereNull('closed_at')
+            ->whereNull('cancelled_at')
+            ->get();
+
+        return $this->forAll($open)
+            ->filter(function (AvailableStep $available) use ($resolver, $person): bool {
+                $takenBySomebodyElse = $available->attempt?->assignee_id !== null
+                    && (int) $available->attempt->assignee_id !== (int) $person->getKey();
+
+                if ($takenBySomebodyElse) {
+                    return false;
+                }
+
+                return $resolver->resolve($available->case, $available->step)
+                    ->contains(fn (User $candidate) => (int) $candidate->getKey() === (int) $person->getKey());
+            })
+            ->values();
     }
 
     /**
@@ -371,9 +418,15 @@ final class AvailableSteps
      * record saying it was ever expected.
      *
      * An unanswered field makes every comparison false, so the step it guards is
-     * skipped. That is only safe because publishing has already refused the two ways a
-     * condition can be permanently unanswerable — a field no form collects, and a field
-     * collected in the step's own group or later.
+     * skipped — and a skipped approval reads exactly like a given one.
+     *
+     * **Publishing does not yet refuse the two ways a condition can be permanently
+     * unanswerable** — a field no form collects, and a field collected in the step's own
+     * group or later. {@see PublishCheck} says so in its own words: the refusal needs to
+     * know which step collects which field, and that is module 04's table. Until it
+     * lands, a template can be published whose condition can never be true, and the step
+     * behind it silently never happens. Wiring that refusal is module 04's, and this is
+     * the sentence that says why it cannot be skipped.
      *
      * The comparisons are deliberately loose. A designation id arrives from the client's
      * flat file as text and from a picker as a number, and both mean the same

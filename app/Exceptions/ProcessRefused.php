@@ -361,6 +361,19 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * Somebody confirming that they themselves inherit a leaver's work.
+     *
+     * The plan has the leaver's manager nominating a successor and HR confirming it,
+     * which is two other people. One person taking a branch's roles, approvals and
+     * reporting lines on their own say-so is the signature the product exists to make
+     * impossible.
+     */
+    public static function nobodyHandsTheWorkToThemselves(string $name): self
+    {
+        return new self("{$name} cannot be the one confirming that the work passes to them.");
+    }
+
+    /**
      * A second handover asked for on somebody whose work has already moved on.
      *
      * The first one took the roles, the reporting lines and the open approvals, so a
