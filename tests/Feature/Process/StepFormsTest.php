@@ -930,6 +930,24 @@ it('refuses a question hidden by anything but whether a document was attached', 
     });
 });
 
+it('refuses a question hidden by words compared as a figure', function () {
+    TenantContext::run($this->meridian, function () {
+        // The same silence, arriving the other way round: asking whether a paragraph is
+        // over fifty thousand is not a question with an answer, so the question underneath
+        // it is never asked and whatever waits on that answer never happens either.
+        $exit = aDraftExitAsking([
+            ['key' => 'hr_remarks', 'label' => 'Anything HR wants to add', 'type' => FormField::Textarea],
+            ['key' => 'recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'hr_remarks', 'operator' => '>', 'value' => 50000]]]],
+        ]);
+
+        expect(fn () => $exit->publish())->toThrow(
+            ProcessRefused::class,
+            'answered with words rather than a figure',
+        );
+    });
+});
+
 it('lets HR attach the photograph of a returned card, on the card Ankit opens', function () {
     Storage::fake('local');
 

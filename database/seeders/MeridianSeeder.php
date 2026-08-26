@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Authorization\StarterRoles;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
 use App\Models\FormField;
@@ -69,6 +70,7 @@ class MeridianSeeder extends Seeder
             $exit = $this->exitProcess();
 
             $this->casesAlreadyRunning($exit, $people);
+            $this->theExitBuiltWithTheMistake($people);
         });
     }
 
@@ -179,14 +181,24 @@ class MeridianSeeder extends Seeder
      */
     private function rolesTheyHold(array $people, array $units): void
     {
-        $hrHead = Role::factory()->keyed('hr_head', 'HR head')->create();
-        $administrator = Role::factory()->keyed(Role::AdministratorKey, 'Administrator')->create();
-        $financeHead = Role::factory()->keyed('finance_head', 'Finance head')->create();
+        // Each demo role carries the actions the same role really carries on a client
+        // company created through the platform, rather than being a name with nothing
+        // behind it. Without them nobody in the demo may see a person's record, and the
+        // screens that ask before they open would be shut to everybody.
+        $starter = StarterRoles::definitions();
+
+        $hrHead = Role::factory()->keyed('hr_head', 'HR head')
+            ->withPermissions($starter['hr_head']['permissions'])->create();
+        $administrator = Role::factory()->keyed(Role::AdministratorKey, 'Administrator')
+            ->withPermissions($starter[Role::AdministratorKey]['permissions'])->create();
+        $financeHead = Role::factory()->keyed('finance_head', 'Finance head')
+            ->withPermissions($starter['finance_approver']['permissions'])->create();
 
         // Where every step of the exit goes when it runs past its own deadline. Held over
         // the whole company by one person, so a late Shimla clearance can be watched
         // appearing in her list beside the branch's own people rather than instead of them.
-        $hrDirector = Role::factory()->keyed('hr_director', 'HR director')->create();
+        $hrDirector = Role::factory()->keyed('hr_director', 'HR director')
+            ->withPermissions($starter['hr_head']['permissions'])->create();
 
         $grant = function (Role $role, User $person, ?OrgUnit $unit) use (&$grant): void {
             $role->assignments()->create([
@@ -407,5 +419,63 @@ class MeridianSeeder extends Seeder
 
         $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link:');
         $this->command?->line($address);
+    }
+
+    /**
+     * A second exit process built with the mistake the check at publishing now refuses,
+     * and one case running on it.
+     *
+     * It is here because the failure that check prevents cannot be seen anywhere else.
+     * The manager's sign-off waits on `amount_recovered`, and what finance is actually
+     * asked is `recover_from_them` — one rename apart, which is how this happens. Nothing
+     * errors: the engine looks for an answer that was never collected, finds none, decides
+     * the step is not wanted, and the exit finishes with the manager never having been
+     * asked. Every screen looks exactly as it does when the sign-off was given properly.
+     *
+     * Priya is the leaver and her manager is Chandni, who also holds finance. So one
+     * person can clear the finance step and watch the exit end without the sign-off that
+     * was hers to give.
+     *
+     * Version 2 is left as an unfinished draft carrying the same mistake, so the refusal
+     * can be read as well as the failure it prevents:
+     * `php artisan process:publish exit_with_the_mistake --tenant=meridian`.
+     *
+     * @param  array<string, User>  $people
+     */
+    private function theExitBuiltWithTheMistake(array $people): void
+    {
+        // The form the real exit already uses, rather than a second copy of it — making
+        // another version of the same form would archive the one Meridian's live exit
+        // points at.
+        $finance = FormDefinition::query()
+            ->where('key', 'finance_clearance')
+            ->where('status', FormDefinition::Published)
+            ->sole();
+
+        $broken = ProcessTemplate::factory()
+            ->named('exit_with_the_mistake', 'Exit (the mistake this check catches)')
+            ->about('employee')->create();
+
+        ProcessStep::factory()->of($broken)->at(1, 1)->named('Finance clearance')
+            ->asking($finance)
+            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected')->dueIn(48)->create();
+
+        ProcessStep::factory()->of($broken)->at(2, 2)->named('Manager sign-off')
+            ->offering('approved')->dueIn(24)
+            ->state([
+                'assignee_rule' => ['kind' => 'reporting_manager'],
+                'open_conditions' => [[[
+                    'source' => 'payload', 'field' => 'amount_recovered', 'operator' => '>', 'value' => 0,
+                ]]],
+            ])->create();
+
+        // Made live without going through the check, because the check is what this exists
+        // to demonstrate and it refuses exactly this. It is also the honest state of any
+        // client who published a process before the check was written.
+        $broken->forceFill(['status' => ProcessTemplate::Published])->save();
+
+        (new CaseEngine)->open($broken, $people['priya'], $people['chandni']);
+
+        $broken->draftNextVersion();
     }
 }

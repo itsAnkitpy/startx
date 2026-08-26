@@ -1,6 +1,8 @@
 <?php
 
 use App\Exceptions\ProcessRefused;
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Tenant;
@@ -27,6 +29,22 @@ use App\Tenancy\TenantContext;
 beforeEach(function () {
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
     $this->files = [];
+
+    // The form the first row of the typed file names, asking the three things the steps
+    // further down open on. A step can only open on an answer some earlier step actually
+    // collects, so without this the file describes a process that could never go live.
+    TenantContext::run($this->meridian, function () {
+        $form = FormDefinition::factory()->named('ack_form', 'Resignation details')->create();
+
+        FormField::factory()->on($form)->at(1)
+            ->asking('annual_ctc', 'Annual package', FormField::Money)->create();
+        FormField::factory()->on($form)->at(2)
+            ->asking('handover_needed', 'Is a handover needed', FormField::Boolean)->create();
+        FormField::factory()->on($form)->at(3)
+            ->asking('assets_held', 'Company property still held', FormField::Boolean)->create();
+
+        $form->publish();
+    });
 });
 
 afterEach(function () {
@@ -79,6 +97,7 @@ function stepsToCompare(ProcessTemplate $template): array
         'sequence' => $step->sequence,
         'group_no' => $step->group_no,
         'name' => $step->name,
+        'form_definition_id' => $step->form_definition_id,
         'participant_kind' => $step->participant_kind,
         'assignee_rule' => $step->assignee_rule,
         'open_conditions' => $step->open_conditions,
@@ -387,6 +406,104 @@ it('refuses two rows for one step where only one of them says when the step open
 
     expect(fn () => (new FlatFile)->read($file))
         ->toThrow(ProcessRefused::class, 'both rows need one');
+});
+
+it('makes an imported draft live, and says why when it cannot', function () {
+    declareVertexsDirectorThreshold();
+
+    // The whole claim, end to end: somebody types the process into a spreadsheet, reads
+    // it in, and makes it live without editing anything.
+    $this->artisan('process:import', [
+        'file' => aProcessFile(vertexsExitAsTyped()),
+        '--tenant' => 'meridian',
+        '--key' => 'exit',
+        '--name' => 'Exit',
+        '--about' => 'employee',
+    ])->assertSuccessful();
+
+    $this->artisan('process:publish', ['key' => 'exit', '--tenant' => 'meridian'])->assertSuccessful();
+
+    TenantContext::run($this->meridian, function () {
+        expect(ProcessTemplate::query()->where('key', 'exit')->sole()->status)->toBe(ProcessTemplate::Published);
+    });
+
+    // The same file with the director's step pointing at a figure nothing collects. It
+    // imports happily, because a draft is allowed to be half-finished, and is refused at
+    // the one moment there is still something to do about it.
+    $broken = str_replace('payload.annual_ctc >', 'payload.annual_salary >', vertexsExitAsTyped());
+
+    $this->artisan('process:import', [
+        'file' => aProcessFile($broken),
+        '--tenant' => 'meridian',
+        '--key' => 'exit',
+    ])->assertSuccessful();
+
+    $this->artisan('process:publish', ['key' => 'exit', '--tenant' => 'meridian'])
+        ->expectsOutputToContain('which no form on this process asks')
+        ->assertFailed();
+
+    TenantContext::run($this->meridian, function () {
+        expect(ProcessTemplate::query()->where('key', 'exit')->where('version', 2)->sole()->status)
+            ->toBe(ProcessTemplate::Draft);
+    });
+});
+
+it("points a step at the client's own form when the row names one", function () {
+    $this->artisan('process:import', [
+        'file' => aProcessFile(vertexsExitAsTyped()),
+        '--tenant' => 'meridian',
+        '--key' => 'exit',
+        '--name' => 'Exit',
+        '--about' => 'employee',
+    ])->assertSuccessful();
+
+    TenantContext::run($this->meridian, function () {
+        $steps = ProcessTemplate::query()->where('key', 'exit')->sole()->steps;
+
+        expect($steps[0]->form?->key)->toBe('ack_form')
+            // Every other row leaves the column empty, which is a step that asks nothing.
+            ->and($steps[1]->form_definition_id)->toBeNull();
+    });
+});
+
+it('refuses a file naming a form this client does not have, and writes nothing at all', function () {
+    $typed = str_replace('ack_form', 'no_such_form', vertexsExitAsTyped());
+
+    $this->artisan('process:import', [
+        'file' => aProcessFile($typed),
+        '--tenant' => 'meridian',
+        '--key' => 'exit',
+        '--name' => 'Exit',
+        '--about' => 'employee',
+    ])->assertFailed();
+
+    // Nothing left behind, because a half-written draft is what refuses the corrected file.
+    TenantContext::run($this->meridian, function () {
+        expect(ProcessTemplate::query()->where('key', 'exit')->exists())->toBeFalse();
+    });
+});
+
+it('refuses a file naming a form that is still a draft', function () {
+    TenantContext::run($this->meridian, function () {
+        $draft = FormDefinition::factory()->named('handover_form', 'Handover note')->create();
+        FormField::factory()->on($draft)->asking('notes', 'Notes')->create();
+    });
+
+    // A draft can still be edited, so a step pointing at one would ask whatever it says on
+    // the day — which is what publishing already refuses for a process built on the screen.
+    $typed = str_replace('ack_form', 'handover_form', vertexsExitAsTyped());
+
+    $this->artisan('process:import', [
+        'file' => aProcessFile($typed),
+        '--tenant' => 'meridian',
+        '--key' => 'exit',
+        '--name' => 'Exit',
+        '--about' => 'employee',
+    ])->assertFailed();
+
+    TenantContext::run($this->meridian, function () {
+        expect(ProcessTemplate::query()->where('key', 'exit')->exists())->toBeFalse();
+    });
 });
 
 it('refuses a file whose heading is missing a column every row needs', function () {

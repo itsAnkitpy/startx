@@ -3,12 +3,14 @@
 namespace App\Console\Commands;
 
 use App\Exceptions\ProcessRefused;
+use App\Models\FormDefinition;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Tenant;
 use App\Process\FlatFile;
 use App\Tenancy\TenantContext;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Type a client's process into a spreadsheet, save it as CSV, and run this.
@@ -95,14 +97,33 @@ class ImportProcess extends Command
             return self::FAILURE;
         }
 
-        $draft = new ProcessTemplate(['key' => $key, 'name' => $name, 'subject_kind' => $about]);
-        $draft->version = ($latest?->version ?? 0) + 1;
-        $draft->status = ProcessTemplate::Draft;
-        $draft->save();
+        // Every form the file names is found before a single row is written, for the same
+        // reason the file is read before anything is looked up: a file naming a form this
+        // client does not have has to leave no half-written draft behind, because that
+        // draft is then what refuses the corrected file.
+        $steps = array_map(function (array $step): array {
+            $formKey = $step['form_key'];
+            unset($step['form_key']);
 
-        foreach ($steps as $step) {
-            ProcessStep::create(['template_id' => $draft->getKey()] + $step);
-        }
+            return ['form_definition_id' => $formKey === null ? null : $this->theLiveFormCalled($formKey)] + $step;
+        }, $steps);
+
+        // The version and its steps are written together or not at all. A row refused
+        // halfway down a long file would otherwise leave the draft behind with some of
+        // its steps in it, and that draft is then what refuses the corrected file — with
+        // nothing in the product able to clear it.
+        $draft = DB::transaction(function () use ($key, $name, $about, $latest, $steps): ProcessTemplate {
+            $draft = new ProcessTemplate(['key' => $key, 'name' => $name, 'subject_kind' => $about]);
+            $draft->version = ($latest?->version ?? 0) + 1;
+            $draft->status = ProcessTemplate::Draft;
+            $draft->save();
+
+            foreach ($steps as $step) {
+                ProcessStep::create(['template_id' => $draft->getKey()] + $step);
+            }
+
+            return $draft;
+        });
 
         $this->components->info(
             "[{$name}] version {$draft->version} is a draft with ".count($steps).' steps in it. '
@@ -110,5 +131,30 @@ class ImportProcess extends Command
         );
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The client's live form of that name, which is the only version a step may point at.
+     *
+     * A draft can still be edited, so a step pointing at one would ask whatever the draft
+     * says on the day — which is what publishing already refuses for a process built on
+     * the screen. Refusing it here as well means a typed file cannot arrive in a state the
+     * screen would not have let anybody build.
+     */
+    private function theLiveFormCalled(string $key): int
+    {
+        $form = FormDefinition::query()
+            ->where('key', $key)
+            ->where('status', FormDefinition::Published)
+            ->first();
+
+        if ($form === null) {
+            throw ProcessRefused::thatRowIsWrong(
+                "[form_key] says a step asks the form [{$key}], and this client has no live form of that name. "
+                .'Make that form live first, or leave the column empty for a step that asks nothing.'
+            );
+        }
+
+        return $form->getKey();
     }
 }

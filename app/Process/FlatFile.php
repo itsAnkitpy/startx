@@ -30,11 +30,15 @@ final class FlatFile
      * The columns, in the order the export writes them. Only the first four are
      * required; the rest may be left out of a hand-typed file entirely.
      *
-     * Two of them are read and stored against nothing, each waiting on the module that
-     * owns what it points at: `form_key` on module 04's form definitions, and `notify`
-     * on module 06 settling whether an entry is a bare template key or a key with a
-     * recipient beside it. They are accepted rather than refused so a client's file does
-     * not have to be edited when those modules arrive.
+     * One of them is read and stored against nothing, waiting on the module that owns
+     * what it points at: `notify`, on module 06 settling whether an entry is a bare
+     * template key or a key with a recipient beside it. It is accepted rather than
+     * refused so a client's file does not have to be edited when that module arrives.
+     *
+     * `form_key` is read here as the name it is written as and turned into the client's
+     * own form by whoever is importing, because the forms belong to one client and this
+     * reader deliberately touches no database at all — a file that turns out not to be a
+     * process has to leave no trace of having been tried.
      */
     public const Columns = [
         'sequence', 'group', 'step_name', 'assignee', 'form_key', 'outcomes',
@@ -100,7 +104,8 @@ final class FlatFile
         $out = fopen('php://temp', 'r+');
         fputcsv($out, self::Columns, escape: '');
 
-        foreach ($template->steps as $step) {
+        // The forms come with the steps, or naming each step's form is a query per step.
+        foreach ($template->load('steps.form')->steps as $step) {
             // A step opening on either of two condition sets is the one thing that spans
             // rows, so it is written as the sets it has and as one row when it has none.
             $sets = $step->open_conditions ?: [null];
@@ -222,6 +227,10 @@ final class FlatFile
             'sequence' => $this->countingNumber($at('sequence'), 'sequence'),
             'group_no' => $this->countingNumber($at('group'), 'group'),
             'name' => $this->words($at('step_name')),
+
+            // The name of the form this step asks, not the form itself. Left in the row
+            // for whoever imports to look up against this one client's forms.
+            'form_key' => trim($at('form_key')) === '' ? null : trim($at('form_key')),
             'participant_kind' => $this->participant($at('participant')),
             'assignee_rule' => $this->assignee($at('assignee')),
             'allowed_outcomes' => $this->outcomes($at('outcomes')),
@@ -520,6 +529,7 @@ final class FlatFile
             'group' => (string) $step->group_no,
             'step_name' => $step->name,
             'assignee' => $this->writtenAssignee($step->assignee_rule ?? []),
+            'form_key' => $step->form?->key ?? '',
             'outcomes' => implode(',', $step->allowed_outcomes ?? []),
             'sla_hours' => $step->sla_hours === null ? '' : (string) $step->sla_hours,
             'nudge_at' => implode(',', array_map($this->writtenValue(...), $step->reminder_rule['nudge_at'] ?? [])),

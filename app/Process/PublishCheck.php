@@ -23,13 +23,6 @@ use Illuminate\Support\Collection;
  *
  * Every problem is reported together rather than the first one found, for the reason
  * given on {@see ProcessRefused::cannotPublish}.
- *
- * **One planned refusal is not here yet and is not dropped: a step conditioned on a
- * form answer collected in its own group or later.** It needs to know which step
- * collects which field, and that is a form definition — module 04's table, which does
- * not exist and which this module's own plan says arrives with its own migration. The
- * check lands with module 04, against the same worked example already written down:
- * the director's approval at group 2 conditioned on a pay figure collected at group 4.
  */
 final readonly class PublishCheck
 {
@@ -57,6 +50,21 @@ final readonly class PublishCheck
         'text' => 'text',
     ];
 
+    /**
+     * How a question's kind reads in a refusal, for the kinds no ordering comparison can
+     * fit. A figure, a date and a chosen option are all left alone — a client's options
+     * are their own and may well be numbers.
+     *
+     * A document is not here because it is refused against every operator but `is_set`,
+     * exactly as it already is when it hides a question further down its own form.
+     */
+    private const KindsWithNoOrder = [
+        FormField::Text => 'words',
+        FormField::Textarea => 'words',
+        FormField::Boolean => 'a yes or a no',
+        FormField::Multiselect => 'a list of choices',
+    ];
+
     public function __construct(private ProcessTemplate $template) {}
 
     /**
@@ -70,16 +78,50 @@ final readonly class PublishCheck
         // slipped through is then frozen into a live version for good. The mirror case
         // bites as well: a relation loaded while the process was still empty makes
         // publishing refuse a process that does have steps.
-        $steps = $this->template->load('steps')->steps;
+        // The questions come with the steps in the same read, because every step's
+        // conditions are checked against every other step's questions and asking for them
+        // one step at a time is a query per step on a screen a client publishes from.
+        $steps = $this->template->load('steps.form.fields')->steps;
 
         if ($steps->isEmpty()) {
             return ['This process has no steps, so a case opened on it would have nothing for anybody to do.'];
         }
 
+        $asked = $this->questionsThisProcessAsks($steps);
+
         return array_merge(
             $this->problemsWithTheOrderTheyRunIn($steps),
-            $steps->flatMap(fn (ProcessStep $step) => $this->problemsWithStep($step))->all(),
+            $steps->flatMap(fn (ProcessStep $step) => $this->problemsWithStep($step, $asked))->all(),
         );
+    }
+
+    /**
+     * Every question the forms on this process ask, under the short name a condition
+     * names it by, with the step that asks it.
+     *
+     * A step's answers are pooled with every other step's when the engine works out
+     * which steps a case still wants, so a condition can name a question asked anywhere
+     * on the process — not only on the step's own form. That is what makes the whole
+     * process, rather than one form, the right thing to check against.
+     *
+     * A step pointing at a draft or replaced form still counts its questions. That
+     * pointer is refused on its own elsewhere, and leaving the questions out would add a
+     * second refusal saying the question does not exist when it plainly does.
+     *
+     * @param  Collection<int, ProcessStep>  $steps
+     * @return array<string, list<array{field: FormField, step: ProcessStep}>>
+     */
+    private function questionsThisProcessAsks(Collection $steps): array
+    {
+        $asked = [];
+
+        foreach ($steps as $step) {
+            foreach ($step->form?->fields ?? [] as $field) {
+                $asked[$field->key][] = ['field' => $field, 'step' => $step];
+            }
+        }
+
+        return $asked;
     }
 
     /**
@@ -124,9 +166,10 @@ final readonly class PublishCheck
     }
 
     /**
+     * @param  array<string, list<array{field: FormField, step: ProcessStep}>>  $asked
      * @return list<string>
      */
-    private function problemsWithStep(ProcessStep $step): array
+    private function problemsWithStep(ProcessStep $step, array $asked): array
     {
         $problems = array_merge(
             $this->problemsWithWhoItBelongsTo($step),
@@ -157,7 +200,7 @@ final readonly class PublishCheck
             }
 
             foreach ($set as $condition) {
-                array_push($problems, ...$this->problemsWithCondition($step, $condition));
+                array_push($problems, ...$this->problemsWithCondition($step, $condition, $asked));
             }
         }
 
@@ -275,13 +318,26 @@ final readonly class PublishCheck
                         .implode(', ', array_map(fn (FormField $earlier): string => $earlier->label, $above)).'.');
         }
 
+        $hides = is_string($named) ? ($above[$named] ?? null) : null;
+
         // A document is either attached or it is not. Comparing one against a figure or a
         // word is never true, so the question underneath it is simply never asked — the
         // same silent nothing every other refusal here exists to catch.
-        if (is_string($named) && ($above[$named] ?? null)?->type === FormField::File && $operator !== 'is_set') {
-            $problems[] = "{$at} depends on the document attached to [".$above[$named]->label
-                .'], compared with ['.$this->readable($operator).']. A document can only be depended on by '
-                .'whether it was attached at all, so this question would never be asked.';
+        if ($hides?->type === FormField::File && $operator !== 'is_set') {
+            $problems[] = "{$at} depends on the document attached to [{$hides->label}], compared with ["
+                .$this->readable($operator).']. A document can only be depended on by whether it was '
+                .'attached at all, so this question would never be asked.';
+        }
+
+        // The same objection a step's own condition gets, arriving here as well: asking
+        // whether a paragraph is over fifty thousand is not a question with an answer, so
+        // the question underneath it is never asked, and a step waiting on that answer
+        // never opens either.
+        if ($hides !== null && in_array($operator, self::OrderingOperators, true)
+            && array_key_exists($hides->type, self::KindsWithNoOrder)) {
+            $problems[] = "{$at} depends on the answer to [{$hides->label}] compared with [{$operator}], and "
+                .'that question is answered with '.self::KindsWithNoOrder[$hides->type].' rather than a figure. '
+                .'There is no larger or smaller to compare, so this question would never be asked.';
         }
 
         if (! in_array($operator, self::Operators, true)) {
@@ -462,9 +518,10 @@ final readonly class PublishCheck
     }
 
     /**
+     * @param  array<string, list<array{field: FormField, step: ProcessStep}>>  $asked
      * @return list<string>
      */
-    private function problemsWithCondition(ProcessStep $step, mixed $condition): array
+    private function problemsWithCondition(ProcessStep $step, mixed $condition, array $asked): array
     {
         if (! is_array($condition)) {
             return [$this->at($step).' has a condition that is not written as a condition.'];
@@ -516,9 +573,157 @@ final readonly class PublishCheck
                 .'this system knows about anybody. It knows '.implode(', ', ProcessCase::SubjectFacts).'.';
         }
 
+        if ($source === 'payload' && is_string($field) && trim($field) !== '') {
+            array_push($problems, ...$this->problemsWithTheAnswerItWaitsFor($step, $field, $operator, $asked));
+        }
+
         array_push($problems, ...$this->problemsWithWhatItComparesAgainst($step, $condition));
 
         return $problems;
+    }
+
+    /**
+     * A step waiting on an answer that can never arrive in time to open it.
+     *
+     * The sharpest failure this class exists for, and the one module 02 wrote down and
+     * could not build: it needs to know which step asks which question, and that is a
+     * form, which is this module's. Anjali points the Finance Director's sign-off at a
+     * figure. The figure is never collected, or is collected beside his step rather than
+     * before it, so when the engine asks whether his step is wanted there is no answer
+     * there — his step is skipped, and the exit closes as though he had approved it.
+     * Nothing errors and no screen is missing.
+     *
+     * The case that must survive: a question asked only in certain cases, because an
+     * answer above it on its own form hides it. That answer is sometimes there and
+     * sometimes not, so the step opens on some cases and not others — which is very
+     * likely what the client meant, and is not refused here.
+     *
+     * @param  array<string, list<array{field: FormField, step: ProcessStep}>>  $asked
+     * @return list<string>
+     */
+    private function problemsWithTheAnswerItWaitsFor(ProcessStep $step, string $field, mixed $operator, array $asked): array
+    {
+        $at = $this->at($step);
+        $occurrences = $asked[$field] ?? [];
+
+        if ($occurrences === []) {
+            return ["{$at} opens on the answer to [{$field}], which no form on this process asks. "
+                .'It would never be answered, so this step would never open and a case would close without it. '
+                .$this->whatIsAskedBefore($step, $asked)];
+        }
+
+        $problems = [];
+
+        // Every step's answers are pooled under their short names, later steps winning,
+        // so two steps asking the same question leave only the last answer standing. The
+        // step reads whichever was answered last rather than the one the client had in
+        // mind, and which that is depends on the order people happen to act in.
+        if (count($occurrences) > 1) {
+            $problems[] = "{$at} opens on the answer to [".$occurrences[0]['field']->label.'], and more than '
+                .'one step asks that question: '.$this->listOf($occurrences).'. Only the last answer given is '
+                .'kept, so which one decides this step depends on the order people answer in. Give the question '
+                .'a different name on all but one of them.';
+        }
+
+        // Steps run in groups, and a group opens all at once. A question asked in this
+        // step's own group is unanswered at the moment the engine decides whether to open
+        // this step, and one asked later is not there at all. The same rule a question on
+        // a form already lives by — it may only be hidden by one above it — read across
+        // steps instead of down a form.
+        $earlier = array_values(array_filter(
+            $occurrences,
+            fn (array $occurrence): bool => $occurrence['step']->group_no < $step->group_no,
+        ));
+
+        if ($earlier === []) {
+            $label = $occurrences[0]['field']->label;
+
+            // The likeliest version of this mistake by far: the condition is put on the
+            // very step that collects the answer. Said as its own sentence, because
+            // "step 2 opens on an answer asked by step 2" is a riddle rather than a
+            // refusal.
+            $elsewhere = array_filter($occurrences, fn (array $occurrence): bool => ! $occurrence['step']->is($step));
+
+            return [...$problems, $elsewhere === []
+                ? "{$at} opens on the answer to [{$label}], which is one of the questions this same step "
+                    .'asks. Nobody has answered it at the moment this product works out whether to open the '
+                    .'step, so the step would never open and nobody would ever be asked. Move the question '
+                    .'to a step that runs earlier.'
+                : "{$at} is in group {$step->group_no} and opens on the answer to [{$label}], which is asked "
+                    .'by '.$this->listOf($occurrences).'. Nobody has answered it when this product works out '
+                    .'whether to open this step, so the step would never open. Move the question to a step in '
+                    .'an earlier group, or move this step to a later one.'];
+        }
+
+        return [...$problems, ...$this->problemsWithTheKindOfAnswer($at, $operator, $earlier[0]['field'])];
+    }
+
+    /**
+     * Whether the comparison fits what that question actually holds.
+     *
+     * The same objection as a threshold typed as words, arriving from the left-hand side:
+     * asking whether a paragraph is over fifty thousand is not a question with an answer,
+     * so the step it guards opens or fails to open on nothing anybody meant.
+     *
+     * @return list<string>
+     */
+    private function problemsWithTheKindOfAnswer(string $at, mixed $operator, FormField $field): array
+    {
+        if ($field->type === FormField::File) {
+            return $operator === 'is_set' ? [] : ["{$at} opens on the document attached to [{$field->label}], "
+                .'compared with ['.$this->readable($operator).']. A document can only be depended on by whether '
+                .'it was attached at all, so this step would never open.'];
+        }
+
+        if (in_array($operator, self::OrderingOperators, true) && array_key_exists($field->type, self::KindsWithNoOrder)) {
+            return ["{$at} opens on the answer to [{$field->label}] compared with [{$operator}], and that "
+                .'question is answered with '.self::KindsWithNoOrder[$field->type].' rather than a figure. '
+                .'There is no larger or smaller to compare, so this step would open on cases nobody meant it to.'];
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  list<array{field: FormField, step: ProcessStep}>  $occurrences
+     */
+    private function listOf(array $occurrences): string
+    {
+        return implode(', ', array_map(
+            fn (array $occurrence): string => $this->at($occurrence['step']),
+            $occurrences,
+        ));
+    }
+
+    /**
+     * The questions a client can actually point this step at, so a mistyped name comes
+     * back with the list to correct it from rather than only the news that it is wrong.
+     *
+     * @param  array<string, list<array{field: FormField, step: ProcessStep}>>  $asked
+     */
+    private function whatIsAskedBefore(ProcessStep $step, array $asked): string
+    {
+        $before = [];
+
+        foreach ($asked as $occurrences) {
+            foreach ($occurrences as $occurrence) {
+                if ($occurrence['step']->group_no < $step->group_no) {
+                    $before[] = $occurrence;
+                }
+            }
+        }
+
+        // In the order somebody actually answers them, rather than the order the questions
+        // happen to be held in here — two steps asking a question of the same name hold
+        // both answers together, which otherwise puts finance's remarks among HR's.
+        usort($before, fn (array $a, array $b): int => [$a['step']->sequence, $a['field']->sort_order]
+            <=> [$b['step']->sequence, $b['field']->sort_order]);
+
+        $labels = array_map(fn (array $occurrence): string => $occurrence['field']->label, $before);
+
+        return $labels === []
+            ? 'No step before this one asks anything, so there is no earlier answer to open it on.'
+            : 'The questions answered before this step are: '.implode(', ', $labels).'.';
     }
 
     /**

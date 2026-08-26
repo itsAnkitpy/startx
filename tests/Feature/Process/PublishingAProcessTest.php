@@ -2,6 +2,8 @@
 
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseStep;
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -47,6 +49,28 @@ function meridiansExitDraft(): ProcessTemplate
     ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')->clearance()->create();
 
     return $exit;
+}
+
+/**
+ * A live form asking the questions given, in the order given.
+ *
+ * For the cases {@see ProcessStepFactory::collecting} cannot build, which is any step
+ * asking more than one thing — a question hidden by an earlier answer on the same form
+ * needs both of them.
+ *
+ * @param  list<array<string, mixed>>  $questions
+ */
+function aLiveFormAskingFor(array $questions): FormDefinition
+{
+    $form = FormDefinition::factory()->named('clearance', 'Finance clearance')->create();
+
+    foreach ($questions as $position => $question) {
+        FormField::factory()->on($form)->at($position + 1)->state($question)->create();
+    }
+
+    $form->publish();
+
+    return $form;
 }
 
 /**
@@ -435,7 +459,9 @@ it('allows that comparison once the setting holds a number', function () {
 
         $hiring = ProcessTemplate::factory()->named('hiring', 'Hiring request')->about('none')->create();
 
-        ProcessStep::factory()->of($hiring)->at(1, 1)->named('Director approval')->create([
+        ProcessStep::factory()->of($hiring)->at(1, 1)->named('Package')->collecting('annual_ctc')->create();
+
+        ProcessStep::factory()->of($hiring)->at(2, 2)->named('Director approval')->create([
             'open_conditions' => [[[
                 'source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>',
                 'setting' => 'hiring_director_threshold',
@@ -532,7 +558,10 @@ it('accepts a step that only asks whether a field was answered', function () {
     TenantContext::run($this->meridian, function () {
         $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
 
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('Notice buyout approval')->create([
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Notice')
+            ->collecting('buyout_days', FormField::Number)->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Notice buyout approval')->create([
             'open_conditions' => [[['source' => 'payload', 'field' => 'buyout_days', 'operator' => 'is_set']]],
         ]);
 
@@ -578,7 +607,9 @@ it('allows that comparison once the figure is written as a number', function () 
     TenantContext::run($this->meridian, function () {
         $hiring = ProcessTemplate::factory()->named('hiring', 'Hiring request')->about('none')->create();
 
-        ProcessStep::factory()->of($hiring)->at(1, 1)->named('Director approval')->create([
+        ProcessStep::factory()->of($hiring)->at(1, 1)->named('Package')->collecting('annual_ctc')->create();
+
+        ProcessStep::factory()->of($hiring)->at(2, 2)->named('Director approval')->create([
             'open_conditions' => [[[
                 'source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>', 'value' => 1500000,
             ]]],
@@ -589,6 +620,210 @@ it('allows that comparison once the figure is written as a number', function () 
         expect($hiring->fresh()->status)->toBe(ProcessTemplate::Published);
     });
 });
+
+/*
+| Step 4 of module 04: a step waiting on an answer that can never arrive.
+|
+| Module 02 wrote this refusal down and could not build it — it needs to know which step
+| asks which question, and that is a form. Anjali points the Finance Director's sign-off
+| at a figure that is never collected, or collected beside his step rather than before it.
+| The engine looks for the answer, does not find it, skips his step, and the exit closes as
+| though he had approved it. Nothing errors and no screen is missing, which is why the only
+| place to catch it is the moment somebody makes the process live.
+*/
+
+it('refuses a step opening on an answer no form on the process collects', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')
+            ->collecting('amount_to_recover')->create();
+
+        // The usual cause: the question was renamed on the new version of the form and
+        // what pointed at it was not.
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'amount_recovered', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'which no form on this process asks');
+
+it('refuses a step opening on an answer collected beside it', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        // Both in group 1, so both open at once and neither can decide the other.
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')
+            ->collecting('amount_to_recover')->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 1)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'amount_to_recover', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'Nobody has answered it when this product works out whether to open this step');
+
+it('refuses a step opening on an answer collected after it', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'amount_to_recover', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+            ->collecting('amount_to_recover')->create();
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'so the step would never open');
+
+it('refuses a step opening on an answer it collects itself', function () {
+    // The likeliest version of the mistake: the condition is put on the very step that
+    // asks the question, so nothing has been answered when the step is decided.
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')
+            ->collecting('amount_to_recover')->create([
+                'open_conditions' => [[[
+                    'source' => 'payload', 'field' => 'amount_to_recover', 'operator' => '>', 'value' => 50000,
+                ]]],
+            ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'which is one of the questions this same step asks');
+
+it('accepts a step opening on an answer collected before it', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')
+            ->collecting('amount_to_recover')->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'amount_to_recover', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        $exit->publish();
+
+        expect($exit->fresh()->status)->toBe(ProcessTemplate::Published);
+    });
+});
+
+it('accepts a step opening on an answer that is only sometimes asked', function () {
+    // The one case that must survive all of this. Chandni is asked how much to recover
+    // only when she says the imprest card did not come back, so the director's step opens
+    // on some exits and not others — which is very likely exactly what Anjali meant.
+    TenantContext::run($this->meridian, function () {
+        $form = aLiveFormAskingFor([
+            ['key' => 'card_returned', 'label' => 'Did the imprest card come back', 'type' => FormField::Boolean],
+            ['key' => 'amount_to_recover', 'label' => 'Amount to recover', 'type' => FormField::Money,
+                'visible_if' => [[['field' => 'card_returned', 'operator' => '=', 'value' => false]]]],
+        ]);
+
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')->asking($form)->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'amount_to_recover', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        $exit->publish();
+
+        expect($exit->fresh()->status)->toBe(ProcessTemplate::Published);
+    });
+});
+
+it('refuses a step opening on words compared as a figure', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
+            ->collecting('hr_remarks', FormField::Textarea)->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'hr_remarks', 'operator' => '>', 'value' => 50000,
+            ]]],
+        ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'answered with words rather than a figure');
+
+it('refuses a step opening on a document compared against anything', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
+            ->collecting('id_card_photograph', FormField::File)->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'id_card_photograph', 'operator' => '=', 'value' => 'yes',
+            ]]],
+        ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'A document can only be depended on by whether it was attached at all');
+
+it('accepts a step opening on whether a document was attached at all', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
+            ->collecting('id_card_photograph', FormField::File)->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'id_card_photograph', 'operator' => 'is_set',
+            ]]],
+        ]);
+
+        $exit->publish();
+
+        expect($exit->fresh()->status)->toBe(ProcessTemplate::Published);
+    });
+});
+
+it('refuses a step opening on an answer two steps collect', function () {
+    // Every step's answers are pooled under their short names, so the second clearance's
+    // answer replaces the first one's and which of them decides the director's step comes
+    // down to who happens to act last.
+    TenantContext::run($this->meridian, function () {
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('IT clearance')
+            ->collecting('assets_held')->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('Admin clearance')
+            ->collecting('assets_held')->create();
+
+        ProcessStep::factory()->of($exit)->at(3, 3)->named('Director sign-off')->create([
+            'open_conditions' => [[[
+                'source' => 'payload', 'field' => 'assets_held', 'operator' => '>', 'value' => 0,
+            ]]],
+        ]);
+
+        $exit->publish();
+    });
+})->throws(ProcessRefused::class, 'more than one step asks that question');
 
 it('refuses an is-one-of comparison against a single value rather than a list', function () {
     TenantContext::run($this->meridian, function () {
