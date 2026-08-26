@@ -99,6 +99,65 @@
             </div>
             @break
 
+        @case (\App\Models\FormField::File)
+            {{-- Filament's own file field draws itself in JavaScript this project does not
+                 build, and a browser's own file box draws as bare text once Filament's
+                 stylesheet has reset it — no border, no button, nothing anybody would
+                 think to click. So the real box is taken off the screen and a Filament
+                 button points at it: the same button as Approve and Pick it up beside it,
+                 in the client's own colours and in dark mode, with no styles of our own.
+
+                 `wire:model` on a file box uploads the moment one is chosen — there is no
+                 `.live` to add and no button to press — and the file goes to Livewire's
+                 holding area, not to ours: nothing is written anywhere it survives until
+                 this step is actually decided. --}}
+            @php($attached = $this->attachedTo($caseId, $sequence, $field->key))
+
+            <div style="display: grid; row-gap: 0.5rem; justify-items: start;">
+                <input
+                    type="file"
+                    id="{{ $id }}"
+                    wire:model="{{ $path }}"
+                    style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;"
+                />
+
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; max-width: 100%;">
+                    <x-filament::button
+                        tag="label"
+                        :for="$id"
+                        color="gray"
+                        size="sm"
+                        icon="heroicon-m-paper-clip"
+                    >
+                        {{ $attached ? 'Choose a different file' : 'Choose a file' }}
+                    </x-filament::button>
+
+                    <span wire:loading wire:target="{{ $path }}" style="font-size: 0.875rem;">
+                        Attaching…
+                    </span>
+
+                    {{-- What is attached, said plainly. A file box that has been taken off
+                         the screen cannot show it, and this page redraws on every answer
+                         given, so without this there is nothing telling a document apart
+                         from none. --}}
+                    @if ($attached)
+                        <x-filament::badge
+                            color="success"
+                            icon="heroicon-m-paper-clip"
+                            style="max-width: 100%; overflow-wrap: anywhere;"
+                        >
+                            {{ $attached }}
+                        </x-filament::badge>
+                    @endif
+                </div>
+
+                <p style="font-size: 0.75rem;">
+                    PDF, JPEG, PNG, Word or Excel, up to
+                    {{ (int) (\App\Process\StepForm::DocumentKilobytes / 1024) }} MB.
+                </p>
+            </div>
+            @break
+
         @case (\App\Models\FormField::UserPicker)
         @case (\App\Models\FormField::OrgUnitPicker)
         @case (\App\Models\FormField::DesignationPicker)

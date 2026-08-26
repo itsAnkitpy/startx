@@ -96,13 +96,6 @@ class FormDefinition extends Model
             throw ProcessRefused::aQuestionWithNoChoicesCannotGoLive($this->name, $withNothingToChoose);
         }
 
-        // ponytail: see the refusal's own note. Goes when the upload path lands.
-        $documents = $this->fields()->where('type', FormField::File)->pluck('label')->all();
-
-        if ($documents !== []) {
-            throw ProcessRefused::fileQuestionsAreNotBuiltYet($this->name, $documents);
-        }
-
         DB::transaction(function (): void {
             static::query()
                 ->where('key', $this->key)

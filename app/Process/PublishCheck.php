@@ -4,6 +4,7 @@ namespace App\Process;
 
 use App\Exceptions\ProcessRefused;
 use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -244,14 +245,14 @@ final readonly class PublishCheck
                 }
             }
 
-            $above[$field->key] = $field->label;
+            $above[$field->key] = $field;
         }
 
         return $problems;
     }
 
     /**
-     * @param  array<string, string>  $above  key => label of the questions asked before this one
+     * @param  array<string, FormField>  $above  the questions asked before this one, by key
      * @return list<string>
      */
     private function problemsWithWhatHidesIt(string $at, mixed $condition, array $above): array
@@ -270,7 +271,17 @@ final readonly class PublishCheck
                 .'already given, so this one would never be asked at all. '
                 .($above === []
                     ? 'It is the first question on the form, so there is no earlier answer to depend on.'
-                    : 'The questions before it are: '.implode(', ', $above).'.');
+                    : 'The questions before it are: '
+                        .implode(', ', array_map(fn (FormField $earlier): string => $earlier->label, $above)).'.');
+        }
+
+        // A document is either attached or it is not. Comparing one against a figure or a
+        // word is never true, so the question underneath it is simply never asked — the
+        // same silent nothing every other refusal here exists to catch.
+        if (is_string($named) && ($above[$named] ?? null)?->type === FormField::File && $operator !== 'is_set') {
+            $problems[] = "{$at} depends on the document attached to [".$above[$named]->label
+                .'], compared with ['.$this->readable($operator).']. A document can only be depended on by '
+                .'whether it was attached at all, so this question would never be asked.';
         }
 
         if (! in_array($operator, self::Operators, true)) {

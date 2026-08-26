@@ -6,6 +6,7 @@ use App\Authorization\PermissionResolver;
 use App\Authorization\TenantPasswordBrokers;
 use App\Models\User;
 use App\Process\AssigneeResolver;
+use App\Process\StepForm;
 use App\Settings\SettingDeclaration;
 use App\Settings\Settings;
 use Illuminate\Auth\EloquentUserProvider;
@@ -45,6 +46,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->declareTheSwitchesClientsCanChange();
+        $this->holdUploadsToWhatAClearanceDocumentMayBe();
 
         // No account survives its last working day, and that has to be true of
         // authentication itself rather than only of the panel's own door.
@@ -69,6 +71,30 @@ class AppServiceProvider extends ServiceProvider
                 ? $provider->withQuery(fn (Builder $query) => $query->where('active', true))
                 : $provider;
         });
+    }
+
+    /**
+     * The same cap and the same list of kinds a step's own form applies, handed to
+     * Livewire so it refuses a file at the moment it is chosen rather than after.
+     *
+     * Not a nicety. Livewire checks every upload against its own rule before ours is ever
+     * reached, and left alone that rule stops at twelve megabytes — under the twenty a
+     * clearance document may be — so the person would be refused by a limit nothing in
+     * the product admits to, in words that read as ours. Doing it here also means a file
+     * of a kind we do not take is never held on our disk at all, even for the day
+     * Livewire keeps an abandoned upload.
+     *
+     * Set rather than published: this is the one value we change out of Livewire's whole
+     * configuration, and a copy of the rest of that file would drift from the package.
+     */
+    private function holdUploadsToWhatAClearanceDocumentMayBe(): void
+    {
+        config(['livewire.temporary_file_upload.rules' => [
+            'required',
+            'file',
+            'max:'.StepForm::DocumentKilobytes,
+            'mimes:'.implode(',', StepForm::DocumentTypes),
+        ]]);
     }
 
     /**

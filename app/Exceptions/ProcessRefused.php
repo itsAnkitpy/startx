@@ -137,16 +137,37 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
-     * ponytail: temporary. Attaching a document is its own step and its own security
-     * review; until it lands, a form carrying one cannot go live rather than going live
-     * and quietly refusing every answer. Delete with the upload path.
+     * An answer whose shape is not the one its question takes.
+     *
+     * Only ever reachable by somebody writing an answer by hand rather than by filling
+     * the card in, and it closes the same hole from both sides. A document question given
+     * a list of words instead of a file would be a person naming any file on our disk as
+     * their own clearance evidence. A file aimed at a question that asks for text would
+     * be an upload nothing had checked the size or the kind of.
+     *
+     * @param  list<string>  $questions
      */
-    public static function fileQuestionsAreNotBuiltYet(string $name, array $questions): self
+    public static function thatIsNotWhatTheQuestionTakes(string $step, array $questions): self
     {
         return new self(
-            "The form [{$name}] asks for a document on ".implode(', ', $questions)
-            .', and attaching a document is not built yet. Take those questions off the form '
-            .'or wait for uploads.'
+            "On [{$step}], ".implode(', ', $questions).' — a question asking for a document takes '
+            .'an attached file and nothing else, and every other question takes no file at all.'
+        );
+    }
+
+    /**
+     * A document the disk would not take.
+     *
+     * Storage reports a failed write by handing back nothing rather than by complaining,
+     * so without this the step is approved and the answer records a file that is not
+     * there — a clearance with no evidence behind it, which is the whole reason the
+     * document was asked for.
+     */
+    public static function thatDocumentWasNotSaved(string $step, string $question): self
+    {
+        return new self(
+            "The document attached to [{$question}] on [{$step}] could not be saved, so nothing "
+            .'has been recorded. Attach it again, and tell us if it keeps happening.'
         );
     }
 

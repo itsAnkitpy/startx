@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CaseDocumentController;
 use App\Http\Controllers\StepLinkController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -60,3 +61,21 @@ Route::post('step/{token}', [StepLinkController::class, 'submit'])->name('step-l
 Route::post('step/{token}/again', [StepLinkController::class, 'again'])
     ->middleware('throttle:5,60')
     ->name('step-link.again');
+
+/*
+| Opening a document somebody attached to a step.
+|
+| Signed in, on the client company's own subdomain, and checked again on every request:
+| whether this person has any business with this case at all is asked here rather than
+| answered once into an address that then works for whoever is holding it. The file lives
+| on a disk nothing on the web can reach, and this is the only way to it.
+|
+| The address names a case, a step and a question — never a path — so there is nothing in
+| it to edit into somebody else's file.
+*/
+Route::get('cases/{case}/documents/{sequence}/{question}', [CaseDocumentController::class, 'show'])
+    ->middleware('auth')
+    ->whereNumber('case')
+    ->whereNumber('sequence')
+    ->where('question', '[a-z][a-z0-9_]*')
+    ->name('case-document');

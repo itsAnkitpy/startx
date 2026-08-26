@@ -15,7 +15,10 @@ use App\Process\CaseEngine;
 use App\Process\StepForm;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Livewire\Livewire;
 
@@ -348,14 +351,19 @@ it('keeps a picker inside the client own rows', function () {
     });
 });
 
-it('will not make a form live that asks for a document, until documents are built', function () {
+it('makes a form live that asks for a document, and lets a question depend on one arriving', function () {
     TenantContext::run($this->meridian, function () {
         $form = draftFormAsking([
             ['key' => 'it_note', 'label' => 'Signed IT handover note', 'type' => FormField::File],
+            // The one thing a document can be depended on for: whether it was attached at
+            // all. Nothing else about a file is a comparison anybody can make.
+            ['key' => 'note_missing_why', 'label' => 'Why there is no note', 'type' => FormField::Text,
+                'visible_if' => [[['field' => 'it_note', 'operator' => 'is_set']]]],
         ]);
 
-        expect(fn () => $form->publish())
-            ->toThrow(ProcessRefused::class, 'attaching a document is not built yet');
+        $form->publish();
+
+        expect($form->fresh()->status)->toBe(FormDefinition::Published);
     });
 });
 
@@ -733,5 +741,260 @@ it('refuses a question said to be hidden by nothing at all', function () {
             ProcessRefused::class,
             'question [Amount to recover] is asked only in certain cases, and one of those cases says nothing',
         );
+    });
+});
+
+/*
+| Step 3: attaching a document.
+|
+| The first place in this product where a client's own employee writes a file to our disk,
+| so the claim being checked is narrow and the whole of it: what a person chooses decides
+| nothing about where it goes or what it is called there, a file is taken on its real kind
+| rather than on its name, and nothing is written anywhere it survives until the step is
+| actually decided.
+*/
+
+it('puts an attached document away, and records where it went rather than what it was called', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'handover_note', 'label' => 'Signed handover note', 'type' => FormField::File],
+        ]);
+
+        $chosen = UploadedFile::fake()->create('Anjali handover.pdf', 40, 'application/pdf');
+
+        $recorded = (new StepForm)->onlyWhatThisStepAsks($step, ['handover_note' => $chosen]);
+
+        $document = $recorded['handover_note'];
+
+        Storage::disk('local')->assertExists($document['path']);
+
+        // Where it went is ours and what it was called is theirs, and the two are kept
+        // apart on purpose: the path is a random name under the client company's own
+        // folder, ending in the extension of what the file really is. So nothing a person
+        // types decides where their file lands or what it is called once it is there.
+        expect($document['path'])->toStartWith('case-documents/'.$step->tenant_id.'/')
+            ->and($document['path'])->toEndWith('.pdf')
+            ->and($document['path'])->not->toContain('Anjali')
+            ->and($document['name'])->toBe('Anjali handover.pdf')
+            ->and($document['type'])->toBe('application/pdf')
+            ->and($document['size'])->toBe(40 * 1024)
+            ->and($document['disk'])->toBe('local');
+
+        // And never on the one disk that exists to be reachable by anybody with the
+        // address. A clearance document is evidence about a named person.
+        expect(Storage::disk('public')->allFiles())->toBe([]);
+    });
+});
+
+it('refuses a document over the cap, and one that is not the kind its name claims', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'handover_note', 'label' => 'Signed handover note', 'type' => FormField::File],
+        ]);
+
+        $rules = (new StepForm)->rules($step, []);
+
+        $tooBig = UploadedFile::fake()->create('scan.pdf', 21 * 1024, 'application/pdf');
+
+        expect(Validator::make(['handover_note' => $tooBig], $rules)->fails())->toBeTrue();
+
+        // Called a PDF and is not one. What is read is what the file actually is — the
+        // name is a string whoever chose the file writes, so it is evidence of nothing.
+        $notReallyAPdf = UploadedFile::fake()->create('scan.pdf', 40, 'application/zip');
+
+        expect(Validator::make(['handover_note' => $notReallyAPdf], $rules)->fails())->toBeTrue();
+
+        $real = UploadedFile::fake()->create('scan.pdf', 40, 'application/pdf');
+
+        expect(Validator::make(['handover_note' => $real], $rules)->fails())->toBeFalse();
+    });
+});
+
+it('takes a document only where one was asked for, and only as a real attachment', function () {
+    Storage::fake('local');
+
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'handover_note', 'label' => 'Signed handover note', 'type' => FormField::File],
+            ['key' => 'remarks', 'label' => 'Anything on the record', 'type' => FormField::Textarea],
+        ]);
+
+        $forms = new StepForm;
+
+        // Written by hand instead of attached, which is somebody naming a file already on
+        // our disk as their own clearance evidence.
+        expect(fn () => $forms->onlyWhatThisStepAsks($step, [
+            'handover_note' => ['disk' => 'local', 'path' => 'case-documents/1/somebody-elses.pdf'],
+        ]))->toThrow(ProcessRefused::class, '[Signed handover note]');
+
+        // The same hole from the other side: an upload aimed at the remarks box, which
+        // nothing would then have checked the size or the kind of.
+        expect(fn () => $forms->onlyWhatThisStepAsks($step, [
+            'handover_note' => UploadedFile::fake()->create('scan.pdf', 40, 'application/pdf'),
+            'remarks' => UploadedFile::fake()->create('also.pdf', 40, 'application/pdf'),
+        ]))->toThrow(ProcessRefused::class, '[Anything on the record]');
+
+        // And the good half of a refused card is not written either. Every answer is
+        // checked before any file is written, so a card refused over one question leaves
+        // nothing behind from another.
+        expect(Storage::disk('local')->allFiles())->toBe([]);
+    });
+});
+
+it('records nothing when the disk will not take the document', function () {
+    // Ordinary storage reports a failed write by handing back nothing rather than by
+    // complaining, which is exactly what a cloud disk does on a network fault. This is a
+    // disk that always does that.
+    Storage::set('nowhere', Mockery::mock(Filesystem::class, ['putFileAs' => false]));
+
+    config(['startx.documents_disk' => 'nowhere']);
+
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'handover_note', 'label' => 'Signed handover note', 'type' => FormField::File],
+        ]);
+
+        // Taken at face value the answer would record a file that is not there, and the
+        // clearance would be approved on evidence nobody can open.
+        expect(fn () => (new StepForm)->onlyWhatThisStepAsks($step, [
+            'handover_note' => UploadedFile::fake()->create('scan.pdf', 40, 'application/pdf'),
+        ]))->toThrow(ProcessRefused::class, 'could not be saved');
+    });
+});
+
+it('records nothing when the disk reports a write it did not do', function () {
+    // The browser's own holding area hands the file to storage and throws away whether
+    // the write worked, handing back the path either way. A disk that quietly refuses is
+    // therefore answered with a path pointing at nothing at all.
+    Storage::set('nowhere', Mockery::mock(Filesystem::class, [
+        'putFileAs' => 'case-documents/1/nothing.pdf',
+        'exists' => false,
+    ]));
+
+    config(['startx.documents_disk' => 'nowhere']);
+
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'handover_note', 'label' => 'Signed handover note', 'type' => FormField::File],
+        ]);
+
+        // Taken on trust the answer records a file nobody can open, which is a clearance
+        // approved against evidence that is not there.
+        expect(fn () => (new StepForm)->onlyWhatThisStepAsks($step, [
+            'handover_note' => UploadedFile::fake()->create('scan.pdf', 40, 'application/pdf'),
+        ]))->toThrow(ProcessRefused::class, 'could not be saved');
+    });
+});
+
+it('does not put away a document for a question it has stopped asking', function () {
+    Storage::fake('local');
+
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'id_card_returned', 'label' => 'ID card returned', 'type' => FormField::Boolean],
+            ['key' => 'id_card_photo', 'label' => 'Photo of the returned card', 'type' => FormField::File,
+                'visible_if' => [[['field' => 'id_card_returned', 'operator' => '=', 'value' => true]]]],
+        ]);
+
+        // The card did not come back, so there is no photograph of it being asked for. The
+        // file goes the way the typed answer to a hidden question goes — nowhere — and it
+        // is never written to our disk at all, rather than written and then forgotten.
+        $recorded = (new StepForm)->onlyWhatThisStepAsks($step, [
+            'id_card_returned' => '0',
+            'id_card_photo' => UploadedFile::fake()->create('card.jpg', 40, 'image/jpeg'),
+        ]);
+
+        expect($recorded)->toBe(['id_card_returned' => '0'])
+            ->and(Storage::disk('local')->allFiles())->toBe([]);
+    });
+});
+
+it('refuses a question hidden by anything but whether a document was attached', function () {
+    TenantContext::run($this->meridian, function () {
+        // Comparing a document against a word is never true, so the question underneath it
+        // is simply never asked — the same silent nothing every other refusal at publishing
+        // exists to catch.
+        $exit = aDraftExitAsking([
+            ['key' => 'id_card_photo', 'label' => 'Photo of the returned card', 'type' => FormField::File],
+            ['key' => 'photo_note', 'label' => 'Why the photo is unclear', 'type' => FormField::Text,
+                'visible_if' => [[['field' => 'id_card_photo', 'operator' => '=', 'value' => 'yes']]]],
+        ]);
+
+        expect(fn () => $exit->publish())->toThrow(
+            ProcessRefused::class,
+            'question [Why the photo is unclear] depends on the document attached to [Photo of the returned card]',
+        );
+    });
+});
+
+it('lets HR attach the photograph of a returned card, on the card Ankit opens', function () {
+    Storage::fake('local');
+
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $rakesh = User::query()->where('work_email', 'rakesh@meridian.test')->sole();
+
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // Nobody is asked for a photograph of the card until somebody says it came back,
+        // which is the two halves of this module meeting on one card.
+        $screen = Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->assertDontSee('Photo or scan of the returned card');
+
+        $screen->set("answers.{$anjalis->getKey()}.1.id_card_returned", '1')
+            ->assertSee('Photo or scan of the returned card')
+            // The half a `set` in a test cannot prove: what the browser is handed really is
+            // a file box, and it really is bound to this answer. Without either, nothing
+            // uploads in a browser and every assertion below still passes.
+            ->assertSee('type="file"', escape: false)
+            ->assertSee('wire:model="answers.'.$anjalis->getKey().'.1.id_card_photo"', escape: false)
+            ->assertDontSee('Choose a different file');
+
+        // And that what stands on the screen in the file box's place is a label carrying
+        // Filament's own button, pointing at that box. A browser's own file box draws as
+        // bare text once Filament's stylesheet has reset it — no border and nothing that
+        // looks clickable — which is what the first version of this shipped as. A span
+        // with the same class would look right and do nothing when pressed, so the tag is
+        // part of what is checked.
+        expect($screen->html())->toMatch(
+            '/<label\s[^>]*class="fi-btn[^"]*" for="q-'.$anjalis->getKey().'-1-id_card_photo"/',
+        );
+
+        // And the step the browser actually takes first, which handing the page a file
+        // straight from a test skips entirely: asking the page where to put it. A page
+        // that cannot take uploads at all refuses here, and without this every assertion
+        // around it still passes while nothing works in a browser.
+        $screen->call(
+            '_startUpload',
+            "answers.{$anjalis->getKey()}.1.id_card_photo",
+            [['name' => 'anjali-card.jpg', 'size' => 40 * 1024, 'type' => 'image/jpeg']],
+            false,
+        )->assertHasNoErrors();
+
+        $screen->set(
+            "answers.{$anjalis->getKey()}.1.id_card_photo",
+            UploadedFile::fake()->create('anjali-card.jpg', 40, 'image/jpeg'),
+        )
+            // The real file box is off the screen, and this page redraws on every answer
+            // given, so what is attached has to be said on the card itself — otherwise
+            // nothing tells an attached document apart from none.
+            ->assertSee('anjali-card.jpg')
+            ->assertSee('Choose a different file')
+            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)->sole();
+
+        $document = ((array) $answered->payload)['id_card_photo'];
+
+        Storage::disk('local')->assertExists($document['path']);
+
+        expect($document['name'])->toBe('anjali-card.jpg');
     });
 });

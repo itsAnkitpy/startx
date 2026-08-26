@@ -104,6 +104,14 @@
                                     </div>
                                 </x-filament::fieldset>
                             @endif
+
+                            {{-- And what earlier steps already attached, so a clearance is
+                                 verified rather than taken on trust. Whoever holds a step
+                                 of a case may open its documents. --}}
+                            @include('filament.pages.partials.case-documents', [
+                                'case' => $case,
+                                'documents' => $this->documentsOn($waiting),
+                            ])
                         </div>
 
                         <div class="flex shrink-0 flex-wrap items-center gap-2">

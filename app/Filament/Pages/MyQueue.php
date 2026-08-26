@@ -12,11 +12,13 @@ use App\Models\User;
 use App\Process\AssigneeResolver;
 use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
+use App\Process\CaseDocuments;
 use App\Process\CaseEngine;
 use App\Process\StepForm;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 
 /**
@@ -168,6 +170,43 @@ class MyQueue extends Page
     private function typedInto(AvailableStep $waiting): array
     {
         return $this->answers[$waiting->case->getKey()][$waiting->step->sequence] ?? [];
+    }
+
+    /**
+     * What somebody has attached to one question on one card, by the name they gave it.
+     *
+     * Only ever the name. The file has gone nowhere of ours yet and does not until the
+     * step is decided, and the one address that exists for it meanwhile is Livewire's
+     * own, which always hands the file over to be saved rather than shown — it is built
+     * for previewing an image inside a page, not for opening a clearance scan. Looking at
+     * a document before approving it therefore needs an address of our own, and that is a
+     * decision rather than a detail: it is a second way to reach a file nothing has
+     * checked against a case yet.
+     *
+     * The card names what is attached either way, which is what tells a chosen file apart
+     * from none once the page redraws.
+     */
+    public function attachedTo(int $caseId, int $sequence, string $key): ?string
+    {
+        $chosen = $this->answers[$caseId][$sequence][$key] ?? null;
+
+        return $chosen instanceof UploadedFile ? $chosen->getClientOriginalName() : null;
+    }
+
+    /**
+     * The documents already attached to this case by steps that are done.
+     *
+     * This is what makes a clearance verifiable rather than taken on trust: finance
+     * clearing an exit can open the photograph HR attached to the ID card question,
+     * instead of approving on the word that it came back. Whoever holds any step of a
+     * case may open its documents — the rule lives with the documents themselves, so this
+     * screen and the address that serves them cannot come to disagree.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function documentsOn(AvailableStep $waiting): Collection
+    {
+        return (new CaseDocuments)->on($waiting->case);
     }
 
     /**

@@ -5,7 +5,9 @@ namespace App\Process;
 use App\Exceptions\ProcessRefused;
 use App\Models\FormField;
 use App\Models\ProcessStep;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 /**
@@ -33,6 +35,23 @@ class StepForm
     public const DefaultTextLength = 255;
 
     public const DefaultParagraphLength = 5000;
+
+    /**
+     * How large a document may be, in kilobytes, and which kinds are accepted.
+     *
+     * Twenty megabytes is BambooHR's own published limit and is comfortably more than a
+     * scanned clearance note needs. The list is what a clearance is actually evidenced
+     * with — a scan, a photograph, or the letter somebody typed.
+     *
+     * **Read here and nowhere else.** Livewire refuses an upload against its own rule
+     * before ours is ever reached, so the same cap and the same list are handed to it
+     * when the application boots. Written twice, the two would drift and the person would
+     * be refused by a limit nothing in the product admits to.
+     */
+    public const DocumentKilobytes = 20480;
+
+    /** @var list<string> */
+    public const DocumentTypes = ['pdf', 'jpg', 'jpeg', 'png', 'docx', 'xlsx'];
 
     /**
      * What this step asks, in the order the client put the questions in.
@@ -223,14 +242,102 @@ class StepForm
         }
 
         $given = $this->answered($payload);
+        $asking = $this->asking($step, $given);
 
         // Hidden here as well as on the screen and in the rules, in the one pass. A
         // question hidden on the screen and still stored is how a figure nobody was
         // asked for ends up deciding a later step.
-        return array_intersect_key(
-            $given,
-            array_flip($this->asking($step, $given)->pluck('key')->all()),
+        $kept = array_intersect_key($given, array_flip($asking->pluck('key')->all()));
+
+        return $this->withDocumentsPutAway($step, $asking, $kept);
+    }
+
+    /**
+     * Move each attached document out of the browser's holding area and record where it
+     * went, in place of the file itself.
+     *
+     * **A document question takes an attached file and nothing else, and no other
+     * question takes one.** That is the guard, and it matters more than it looks. What is
+     * held while somebody fills a card in is a real upload, put there by Livewire's own
+     * signed endpoint; what arrives as a bare list of words is somebody writing the
+     * answer by hand, and a hand-written `{disk, path}` would let a person name any file
+     * on the disk as their clearance evidence. The other way round is the same hole from
+     * the other side — an upload aimed at the remarks box, which nothing would then check
+     * the size or the kind of.
+     *
+     * What is stored is where it went, what the person called it, how big it was and what
+     * it actually is. The name is kept for reading back only and is never part of the
+     * path: the path is a random name Laravel derives from the file's real kind, so
+     * nothing a person types decides where their file lands or what it is called there.
+     *
+     * The write happens inside the same transaction the answer is recorded in. If that
+     * transaction rolls back the file stays on the disk with no row pointing at it, which
+     * is the right way round — a row pointing at a file that is not there is the failure
+     * worth avoiding, and nothing here is ever deleted automatically anyway.
+     *
+     * @param  Collection<int, FormField>  $asking
+     * @param  array<string, mixed>  $kept
+     * @return array<string, mixed>
+     */
+    private function withDocumentsPutAway(ProcessStep $step, Collection $asking, array $kept): array
+    {
+        $questions = $asking->keyBy('key');
+
+        // Every answer is checked before any file is written, so a card refused over one
+        // question does not leave the file from another one lying on the disk.
+        $wrong = [];
+
+        foreach ($kept as $key => $answer) {
+            if (($questions[$key]->type === FormField::File) !== ($answer instanceof UploadedFile)) {
+                $wrong[] = '['.$questions[$key]->label.']';
+            }
+        }
+
+        if ($wrong !== []) {
+            throw ProcessRefused::thatIsNotWhatTheQuestionTakes($step->name, $wrong);
+        }
+
+        foreach ($kept as $key => $answer) {
+            if ($answer instanceof UploadedFile) {
+                $kept[$key] = $this->putAway($step, $answer, $questions[$key]->label);
+            }
+        }
+
+        return $kept;
+    }
+
+    /**
+     * @return array{disk: string, path: string, name: string, size: int, type: string}
+     */
+    private function putAway(ProcessStep $step, UploadedFile $document, string $label): array
+    {
+        $disk = (string) config('startx.documents_disk');
+
+        // A random name with the extension of whatever the file really is, under the
+        // client company's own folder. Laravel writes both; nothing here comes from the
+        // browser.
+        $path = $document->storeAs(
+            'case-documents/'.$step->tenant_id,
+            $document->hashName(),
+            ['disk' => $disk],
         );
+
+        // A failed write is not always complained about. Ordinary storage reports one by
+        // handing back nothing; the browser's own holding area hands back the path either
+        // way and throws away whether the write worked at all. So what is checked is the
+        // file being there, which is the only answer that means anything: taken on trust,
+        // this records a clearance approved against evidence nobody can open.
+        if (! is_string($path) || $path === '' || ! Storage::disk($disk)->exists($path)) {
+            throw ProcessRefused::thatDocumentWasNotSaved($step->name, $label);
+        }
+
+        return [
+            'disk' => $disk,
+            'path' => $path,
+            'name' => mb_substr((string) $document->getClientOriginalName(), 0, self::DefaultTextLength),
+            'size' => (int) $document->getSize(),
+            'type' => (string) $document->getMimeType(),
+        ];
     }
 
     /**
@@ -305,10 +412,15 @@ class StepForm
             FormField::UserPicker => ['integer', Rule::exists('users', 'id')],
             FormField::OrgUnitPicker => ['integer', Rule::exists('org_units', 'id')],
             FormField::DesignationPicker => ['integer', Rule::exists('designations', 'id')],
-            // ponytail: the upload path is its own step and its own security review, and
-            // publishing refuses a form carrying one until then, so this is unreachable
-            // on a live form. Delete this arm's guard when uploads land.
-            FormField::File => ['prohibited'],
+            // The kind is read off the file's own contents, never off its name.
+            // Laravel's `mimes` rule looks at what the file is and asks which extension
+            // that kind uses; `extensions` would read the name the browser sent, which
+            // is a string the person choosing the file writes.
+            FormField::File => [
+                'file',
+                'max:'.self::DocumentKilobytes,
+                'mimes:'.implode(',', self::DocumentTypes),
+            ],
         };
     }
 

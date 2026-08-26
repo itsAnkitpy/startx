@@ -40,6 +40,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // client company this request belongs to, and the database wall denies
         // every read until it is told.
         $middleware->prepend(BindTenantToRequest::class);
+
+        // Where somebody signed out is sent when they open a page that needs an account —
+        // a document link forwarded to them, most likely. Laravel looks for a route called
+        // `login` and there is none: every sign-in page in this product belongs to a panel
+        // and is named after it, so without this an ordinary forwarded link answers with
+        // an error page instead of asking them to sign in.
+        $middleware->redirectGuestsTo(fn (): string => route('filament.admin.auth.login'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

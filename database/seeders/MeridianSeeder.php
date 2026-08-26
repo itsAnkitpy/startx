@@ -253,9 +253,13 @@ class MeridianSeeder extends Seeder
      * What HR asks when it clears an exit.
      *
      * Drawn from the old tool's own HR clearance screen — the ID card, what is being
-     * recovered and why — but as five rows in two tables rather than as columns on the
-     * exit itself, which is the whole difference this module exists to make. Vertex Foods
-     * will ask something different on the same step and nobody will write a migration.
+     * recovered and why — but as rows in two tables rather than as columns on the exit
+     * itself, which is the whole difference this module exists to make. Vertex Foods will
+     * ask something different on the same step and nobody will write a migration.
+     *
+     * The photograph of the returned card is the demo's one attached document, and it is
+     * asked only once somebody says the card came back — which is the whole point of
+     * asking for it, and puts the two things this module has built so far on one card.
      */
     private function hrClearanceForm(): FormDefinition
     {
@@ -265,10 +269,14 @@ class MeridianSeeder extends Seeder
             ->asking('id_card_returned', 'ID card returned', FormField::Boolean)->create();
 
         FormField::factory()->on($form)->at(2)
+            ->asking('id_card_photo', 'Photo or scan of the returned card', FormField::File)
+            ->askedWhen('id_card_returned', '=', true)->create();
+
+        FormField::factory()->on($form)->at(3)
             ->asking('notice_shortfall_days', 'Notice period short by (days)', FormField::Number)
             ->limitedBy(['min' => 0, 'max' => 180])->create();
 
-        FormField::factory()->on($form)->at(3)
+        FormField::factory()->on($form)->at(4)
             ->asking('remarks', 'Anything HR wants on the record', FormField::Textarea)->create();
 
         $form->publish();
