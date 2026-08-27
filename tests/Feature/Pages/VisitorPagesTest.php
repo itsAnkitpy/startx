@@ -9,8 +9,8 @@ use App\Models\Tenant;
 | They are tested through real requests rather than by rendering a view, because two of
 | the things that would break them are invisible to a view test. All three share one
 | brand component, so a mistake in it breaks all three at once. And none of them may
-| depend on a front-end build: `npm install` has never been run in this project, so a
-| page reaching for compiled assets throws rather than rendering.
+| depend on a front-end build: the signed-in area now compiles a stylesheet, but these
+| three pages carry their own styles and must keep rendering with nothing built.
 */
 
 it('offers the same sign-in link on the bare domain and on a company address', function () {
