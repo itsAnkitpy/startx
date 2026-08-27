@@ -18,6 +18,7 @@ use App\Process\StepForm;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 
@@ -73,7 +74,19 @@ class MyQueue extends Page
      */
     public function queue(): Collection
     {
-        return (new AvailableSteps)->waitingOn($this->person());
+        $queue = (new AvailableSteps)->waitingOn($this->person());
+
+        // The panel above each form reads the person as the case froze them, so the
+        // person, their department and their manager are read once for the whole list
+        // rather than once per card. The pinned job row and its office are already
+        // loaded by the list itself, so this is two reads however many cards there are.
+        (new EloquentCollection($queue->pluck('case')->all()))->loadMissing([
+            'subject',
+            'subjectEmploymentRecord.orgUnit',
+            'subjectEmploymentRecord.reportsTo',
+        ]);
+
+        return $queue;
     }
 
     /**

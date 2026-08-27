@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Authorization\StarterRoles;
+use App\Models\Designation;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
 use App\Models\FormField;
@@ -133,22 +134,30 @@ class MeridianSeeder extends Seeder
      */
     private function people(array $units, array $offices): array
     {
-        $chandni = $this->person('Chandni Verma', $units['north'], $offices['pune']);
-        $rakesh = $this->person('Rakesh Menon', $units['shimla'], $offices['shimla'], $chandni);
-        $priya = $this->person('Priya Nair', $units['shimla'], $offices['shimla'], $chandni);
+        // The client's own list of designations, because a job row points at an entry on
+        // it rather than carrying typed words — and because the panel above every step's
+        // form names the designation the person had when the case opened, which is blank
+        // for anybody whose row points at nothing.
+        $head = Designation::factory()->named('Regional Head')->create();
+        $manager = Designation::factory()->named('Branch Manager')->create();
+        $officer = Designation::factory()->named('Operations Officer')->create();
+
+        $chandni = $this->person('Chandni Verma', $units['north'], $offices['pune'], $head);
+        $rakesh = $this->person('Rakesh Menon', $units['shimla'], $offices['shimla'], $manager, $chandni);
+        $priya = $this->person('Priya Nair', $units['shimla'], $offices['shimla'], $manager, $chandni);
 
         return [
             'chandni' => $chandni,
             'rakesh' => $rakesh,
             'priya' => $priya,
-            'deepak' => $this->person('Deepak Iyer', $units['shimla'], $offices['shimla'], $rakesh),
-            'anjali' => $this->person('Anjali Rao', $units['shimla'], $offices['shimla'], $rakesh),
-            'rohit' => $this->person('Rohit Menon', $units['pune'], $offices['pune'], $chandni),
+            'deepak' => $this->person('Deepak Iyer', $units['shimla'], $offices['shimla'], $officer, $rakesh),
+            'anjali' => $this->person('Anjali Rao', $units['shimla'], $offices['shimla'], $officer, $rakesh),
+            'rohit' => $this->person('Rohit Menon', $units['pune'], $offices['pune'], $officer, $chandni),
         ];
     }
 
     /** Somebody with an address they can sign in with and a dated job row. */
-    private function person(string $name, OrgUnit $unit, Office $office, ?User $manager = null): User
+    private function person(string $name, OrgUnit $unit, Office $office, Designation $designation, ?User $manager = null): User
     {
         [$first] = explode(' ', $name, 2);
 
@@ -164,7 +173,8 @@ class MeridianSeeder extends Seeder
                 'password' => self::Password,
             ]);
 
-        $row = EmploymentRecord::factory()->forPerson($person)->in($unit)->basedAt($office);
+        $row = EmploymentRecord::factory()->forPerson($person)->in($unit)->basedAt($office)
+            ->designated($designation);
 
         $manager === null ? $row->create() : $row->reportingTo($manager)->create();
 

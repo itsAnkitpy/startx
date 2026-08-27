@@ -30,7 +30,11 @@
 
                 <x-filament::section>
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div class="min-w-0 space-y-1">
+                        {{-- Spaced with a plain style: Filament 4 ships only its own
+                             classes compiled and this project has no front-end build, so
+                             the utility classes on this page reach the browser as nothing
+                             at all and everything inside a card renders flush. --}}
+                        <div style="display: grid; row-gap: 0.5rem; min-width: 0;">
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="text-base font-semibold text-gray-950 dark:text-white">
                                     {{ $step->name }}
@@ -82,6 +86,12 @@
                                 Became yours {{ $waiting->availableSince->diffForHumans() }}@if ($waiting->dueAt),
                                     due {{ $waiting->dueAt->diffForHumans() }}@endif.
                             </p>
+
+                            {{-- Who it is about, before what it asks. Somebody clearing an
+                                 exit under a two-day clock cannot decide anything without
+                                 the person's details in front of them, and they will not
+                                 go and look them up in another screen. --}}
+                            @include('filament.pages.partials.subject-panel', ['case' => $case])
 
                             {{-- What this step asks. A step with no form asks nothing and
                                  shows nothing, which is right for a sign-off that is only
