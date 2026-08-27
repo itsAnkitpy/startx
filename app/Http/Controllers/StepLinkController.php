@@ -19,9 +19,11 @@ use Illuminate\Http\Response;
  * is the entire permission and every one of the three checks it again on the server —
  * this class holds no rule of its own, it only chooses which page to draw.
  *
- * Every refusal is drawn on the same page a wrong company address is drawn on, in the
- * same words the engine wrote, and carries the one way forward there is: ask for another
- * link, sent to the address already on the record.
+ * A refusal that means the link is finished is drawn on the same page a wrong company
+ * address is drawn on, in the same words the engine wrote, and carries the one way forward
+ * there is: ask for another link, sent to the address already on the record. A refusal
+ * over what was typed is a different thing and goes back onto the form, because the link
+ * is fine and there is something to correct.
  */
 class StepLinkController extends Controller
 {
@@ -44,13 +46,7 @@ class StepLinkController extends Controller
 
         $links->opened($link);
 
-        return response()->view('step-link', [
-            'token' => $token,
-            'case' => $link->case,
-            'step' => $waiting->step,
-            'lastsHours' => StepLink::LastsHours,
-            'opens' => StepLink::Opens,
-        ]);
+        return $this->theStep($token, $waiting);
     }
 
     /**
@@ -59,7 +55,7 @@ class StepLinkController extends Controller
      * The outcome is not trusted from the form: the engine checks it against what the step
      * actually offers, and checks the token again before writing anything.
      */
-    public function submit(Request $request, string $token): Response
+    public function submit(Request $request, string $token, StepLink $links): Response
     {
         $typed = $request->validate([
             'outcome' => ['required', 'string', 'max:40'],
@@ -73,6 +69,24 @@ class StepLinkController extends Controller
                 array_filter(['note' => $typed['note'] ?? null]),
             );
         } catch (ProcessRefused $refused) {
+            // A refusal over what was typed is not a dead link, and drawing it as one is
+            // worse than unhelpful: the only way forward that page offers is a new link,
+            // which replaces the answer being given and hands over the same box again, so
+            // there is no end to it, and each round spends one of the link's opens. Since
+            // the engine started applying the step's own form rules this is the ordinary
+            // refusal here rather than a rare one.
+            //
+            // Whether the link still opens is asked rather than guessed from the message,
+            // and it is asked through the same two checks the page itself opens through.
+            $answerable = $this->stillAnswerable($links, $token);
+
+            if ($answerable !== null) {
+                return $this->theStep($token, $answerable, [
+                    'refused' => $refused->getMessage(),
+                    'note' => $typed['note'] ?? null,
+                ], 422);
+            }
+
             return $this->refused($refused->getMessage(), $token);
         }
 
@@ -111,6 +125,48 @@ class StepLinkController extends Controller
             'It has gone to the same address as the last one, and works for the next '
                 .StepLink::LastsHours.' hours.',
         );
+    }
+
+    /**
+     * The page itself, drawn from one place whether it is being opened or drawn again over
+     * a refusal. Drawing it again costs none of the link's opens: nobody opened anything,
+     * they answered and are being asked to correct it.
+     *
+     * @param  array<string, mixed>  $also
+     */
+    private function theStep(string $token, AvailableStep $waiting, array $also = [], int $status = 200): Response
+    {
+        return response()->view('step-link', [
+            'token' => $token,
+            'case' => $waiting->case,
+            'step' => $waiting->step,
+            'lastsHours' => StepLink::LastsHours,
+            'opens' => StepLink::Opens,
+            ...$also,
+        ], $status);
+    }
+
+    /**
+     * The step this link can still answer, or nothing if the link itself is finished.
+     *
+     * Both checks, because either can be the reason: the link may have run out of time or
+     * opens, or the case may have been answered, cancelled or closed some other way.
+     */
+    private function stillAnswerable(StepLink $links, string $token): ?AvailableStep
+    {
+        $link = $links->find($token);
+
+        if ($link === null) {
+            return null;
+        }
+
+        try {
+            $links->refuseUnlessItStillWorks($link);
+
+            return $this->stepStillWaiting($link);
+        } catch (ProcessRefused) {
+            return null;
+        }
     }
 
     /**

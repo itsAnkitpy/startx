@@ -421,8 +421,13 @@ class MeridianSeeder extends Seeder
 
         // Priya, because Rakesh holds HR head over Shimla himself and can never clear his
         // own exit. Then finance, then his own manager.
-        $engine->decide($rakeshs, 1, 'approved', $people['priya']);
-        $engine->decide($rakeshs, 2, 'approved', $people['chandni']);
+        //
+        // Each clearance is answered, not merely approved. Until the engine applied a
+        // form's rules these three went through with every box empty, which is a demo
+        // showing two clearances that were never actually given — and the manager's
+        // sign-off asks nothing at all, so it still passes nothing.
+        $engine->decide($rakeshs, 1, 'approved', $people['priya'], ['id_card_returned' => true]);
+        $engine->decide($rakeshs, 2, 'approved', $people['chandni'], ['imprest_card_returned' => true]);
         $engine->decide($rakeshs, 3, 'approved', $people['chandni']);
 
         $address = (new StepLink)->issue($rakeshs, 4);

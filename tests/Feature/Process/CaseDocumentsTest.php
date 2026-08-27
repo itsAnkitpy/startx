@@ -196,9 +196,23 @@ it('opens nothing written by hand into a box that asks for words', function () {
         // something a document is the question the client asked, never the shape of what
         // is stored under it — read the other way round, this is somebody naming a file
         // already on our disk as their own clearance evidence and then opening it.
-        (new CaseEngine)->decide($anjalis, 1, 'approved', meridiansStaffCalled('rakesh'), [
-            'id_card_returned' => '0',
-            'remarks' => ['disk' => 'local', 'path' => 'case-documents/1/somebody-elses.pdf'],
+        //
+        // Written straight into the row, because the engine now refuses this on the way
+        // in: the box asks for words and a note of a file is not words. This reader is the
+        // second of the two guards and has its own reason to hold — it walks whatever the
+        // answers column contains, including a case answered by a version of this product
+        // that had no documents in it at all — so it is still checked against a row the
+        // engine will not write.
+        CaseStep::create([
+            'case_id' => $anjalis->getKey(),
+            'sequence' => 1,
+            'assignee_id' => meridiansStaffCalled('rakesh')->getKey(),
+            'outcome' => 'approved',
+            'acted_at' => now(),
+            'payload' => [
+                'id_card_returned' => '0',
+                'remarks' => ['disk' => 'local', 'path' => 'case-documents/1/somebody-elses.pdf'],
+            ],
         ]);
 
         expect((new CaseDocuments)->on($anjalis->refresh()))->toBeEmpty();

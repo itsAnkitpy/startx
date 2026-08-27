@@ -326,6 +326,188 @@ it('will not let a required question be left out of the request', function () {
     });
 });
 
+/*
+| The same questions, demanded by the engine and not only by the one screen.
+|
+| Until these, the queue screen was the only thing in the product that read a form's rules.
+| Everything else that writes an answer — the link sent to somebody with no account, a
+| console command, and the screen module 05 adds for raising a request — filed whatever it
+| was handed. So Rakesh's exit could be seeded with three clearances nobody answered, and
+| the case closed as though all three had been given.
+|
+| Which outcome it is decides one thing and one thing only: whether a required question is
+| demanded. Approving is the step's answers being filed. A rejection, a hold and a send-back
+| are each a reason the step is not finished, and demanding a full form on any of them makes
+| that outcome unreachable in exactly the case it exists for. Every limit the client wrote —
+| how long, how large, never below zero, one of their own rows — holds either way.
+*/
+
+it('refuses a clearance with a required question empty, screen or no screen', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // Nothing at all handed over for the one question HR has to answer, and no screen
+        // in the way. The refusal names the question in the client's own words, because
+        // the person reading it is the one who has to fix it.
+        expect(fn () => (new CaseEngine)->decide($anjalis, 1, 'approved', $priya))
+            ->toThrow(ProcessRefused::class, 'ID card returned');
+
+        // Half an answer is refused the same way: HR says the card came back, which is
+        // what makes the photograph asked for at all, and sends no photograph.
+        expect(fn () => (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, [
+            'id_card_returned' => true,
+            'notice_shortfall_days' => 400,
+        ]))->toThrow(ProcessRefused::class, 'Notice period short by (days)');
+
+        // Anjali's exit is exactly where it was: nobody has cleared anything, and it has
+        // not closed behind a clearance that never happened.
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())
+            ->whereNotNull('acted_at')->count())->toBe(0)
+            ->and($anjalis->fresh()->closed_at)->toBeNull();
+
+        // And the answer that does fit goes through, so this is a check and not a wall.
+        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+            ->sole()->outcome)->toBe('approved');
+    });
+});
+
+it('lets a clearance be rejected over the very question that is empty', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $rakesh = User::query()->where('work_email', 'rakesh@meridian.test')->sole();
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // Rakesh holds HR's clearance on Anjali's exit. He is rejecting it because he
+        // cannot say the ID card came back — so demanding that answer would leave the one
+        // outcome the situation calls for as the one he cannot record.
+        $rejected = (new CaseEngine)->decide($anjalis, 1, 'rejected', $rakesh, [], 'Card never came back.');
+
+        expect($rejected->outcome)->toBe('rejected')
+            ->and($anjalis->fresh()->state)->toBe(ProcessCase::Closed);
+
+        // The same rule, read where it is written: a hold and a send-back are the other
+        // two ways a step is not finished, and neither demands the form either. Both get
+        // their screen and their walk-through in module 05's step 6.
+        $step = ProcessStep::query()->whereRelation('template', 'key', 'exit')
+            ->where('sequence', 2)->sole();
+
+        expect((new StepForm)->rules($step, [], finishingTheStep: false))
+            ->toHaveKey('imprest_card_returned')
+            ->and((new StepForm)->rules($step, [], finishingTheStep: false)['imprest_card_returned'])
+            ->toBe(['nullable', 'boolean']);
+    });
+});
+
+it('holds a rejection to the limits the client wrote on the question', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
+        $chandni = User::query()->where('work_email', 'chandni@meridian.test')->sole();
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+
+        // Chandni is rejecting finance's clearance, so nothing is required of her. What is
+        // still refused is a recovery of minus two and a half thousand rupees, which is a
+        // payable and has its own line on the settlement statement. A figure that cannot
+        // be right is not made right by the step ending badly.
+        expect(fn () => (new CaseEngine)->decide($anjalis, 2, 'rejected', $chandni, [
+            'imprest_card_returned' => false,
+            'recover_from_them' => -2500,
+        ], 'Figures do not add up.'))->toThrow(ProcessRefused::class, 'Amount to recover from them');
+
+        expect($anjalis->fresh()->closed_at)->toBeNull();
+    });
+});
+
+it('does not demand a required question an earlier answer has hidden', function () {
+    TenantContext::run($this->meridian, function () {
+        $step = aStepAsking([
+            ['key' => 'imprest_card_returned', 'label' => 'Imprest card returned',
+                'type' => FormField::Boolean, 'required' => true],
+            ['key' => 'recover_from_them', 'label' => 'Amount to recover from them',
+                'type' => FormField::Money, 'required' => true,
+                'visible_if' => [[['field' => 'imprest_card_returned', 'operator' => '=', 'value' => false]]]],
+        ]);
+
+        // The card came back, so nobody is asked what to recover and the box is not on the
+        // screen. Demanding it here is the failure ServiceNow spent years on: a step that
+        // cannot be finished, refused over a question with nowhere to answer it.
+        expect((new StepForm)->onlyWhatThisStepAsks($step, ['imprest_card_returned' => true]))
+            ->toEqual(['imprest_card_returned' => true]);
+
+        // The card did not come back, the box appears, and now it is required.
+        expect(fn () => (new StepForm)->onlyWhatThisStepAsks($step, ['imprest_card_returned' => false]))
+            ->toThrow(ProcessRefused::class, 'Amount to recover from them');
+    });
+});
+
+it('lets the queue screen reject a step whose required box is empty', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $rakesh = User::query()->where('work_email', 'rakesh@meridian.test')->sole();
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // The screen and the engine have to agree about this, and the screen is the half
+        // that used to demand a full form whatever the button said. Rakesh could not
+        // reject the clearance whose empty box was his reason for rejecting it.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('decide', $anjalis->getKey(), 1, 'rejected')
+            ->assertHasNoErrors();
+
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+            ->sole()->outcome)->toBe('rejected');
+    });
+});
+
+it('puts the refusal under the box when a yes or no is left unanswered', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        $rakesh = User::query()->where('work_email', 'rakesh@meridian.test')->sole();
+        $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        // Rakesh opens the yes/no, puts it back to "Not answered", and approves. That is an
+        // empty box, not a "no" — and it has to be refused under the box he has to fill in,
+        // not in a sentence across the top of the page about a box with no mark on it.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '')
+            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->assertHasErrors("answers.{$anjalis->getKey()}.1.id_card_returned");
+
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+            ->whereNotNull('acted_at')->count())->toBe(0);
+
+        // And an explicit "no" is a real answer, which is the reason the empty one cannot
+        // simply be treated as one.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '0')
+            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+            ->sole()->payload)->toEqual(['id_card_returned' => '0']);
+    });
+});
+
 it('keeps a picker inside the client own rows', function () {
     $ours = Tenant::factory()->create(['name' => 'Vertex Foods', 'slug' => 'vertex-forms']);
 

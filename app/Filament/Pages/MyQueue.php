@@ -247,9 +247,15 @@ class MyQueue extends Page
      *
      * The answers are checked here against the client's own definitions, which is what
      * puts "Imprest card returned is required" under the right box. That is not the only
-     * check and is not the important one — the engine refuses an answer to a question the
-     * step does not ask, and it refuses it whether it came from this page, from a link
-     * sent to somebody with no account, or from a console command.
+     * check and is not the important one — the engine applies the same rules whether the
+     * answers came from this page, from a link sent to somebody with no account, or from
+     * a console command, and refuses them in one sentence rather than beside a box.
+     *
+     * **The two have to agree about required questions, which is why the outcome is
+     * handed to both.** A rejection and a send-back are not the step's answers being
+     * filed, so neither demands a full form; a screen that demanded one anyway would
+     * refuse what the engine allows, and Chandni could not reject the clearance whose
+     * empty box is her reason for rejecting it.
      */
     public function decide(int $caseId, int $sequence, string $outcome): void
     {
@@ -269,10 +275,18 @@ class MyQueue extends Page
             $forms = new StepForm;
             $under = "answers.{$caseId}.{$sequence}.";
 
+            // An empty box dropped before anything is checked, because the engine drops it
+            // too and what is left has to be the same on both sides. A yes/no left on "Not
+            // answered" is an empty string, which Laravel treats as an answer and the
+            // engine does not — so without this the screen let it through and the engine
+            // refused it, and the person got a sentence at the top of the page about a box
+            // with no mark against it.
+            $this->answers[$caseId][$sequence] = $forms->answered($this->typedInto($waiting));
+
             // Rewritten under the property path the inputs are bound to, so a refusal
             // lands beside the box it is about instead of at the top of the page.
             $this->validate(
-                collect($forms->rules($waiting->step, $this->typedInto($waiting)))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
+                collect($forms->rules($waiting->step, $this->typedInto($waiting), $outcome === 'approved'))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
                 [],
                 collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
             );

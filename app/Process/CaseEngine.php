@@ -250,7 +250,14 @@ final class CaseEngine
             $attempt->acted_at = now();
             $attempt->payload = array_merge(
                 (array) $attempt->payload,
-                (new StepForm)->onlyWhatThisStepAsks($step, $payload),
+                // The form's own rules, applied here and not only on a screen. Whether a
+                // required question is demanded turns on the outcome: approving is the
+                // step's answers being filed, while a rejection, a hold and a send-back
+                // are each a reason it is not finished. Demanding a full form on those
+                // three would make each unreachable in the one case it exists for —
+                // Chandni rejects Rakesh's clearance *because* the figure is wrong, and
+                // she sends it back to have it corrected.
+                (new StepForm)->onlyWhatThisStepAsks($step, $payload, $outcome === 'approved'),
             );
             $attempt->save();
 
@@ -348,7 +355,12 @@ final class CaseEngine
             $attempt->acted_at = now();
             $attempt->payload = array_merge(
                 (array) $attempt->payload,
-                (new StepForm)->onlyWhatThisStepAsks($step, $payload),
+                // The same rules as the queue screen applies, on the door that has no
+                // screen behind it. This is the writer the check was missing from: Neha
+                // Deshpande answering her own clearance through the link sent to her
+                // filed it with every box empty, and the exit closed as though it had
+                // been cleared.
+                (new StepForm)->onlyWhatThisStepAsks($step, $payload, $outcome === 'approved'),
             );
             $attempt->save();
 

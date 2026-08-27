@@ -104,6 +104,16 @@
         button:hover { filter: brightness(1.08); }
 
         .sx-note { margin-top: 22px; font-size: 0.82rem; }
+
+        .sx-refused {
+            margin-top: 22px;
+            padding: 12px 14px;
+            border: 1px solid rgba(255, 138, 138, 0.45);
+            border-radius: 12px;
+            background: rgba(255, 96, 96, 0.12);
+            color: #ffc9c9;
+            white-space: pre-line;
+        }
     </style>
 </head>
 <body>
@@ -124,11 +134,19 @@
             @endif
         </p>
 
+        {{-- What the company's own form would not accept, in the words the engine wrote.
+             Above the box rather than on a page of its own, because the person has a live
+             link and something to correct — sending them to the dead-link page would offer
+             them a new link, which replaces the answer they are trying to give. --}}
+        @if (($refused ?? null) !== null)
+            <p class="sx-refused">{{ $refused }}</p>
+        @endif
+
         <form method="POST" action="{{ route('step-link.submit', $token) }}">
             @csrf
 
             <label for="note">Anything you want on the record (optional)</label>
-            <textarea id="note" name="note" maxlength="2000"></textarea>
+            <textarea id="note" name="note" maxlength="2000">{{ $note ?? '' }}</textarea>
 
             <div class="sx-answers">
                 @foreach ($step->allowed_outcomes ?? [] as $outcome)

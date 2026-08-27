@@ -3,6 +3,8 @@
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -100,7 +102,8 @@ it('adds the escalation target to an overdue step and takes it from nobody', fun
         // Widening the list is not a decoration: the engine lets her act on it, asked the
         // same question again at the moment of acting.
         $decided = (new CaseEngine)->decide(
-            theExitOf('Anjali'), 1, 'approved', whoWorksAtMeridian('chandni')
+            theExitOf('Anjali'), 1, 'approved', whoWorksAtMeridian('chandni'),
+            ['id_card_returned' => true]
         );
 
         expect($decided->outcome)->toBe('approved');
@@ -391,4 +394,74 @@ it('refuses to send a link where there is no address to send it to', function ()
         expect(fn () => (new StepLink)->issue(theExitOf('Rakesh'), 4))
             ->toThrow(ProcessRefused::class, 'no personal email address recorded');
     });
+});
+
+it('holds an answer sent through a link to the form the client wrote', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakeshs = theExitOf('Rakesh');
+        $token = tokenForStep($rakeshs, 4);
+
+        // Meridian allows two thousand characters on the one question the leaver is asked.
+        // Nothing on this path had ever been checked against it: the queue screen was the
+        // only thing in the product reading a form's rules, and there is no queue screen
+        // behind a link, so this door recorded whatever it was handed.
+        //
+        // The page in front of it carries its own looser copy of the same limit, which is
+        // what module 10 replaces when it draws the step's real form there. This is the
+        // writer underneath, which is the half every other door also goes through.
+        expect(fn () => (new CaseEngine)->decideThroughALink($token, 'approved', [
+            'note' => str_repeat('a', 2001),
+        ]))->toThrow(ProcessRefused::class, 'Anything you want on the record');
+
+        // Rakesh's exit is still waiting on him and has not closed on an answer that was
+        // refused.
+        expect(CaseStep::query()->where('case_id', $rakeshs->getKey())->where('sequence', 4)
+            ->whereNull('superseded_at')->sole()->outcome)->toBeNull()
+            ->and($rakeshs->fresh()->closed_at)->toBeNull();
+
+        // The same link, an answer that fits, and it goes through — so this is the client's
+        // own limit and not a door that has stopped opening.
+        (new CaseEngine)->decideThroughALink($token, 'approved', ['note' => 'All handed over.']);
+
+        expect($rakeshs->fresh()->closed_at)->not->toBeNull();
+    });
+});
+
+it('draws a refusal over the form rather than telling a live link it is dead', function () {
+    $token = TenantContext::run($this->meridian, function () {
+        // A second process of Meridian's whose one step is answered through a link and
+        // whose form insists on an answer. Their exit's handover question is optional, so
+        // it cannot show this — and a client whose external step asks something required
+        // is ordinary, not exotic.
+        $form = FormDefinition::factory()->named('return_confirmation', 'Return confirmation')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('everything_returned', 'Everything returned', FormField::Boolean)->create();
+
+        $form->publish();
+
+        $template = ProcessTemplate::factory()->named('asset_return', 'Asset return')->about('employee')->create();
+
+        ProcessStep::factory()->of($template)->at(1, 1)->named('Leaver confirms what came back')
+            ->asking($form)->external()->offering('approved', 'rejected')->create();
+
+        $template->publish();
+
+        $started = (new CaseEngine)->open(
+            $template->fresh(), whoWorksAtMeridian('rakesh'), whoWorksAtMeridian('chandni')
+        );
+
+        return tokenForStep($started, 1);
+    });
+
+    // The page in front of this draws one fixed box for a note and cannot ask the question
+    // at all, which is module 10's screen to fix. What matters here is where the refusal
+    // lands: not on the page that says the link is finished, whose only way forward is a
+    // new link — that replaces the answer being given, hands over the same box again and
+    // spends one of the link's opens each time round.
+    $this->post(atMeridiansAddress('step/'.$token), ['outcome' => 'approved'])
+        ->assertStatus(422)
+        ->assertSee('Leaver confirms what came back')
+        ->assertSee('Everything returned')
+        ->assertDontSee('This link no longer opens');
 });

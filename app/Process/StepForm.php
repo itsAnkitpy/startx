@@ -8,6 +8,7 @@ use App\Models\ProcessStep;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 /**
@@ -168,15 +169,24 @@ class StepForm
      * required — it is not asked — and demanding it would leave the step impossible to
      * complete with nothing on the screen saying why.
      *
+     * **`$finishingTheStep` decides whether a required question is demanded**, and only
+     * that. Every limit the client wrote on a question — how long, how large, which of
+     * their own rows, what kind of file — holds either way, because a rejection carrying
+     * a twenty-megabyte file or a negative recovery figure is wrong however the step
+     * ended. See {@see onlyWhatThisStepAsks()} for why the two are separated at all.
+     *
      * @param  array<string, mixed>  $answers
      * @return array<string, mixed>
      */
-    public function rules(ProcessStep $step, array $answers): array
+    public function rules(ProcessStep $step, array $answers, bool $finishingTheStep = true): array
     {
         $rules = [];
 
         foreach ($this->asking($step, $answers) as $field) {
-            $rules[$field->key] = [...$this->presence($field), ...$this->forType($field)];
+            $rules[$field->key] = [
+                ...($finishingTheStep ? $this->presence($field) : ['nullable']),
+                ...$this->forType($field),
+            ];
 
             if ($field->type === FormField::Multiselect) {
                 // Each chosen value, not the list. Written separately because Laravel
@@ -223,12 +233,30 @@ class StepForm
      * nothing to do about. An answer to a question no version of the form ever asked is
      * somebody reaching past the screen, and that is refused.
      *
+     * **And the client's own rules are applied here, which is the whole point of putting
+     * this on the engine.** Until this existed the only thing demanding a required
+     * question was the queue screen, so Neha Deshpande answering the same clearance
+     * through the link sent to her filed it with every box empty and the exit closed as
+     * though it were cleared. Every product looked at has this hole somewhere — Jira's
+     * approval steps skip its own validators, Camunda's form rules are not applied when
+     * a task is completed through its API, and ServiceNow's depend on which screen was
+     * used — and each of them has it because the check lives with a screen rather than
+     * with the write.
+     *
+     * `$finishingTheStep` is false for a rejection, a hold and a send-back. None of the
+     * three is the step's answers being filed; each is a reason it is not finished, and
+     * demanding a complete form on any of them makes that outcome unreachable in exactly
+     * the case it exists for — an approver rejects *because* an answer is wrong, and a
+     * send-back exists to get one corrected. ServiceNow lands in the same place from the
+     * other direction: what it makes compulsory on a rejection is the comment, not the
+     * form. Ours is the reason on the case, which the engine already demands for a hold.
+     *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function onlyWhatThisStepAsks(ProcessStep $step, array $payload): array
+    public function onlyWhatThisStepAsks(ProcessStep $step, array $payload, bool $finishingTheStep = true): array
     {
-        if ($payload === []) {
+        if ($payload === [] && ! $finishingTheStep) {
             return [];
         }
 
@@ -249,13 +277,50 @@ class StepForm
         // asked for ends up deciding a later step.
         $kept = array_intersect_key($given, array_flip($asking->pluck('key')->all()));
 
+        // Shape first, because it is the one refusal that says what the question takes
+        // rather than what is wrong with the answer, and because it is what lets the
+        // write below trust that a document question is holding a real upload.
+        $this->refuseUnlessEachAnswerIsTheRightShape($step, $asking, $kept);
+
+        // Then the client's own rules, and still before a single file has moved: what a
+        // person attached is the file itself at this point, so its size and its kind can
+        // be checked. A moment later it is a note of where the file went, which no rule
+        // about files can read.
+        $this->refuseUnlessTheAnswersFit($step, $kept, $finishingTheStep);
+
         return $this->withDocumentsPutAway($step, $asking, $kept);
     }
 
     /**
-     * Move each attached document out of the browser's holding area and record where it
-     * went, in place of the file itself.
+     * Hold the answers to the client's own rules, and name every problem at once.
      *
+     * `ponytail:` this checks what is being written now, not what is already on a step
+     * that was held and is being approved later — the engine merges the two and only the
+     * new half comes through here. The queue screen clears its boxes when a step is held
+     * and does not fill them back in, so today a held step is answered again in full
+     * anyway. Two things have to come in here together when a screen starts showing a held
+     * step's earlier answers back: the already-stored half, and the hiding — Chandni
+     * holding finance with a recovery figure and then approving it saying the card came
+     * back leaves that figure on the row, where a later step's condition can still read
+     * it. Module 05's step 6 is where the hold screen arrives and owns both.
+     *
+     * @param  array<string, mixed>  $kept
+     */
+    private function refuseUnlessTheAnswersFit(ProcessStep $step, array $kept, bool $finishingTheStep): void
+    {
+        $validator = Validator::make(
+            $kept,
+            $this->rules($step, $kept, $finishingTheStep),
+            [],
+            $this->labels($step),
+        );
+
+        if ($validator->fails()) {
+            throw ProcessRefused::cannotBeRecordedWithThoseAnswers($step->name, $validator->errors()->all());
+        }
+    }
+
+    /**
      * **A document question takes an attached file and nothing else, and no other
      * question takes one.** That is the guard, and it matters more than it looks. What is
      * held while somebody fills a card in is a real upload, put there by Livewire's own
@@ -264,6 +329,36 @@ class StepForm
      * on the disk as their clearance evidence. The other way round is the same hole from
      * the other side — an upload aimed at the remarks box, which nothing would then check
      * the size or the kind of.
+     *
+     * Every answer is checked before any file is written, so a card refused over one
+     * question does not leave the file from another one lying on the disk.
+     *
+     * @param  Collection<int, FormField>  $asking
+     * @param  array<string, mixed>  $kept
+     */
+    private function refuseUnlessEachAnswerIsTheRightShape(ProcessStep $step, Collection $asking, array $kept): void
+    {
+        $questions = $asking->keyBy('key');
+
+        $wrong = [];
+
+        foreach ($kept as $key => $answer) {
+            if (($questions[$key]->type === FormField::File) !== ($answer instanceof UploadedFile)) {
+                $wrong[] = '['.$questions[$key]->label.']';
+            }
+        }
+
+        if ($wrong !== []) {
+            throw ProcessRefused::thatIsNotWhatTheQuestionTakes($step->name, $wrong);
+        }
+    }
+
+    /**
+     * Move each attached document out of the browser's holding area and record where it
+     * went, in place of the file itself.
+     *
+     * Reached only once {@see refuseUnlessEachAnswerIsTheRightShape()} has held, so every
+     * answer on a document question here is a real upload.
      *
      * What is stored is where it went, what the person called it, how big it was and what
      * it actually is. The name is kept for reading back only and is never part of the
@@ -282,20 +377,6 @@ class StepForm
     private function withDocumentsPutAway(ProcessStep $step, Collection $asking, array $kept): array
     {
         $questions = $asking->keyBy('key');
-
-        // Every answer is checked before any file is written, so a card refused over one
-        // question does not leave the file from another one lying on the disk.
-        $wrong = [];
-
-        foreach ($kept as $key => $answer) {
-            if (($questions[$key]->type === FormField::File) !== ($answer instanceof UploadedFile)) {
-                $wrong[] = '['.$questions[$key]->label.']';
-            }
-        }
-
-        if ($wrong !== []) {
-            throw ProcessRefused::thatIsNotWhatTheQuestionTakes($step->name, $wrong);
-        }
 
         foreach ($kept as $key => $answer) {
             if ($answer instanceof UploadedFile) {
@@ -351,10 +432,16 @@ class StepForm
      * the answer not being there, and it is what decides whether the question below it is
      * asked.
      *
+     * Read by the queue screen as well as from here, so that the screen checks what the
+     * engine will check. A yes/no box left on "Not answered" arrives as an empty string:
+     * the screen used to hand that to Laravel untouched, which lets a required question
+     * pass, and the engine dropped it and refused — so the person got a refusal at the top
+     * of the page instead of a message under the box they had to fill in.
+     *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function answered(array $payload): array
+    public function answered(array $payload): array
     {
         return array_filter(
             $payload,

@@ -120,6 +120,30 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * Answers that do not satisfy the step's own form — a required question left empty,
+     * or an answer outside the limits the client wrote on it.
+     *
+     * Every problem at once, in the client's own words for each question, for the same
+     * reason {@see cannotPublish} names every problem at once: being told about one,
+     * fixing it, and being told about the next is a screen somebody gives up on.
+     *
+     * This is the check that used to live only on the queue screen, which meant a link
+     * sent to somebody with no account, or a console command, filed an incomplete
+     * clearance and the case closed as though it were complete. It is on the engine now,
+     * so every writer passes through it.
+     *
+     * @param  list<string>  $problems
+     */
+    public static function cannotBeRecordedWithThoseAnswers(string $step, array $problems): self
+    {
+        $listed = implode("\n  - ", $problems);
+
+        return new self(
+            "[{$step}] cannot be recorded yet:\n  - {$listed}"
+        );
+    }
+
+    /**
      * A list to choose from with nothing on it.
      *
      * The same invisible failure as everything else caught at publishing: the form goes
