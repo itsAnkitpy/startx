@@ -136,7 +136,7 @@ final class AvailableSteps
     {
         $case->loadMissing('liveSteps');
 
-        return $this->conditionsAreMet($step, $case, $this->answersOn($case->liveSteps));
+        return $this->conditionsAreMet($step, $case, $case->answersSoFar());
     }
 
     /**
@@ -149,7 +149,7 @@ final class AvailableSteps
         }
 
         $live = $case->liveSteps->keyBy('sequence');
-        $answers = $this->answersOn($live);
+        $answers = $case->answersSoFar();
         $calendar = $this->calendarOf($case);
 
         $available = [];
@@ -351,21 +351,6 @@ final class AvailableSteps
                 escalateTo: $manager,
             );
         });
-    }
-
-    /**
-     * Everything the case's own forms have collected so far, later answers winning.
-     *
-     * These are the one thing that is meant to decide a branch while a case runs,
-     * because they arrive during it. Everything else a condition can ask about was
-     * frozen when the case opened.
-     *
-     * @param  Collection<int, CaseStep>  $live
-     * @return array<string, mixed>
-     */
-    private function answersOn(Collection $live): array
-    {
-        return $live->sortBy('sequence')->pluck('payload')->collapse()->all();
     }
 
     /**

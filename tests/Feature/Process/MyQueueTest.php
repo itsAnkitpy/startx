@@ -32,11 +32,17 @@ function atMeridianCalled(string $first): User
     return User::query()->where('work_email', $first.'@meridian.test')->sole();
 }
 
-/** The names of the steps waiting on somebody, as the screen would list them. */
+/**
+ * The names of the steps waiting on somebody, as the screen would list them.
+ *
+ * A hiring request is about a vacancy rather than a person, so it is listed by the
+ * process it runs on.
+ */
 function waitingOnThem(User $person): array
 {
     return (new AvailableSteps)->waitingOn($person)
-        ->map(fn ($waiting) => $waiting->step->name.' — '.$waiting->case->subject->name)
+        ->map(fn ($waiting) => $waiting->step->name.' — '
+            .($waiting->case->subject?->name ?? $waiting->case->template->name))
         ->sort()->values()->all();
 }
 
@@ -45,9 +51,10 @@ it('seeds a company worth looking at', function () {
         expect(User::query()->count())->toBe(6)
             // Three exits nobody has touched; Rakesh's, which everybody who works here
             // has already cleared and which now waits on Rakesh himself through a link,
-            // because his sign-in is gone; and Priya's, which runs on the process built
-            // with the mistake publishing now refuses.
-            ->and(ProcessCase::query()->whereNull('closed_at')->count())->toBe(5);
+            // because his sign-in is gone; Priya's, which runs on the process built with
+            // the mistake publishing now refuses; and the two hiring requests, one under
+            // the salary threshold and one over it.
+            ->and(ProcessCase::query()->whereNull('closed_at')->count())->toBe(7);
 
         // Nobody has touched any of the three, so not one of their waiting steps has a row
         // anywhere. That is the whole point of the lists below.
@@ -62,9 +69,16 @@ it('seeds a company worth looking at', function () {
 it('shows each person only the steps that are theirs', function () {
     TenantContext::run($this->meridian, function () {
         // Rakesh holds HR head over Shimla, so the two Shimla exits are his. Rohit's is
-        // in Pune and his grant does not reach it.
+        // in Pune and his grant does not reach it. He also holds line-of-business head
+        // over Shimla, which is where both hiring requests say the vacancy is — and those
+        // two reached him from their own answers rather than from anybody's job row.
         expect(waitingOnThem(atMeridianCalled('rakesh')))
-            ->toBe(['HR clearance — Anjali Rao', 'HR clearance — Deepak Iyer']);
+            ->toBe([
+                'HR clearance — Anjali Rao',
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+                'Line-of-business approval — Hiring request',
+            ]);
 
         // Priya shares that role over the same branch, so she sees the same two.
         expect(waitingOnThem(atMeridianCalled('priya')))
@@ -99,7 +113,12 @@ it('takes a shared step out of the other person\'s list once somebody picks it u
             ->assertOk();
 
         expect(waitingOnThem($rakesh))
-            ->toBe(['HR clearance — Anjali Rao', 'HR clearance — Deepak Iyer'])
+            ->toBe([
+                'HR clearance — Anjali Rao',
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+                'Line-of-business approval — Hiring request',
+            ])
             ->and(waitingOnThem($priya))->toBe(['HR clearance — Deepak Iyer']);
     });
 });
@@ -120,7 +139,12 @@ it('lets the holder decide a step, and opens the next group to somebody else', f
 
         // Gone from Rakesh's list, and the finance clearance behind it is now Chandni's —
         // which nothing wrote down in advance.
-        expect(waitingOnThem($rakesh))->toBe(['HR clearance — Deepak Iyer'])
+        expect(waitingOnThem($rakesh))
+            ->toBe([
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+                'Line-of-business approval — Hiring request',
+            ])
             ->and(waitingOnThem($chandni))
             ->toBe([
                 'Finance clearance — Anjali Rao',
@@ -164,7 +188,7 @@ it('marks a step that has blown its deadline', function () {
         // Anjali's exit was opened five days ago against a two-day target, so its
         // clearance is past due and the screen has to say so.
         $overdue = (new AvailableSteps)->waitingOn(atMeridianCalled('rakesh'))
-            ->firstWhere(fn ($waiting) => $waiting->case->subject->first_name === 'Anjali');
+            ->firstWhere(fn ($waiting) => $waiting->case->subject?->first_name === 'Anjali');
 
         expect($overdue->escalationOwed)->toBeTrue();
 
@@ -203,7 +227,12 @@ it('opens at its own address for a signed-in employee', function () {
         ->get('http://'.MeridianSeeder::Slug.'.'.config('tenancy.central_domain').'/admin/my-queue')
         ->assertOk()
         ->assertSee('HR clearance')
-        ->assertSee('Anjali Rao');
+        ->assertSee('Anjali Rao')
+        // And the hiring approvals beside them, drawn through the whole page rather than
+        // through the component on its own.
+        ->assertSee('Line-of-business approval')
+        ->assertSee('What this request is for')
+        ->assertSee('Shimla branch');
 });
 
 it('says on the card when a step only reached somebody because nobody holds the role', function () {

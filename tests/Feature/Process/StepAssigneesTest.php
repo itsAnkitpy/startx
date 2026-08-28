@@ -3,6 +3,8 @@
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\EmploymentRecord;
+use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
@@ -386,6 +388,165 @@ it('climbs from a named person to their manager when the named person is the one
         $case = (new CaseEngine)->open($exit, $rakesh, $chandni);
 
         expect(whoHoldsIt($case))->toBe(['Chandni Iyer']);
+    });
+});
+
+/*
+| A case with no department of its own
+*/
+
+/**
+ * A request about a vacancy: the first step asks which part of the company it is for, and
+ * the second belongs to whoever holds a role over whatever that answer named.
+ */
+function aRequestScopedByItsOwnAnswer(User $raisedBy, string $roleKey = 'lob_head'): ProcessTemplate
+{
+    $form = FormDefinition::factory()->named('request', 'Request')->create();
+
+    FormField::factory()->on($form)->at(1)->required()
+        ->asking('department', 'Which part of the company', FormField::OrgUnitPicker)->create();
+
+    $form->publish();
+
+    $hiring = ProcessTemplate::factory()->named('hiring', 'Hiring request')->about('none')->create();
+
+    ProcessStep::factory()->of($hiring)->at(1, 1)->named('Raise request')
+        ->asking($form)->heldBy($raisedBy->work_email)->offering('approved')->create();
+
+    ProcessStep::factory()->of($hiring)->at(2, 2)->named('Approval')
+        ->heldByTheRole($roleKey, 'department')->offering('approved', 'rejected')->create();
+
+    $hiring->publish();
+
+    return $hiring;
+}
+
+/** A request raised naming one department, so its approval step is the one waiting. */
+function aRequestNaming(OrgUnit $department, User $raisedBy): ProcessCase
+{
+    $engine = new CaseEngine;
+    $request = $engine->open(aRequestScopedByItsOwnAnswer($raisedBy), by: $raisedBy);
+
+    $engine->decide($request, 1, 'approved', $raisedBy, ['department' => $department->getKey()]);
+
+    return $request->fresh();
+}
+
+/** The names of the people the approval step of a request belongs to. */
+function whoApprovesIt(ProcessCase $request): array
+{
+    $approval = $request->template->steps->firstWhere('sequence', 2);
+
+    return (new AssigneeResolver)->resolve($request, $approval)
+        ->map(fn (User $person) => $person->name)
+        ->all();
+}
+
+it('sends an approval to the head of the department the request itself named', function () {
+    TenantContext::run($this->meridian, function () {
+        $units = meridiansStructure();
+        $anjali = personIn($units['shimla'], 'Anjali Nair');
+        $rakesh = personIn($units['shimla'], 'Rakesh Menon');
+        $priya = personIn($units['pune'], 'Priya Sharma');
+
+        grant($rakesh, 'lob_head', $units['shimla']);
+        grant($priya, 'lob_head', $units['pune']);
+
+        // A vacancy in Shimla goes to Shimla's head, and Pune's never sees it — the same
+        // rule an exit gets from the leaver's own job row, on a case that has no job row.
+        expect(whoApprovesIt(aRequestNaming($units['shimla'], $anjali)))->toBe(['Rakesh Menon']);
+    });
+});
+
+it('climbs to the unit above when the department a request named has nobody in the job', function () {
+    TenantContext::run($this->meridian, function () {
+        $units = meridiansStructure();
+        $anjali = personIn($units['shimla'], 'Anjali Nair');
+        $chandni = personIn($units['north'], 'Chandni Verma');
+
+        grant($chandni, 'lob_head', $units['north']);
+
+        expect(whoApprovesIt(aRequestNaming($units['shimla'], $anjali)))->toBe(['Chandni Verma']);
+    });
+});
+
+it('leaves a request approved by nobody, and says so, when no unit above it holds the role either', function () {
+    TenantContext::run($this->meridian, function () {
+        $units = meridiansStructure();
+        $anjali = personIn($units['shimla'], 'Anjali Nair');
+
+        $request = aRequestNaming($units['shimla'], $anjali);
+
+        // Nobody at all, and the case says so on its own record rather than the request
+        // quietly widening to whoever holds the role anywhere in the company.
+        expect(whoApprovesIt($request))->toBe([]);
+
+        expect(warningsOn($request)->sole()->payload['step'])->toBe('Approval');
+    });
+});
+
+it('sends the approval somewhere else once the department on the request is corrected', function () {
+    TenantContext::run($this->meridian, function () {
+        $units = meridiansStructure();
+        $anjali = personIn($units['shimla'], 'Anjali Nair');
+        $rakesh = personIn($units['shimla'], 'Rakesh Menon');
+        $priya = personIn($units['pune'], 'Priya Sharma');
+
+        grant($rakesh, 'lob_head', $units['shimla']);
+        grant($priya, 'lob_head', $units['pune']);
+
+        $request = aRequestNaming($units['shimla'], $anjali);
+
+        // The request is corrected to name Pune instead. Whose job a step is has always
+        // been worked out fresh rather than written down, and the vacancy really did move,
+        // so the approval moves with it.
+        $request->liveSteps()->where('sequence', 1)->sole()
+            ->update(['payload' => ['department' => $units['pune']->getKey()]]);
+
+        expect(whoApprovesIt($request->fresh()))->toBe(['Priya Sharma']);
+    });
+});
+
+it('still reads the frozen job row, not an answer, on a case that is about a person', function () {
+    TenantContext::run($this->meridian, function () {
+        $units = meridiansStructure();
+        $rakesh = personIn($units['shimla'], 'Rakesh Menon');
+        $anjali = personIn($units['shimla'], 'Anjali Nair');
+        $priya = personIn($units['pune'], 'Priya Sharma');
+
+        grant($anjali, 'hr_head', $units['shimla']);
+        grant($priya, 'hr_head', $units['pune']);
+
+        // An exit whose first step asks a department and whose clearance names it. Rakesh's
+        // own job row says Shimla and the answer says Pune, and the row wins: a clearance
+        // opened against a branch must not move into another branch's queue because
+        // somebody typed a department into a later box.
+        $form = FormDefinition::factory()->named('opening', 'Opening note')->create();
+
+        FormField::factory()->on($form)->at(1)
+            ->asking('department', 'Which part of the company', FormField::OrgUnitPicker)->create();
+
+        $form->publish();
+
+        $exit = ProcessTemplate::factory()->named('exit', 'Exit')->about('employee')->create();
+
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Opening note')
+            ->asking($form)->heldBy($anjali->work_email)->offering('approved')->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('HR clearance')
+            ->heldByTheRole('hr_head', 'department')->offering('approved', 'rejected')->create();
+
+        $exit->publish();
+
+        $engine = new CaseEngine;
+        $case = $engine->open($exit, $rakesh, $anjali);
+
+        $engine->decide($case, 1, 'approved', $anjali, ['department' => $units['pune']->getKey()]);
+
+        $clearance = $case->template->steps->firstWhere('sequence', 2);
+
+        expect((new AssigneeResolver)->resolve($case->fresh(), $clearance)->pluck('name')->all())
+            ->toBe(['Anjali Nair']);
     });
 });
 

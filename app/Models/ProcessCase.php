@@ -148,6 +148,26 @@ class ProcessCase extends Model
         return $this->hasMany(EmploymentRecord::class, 'caused_by_case_id');
     }
 
+    /**
+     * Everything the case's own forms have collected so far, later answers winning.
+     *
+     * These are the one thing that is meant to decide anything while a case runs, because
+     * they arrive during it — everything else a condition or a rule can ask about was
+     * frozen when the case opened. Held steps are in here too: the relation keeps every
+     * attempt a send-back has not replaced, so step one's answers are still readable when
+     * step two is being worked out.
+     *
+     * On the case rather than on whichever class wanted it first, because two now do —
+     * the engine deciding which steps a case still wants, and the rule that sends a
+     * hiring approval to the department the request itself named.
+     *
+     * @return array<string, mixed>
+     */
+    public function answersSoFar(): array
+    {
+        return $this->liveSteps->sortBy('sequence')->pluck('payload')->collapse()->all();
+    }
+
     /** What has been done on this case. A step nobody has touched has no row here. */
     public function steps(): HasMany
     {

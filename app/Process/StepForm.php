@@ -3,8 +3,11 @@
 namespace App\Process;
 
 use App\Exceptions\ProcessRefused;
+use App\Models\Designation;
 use App\Models\FormField;
+use App\Models\OrgUnit;
 use App\Models\ProcessStep;
+use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
@@ -196,6 +199,48 @@ class StepForm
         }
 
         return $rules;
+    }
+
+    /**
+     * The rows a picker offers, as `id => name`.
+     *
+     * Only the three picker questions have any, and each reads the client's own table.
+     * The tenant wall does the scoping, so this is the client's own people, their own
+     * departments and their own designations without a word here saying so.
+     *
+     * Here rather than on the queue screen, because two things need it: the screen
+     * drawing the list to choose from, and the panel above an approver's form turning
+     * the number that was chosen back into words.
+     *
+     * @return array<int, string>
+     */
+    public function optionsFor(FormField $field): array
+    {
+        return match ($field->type) {
+            FormField::UserPicker => User::query()->orderBy('name')->pluck('name', 'id')->all(),
+            FormField::OrgUnitPicker => OrgUnit::query()->orderBy('name')->pluck('name', 'id')->all(),
+            FormField::DesignationPicker => Designation::query()->where('active', true)
+                ->orderBy('name')->pluck('name', 'id')->all(),
+            default => [],
+        };
+    }
+
+    /**
+     * One picker answer as the row's own name, whether or not it is still offered.
+     *
+     * Not read off the list above, which is the list of choices a person may still make:
+     * a designation the client has retired is rightly gone from it, and an approval
+     * already asking for that designation must still say so rather than reading back as
+     * nothing. So the row is read, and it is also the smaller read of the two.
+     */
+    public function nameOfThePicked(FormField $field, mixed $id): ?string
+    {
+        return match ($field->type) {
+            FormField::UserPicker => User::query()->find($id)?->name,
+            FormField::OrgUnitPicker => OrgUnit::query()->find($id)?->name,
+            FormField::DesignationPicker => Designation::query()->find($id)?->name,
+            default => null,
+        };
     }
 
     /**

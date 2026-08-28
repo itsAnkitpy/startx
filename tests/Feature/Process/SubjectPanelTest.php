@@ -120,6 +120,108 @@ it('puts the details above the form on the queue screen', function () {
         ->assertSee('Not recorded'));
 });
 
+it('shows what a request asked for when the case is about a vacancy', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, function () {
+        // The cheaper of the two hiring requests the demo has in flight. It is about a
+        // vacancy, so there is nobody to describe — and what an approver actually has to
+        // read is what was asked for.
+        $request = ProcessCase::query()->whereNull('subject_user_id')->get()
+            ->sole(fn (ProcessCase $case) => ($case->answersSoFar()['annual_ctc'] ?? null) == 900000);
+
+        $panel = (new SubjectPanel)->of($request);
+
+        expect($panel['heading'])->toBe('What this request is for')
+            ->and($panel['who'])->toBeNull()
+            ->and($panel['instead'])->toBeNull()
+            // No claim about a person's record, because there is no person and no record.
+            ->and($panel['asOf'])->toBeNull();
+
+        // Both pickers read back as the client's own words rather than as the numbers
+        // they are stored as, and the choice reads as the client wrote it.
+        expect($panel['facts'])->toEqual([
+            'Which part of the company' => 'Shimla branch',
+            'Designation' => 'Operations Officer',
+            'Replacement or new headcount' => 'Replacing somebody who has left',
+            'How many positions' => '1',
+            'Annual CTC offered' => '900000',
+            'Employment type' => 'Permanent',
+            'Wanted by' => now()->addMonths(2)->format('j F Y'),
+            'Why the role is needed' => 'Replacing Deepak Iyer, whose exit is already running.',
+        ]);
+    });
+});
+
+it('puts the vacancy above the approval on the queue screen', function () {
+    $this->seed(MeridianSeeder::class);
+
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    TenantContext::run($meridian, fn () => Livewire::actingAs(
+        User::query()->where('work_email', 'rakesh@meridian.test')->sole()
+    )->test(MyQueue::class)
+        ->assertOk()
+        ->assertSee('Line-of-business approval')
+        ->assertSee('What this request is for')
+        ->assertSee('Replacing somebody who has left')
+        ->assertSee('Branch Manager')
+        // And the exits beside it still say who they are about, on the same page.
+        ->assertSee('Who this is about'));
+});
+
+it('still names a designation the client has since retired, and reads a yes and a list', function () {
+    $tenant = Tenant::query()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian-retired']);
+
+    TenantContext::run($tenant, function () {
+        $officer = Designation::factory()->named('Operations Officer')->create();
+        $anjali = User::factory()->named('Anjali Rao')->create();
+
+        $form = FormDefinition::factory()->named('request', 'Request')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('designation', 'Designation', FormField::DesignationPicker)->create();
+
+        FormField::factory()->on($form)->at(2)
+            ->asking('urgent', 'Needed urgently', FormField::Boolean)->create();
+
+        FormField::factory()->on($form)->at(3)
+            ->asking('shifts', 'Shifts to cover', FormField::Multiselect)
+            ->choosing(['day' => 'Day shift', 'night' => 'Night shift'])->create();
+
+        $form->publish();
+
+        $request = ProcessTemplate::factory()->named('hiring', 'Hiring request')->about('none')->create();
+
+        ProcessStep::factory()->of($request)->at(1, 1)->named('Raise request')
+            ->asking($form)->heldBy($anjali->work_email)->offering('approved')->create();
+
+        $request->publish();
+
+        $engine = new CaseEngine;
+        $case = $engine->open($request, by: $anjali);
+
+        $engine->decide($case, 1, 'approved', $anjali, [
+            'designation' => $officer->getKey(),
+            'urgent' => true,
+            'shifts' => ['day', 'night'],
+        ]);
+
+        // The client retires the designation the day after the request is raised. It is
+        // rightly gone from what anybody may still choose, and the request has to keep
+        // saying which job it is asking for.
+        $officer->update(['active' => false]);
+
+        expect((new SubjectPanel)->of($case->fresh())['facts'])->toEqual([
+            'Designation' => 'Operations Officer',
+            'Needed urgently' => 'Yes',
+            'Shifts to cover' => 'Day shift, Night shift',
+        ]);
+    });
+});
+
 it('draws every panel on the queue without a query per card', function () {
     $this->seed(VertexSeeder::class);
 

@@ -5,6 +5,7 @@ namespace App\Process;
 use App\Models\CaseEvent;
 use App\Models\Delegation;
 use App\Models\EmploymentRecord;
+use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\Role;
@@ -207,7 +208,7 @@ final class AssigneeResolver
         return match ($rule['kind'] ?? null) {
             'reporting_manager' => $this->reportingLineAbove($case->subject_user_id),
             'initiators_manager' => $this->reportingLineAbove($case->initiated_by),
-            'role_in_scope' => $this->holdersOfARoleUpTheTree($case, (string) ($rule['role'] ?? '')),
+            'role_in_scope' => $this->holdersOfARoleUpTheTree($case, $rule),
             'role_global' => $this->everyHolderOfARole((string) ($rule['role'] ?? '')),
             'specific_user' => $this->thePersonNamed((string) ($rule['email'] ?? '')),
         };
@@ -312,17 +313,18 @@ final class AssigneeResolver
      * department today. An exit that moves somebody out of a branch on day two must not
      * also move the clearance it was opened with into a different branch's queue.
      *
+     * @param  array<string, mixed>  $rule
      * @return iterable<int, list<int>>
      */
-    private function holdersOfARoleUpTheTree(ProcessCase $case, string $roleKey): iterable
+    private function holdersOfARoleUpTheTree(ProcessCase $case, array $rule): iterable
     {
-        $roleId = $this->idOfTheRoleCalled($roleKey);
-        $unit = $case->subjectEmploymentRecord?->orgUnit;
+        $roleId = $this->idOfTheRoleCalled((string) ($rule['role'] ?? ''));
+        $unit = $case->subjectEmploymentRecord?->orgUnit ?? $this->theDepartmentTheCaseNamed($case, $rule);
 
-        // A case about nobody — a hiring request for a vacancy — has no department for
-        // this to be scoped to. There is no sensible narrowing left, so it resolves to
-        // nobody and warns rather than quietly widening to the whole company; a process
-        // that wants everybody holding a role says so with `role_global`.
+        // Nothing to scope to and nothing the step named to scope by. There is no sensible
+        // narrowing left, so it resolves to nobody and warns rather than quietly widening
+        // to the whole company; a process that wants everybody holding a role says so with
+        // `role_global`.
         if ($roleId === null || $unit === null) {
             return;
         }
@@ -348,6 +350,47 @@ final class AssigneeResolver
                 ->pluck('user_id')
                 ->all();
         }
+    }
+
+    /**
+     * The department a case with no job row names in its own answers.
+     *
+     * A hiring request is about a vacancy, so there is no job row to read a department
+     * from and the walk above has nothing to start from. Rather than sending the approval
+     * to whoever holds the role anywhere in the company — which in a client with three
+     * business lines puts one request in three inboxes and lets whoever clicks first take
+     * it — the step may say **which answer on the case holds the department**, and the
+     * walk starts there instead.
+     *
+     * It names no process, no role and no question: the step's own rule carries the name
+     * of the answer, so a client writing a hiring request, a budget request or anything
+     * else about nobody gets the same behaviour without a line of code.
+     *
+     * **The job row still wins where there is one.** An exit reads the department frozen
+     * onto it on purpose, and an answer typed later must not move a clearance that was
+     * opened against a branch. A vacancy has nothing frozen to read, so its department is
+     * whatever the request currently says — and correcting the request after a send-back
+     * moves the approval with it, which is right, because the vacancy really did move.
+     *
+     * A department nobody heads, or an answer naming nothing, leaves the step held by
+     * nobody with a line on the case saying so. That is the existing behaviour of every
+     * scoped step and it fails loudly rather than quietly.
+     *
+     * @param  array<string, mixed>  $rule
+     */
+    private function theDepartmentTheCaseNamed(ProcessCase $case, array $rule): ?OrgUnit
+    {
+        $question = $rule['department_from'] ?? null;
+
+        if (! is_string($question) || $question === '') {
+            return null;
+        }
+
+        $answer = $case->answersSoFar()[$question] ?? null;
+
+        // The client's own departments and nothing else: row-level security is on the
+        // table, so a number edited in a browser cannot reach another company's row.
+        return is_numeric($answer) ? OrgUnit::query()->find((int) $answer) : null;
     }
 
     private function idOfTheRoleCalled(string $roleKey): ?int

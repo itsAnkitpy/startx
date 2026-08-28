@@ -145,10 +145,22 @@ class ProcessStepFactory extends Factory
         return $this->state(['escalate_to' => $rule]);
     }
 
-    /** Holders of a role in the subject's own department, or above it. */
-    public function heldByTheRole(string $roleKey): static
+    /**
+     * Holders of a role in the subject's own department, or above it.
+     *
+     * `$departmentAnsweredIn` is for a case that has no department of its own — a hiring
+     * request is about a vacancy, so the department comes from the question the request
+     * itself answered. Left out, the step behaves exactly as it always has.
+     */
+    public function heldByTheRole(string $roleKey, ?string $departmentAnsweredIn = null): static
     {
-        return $this->state(['assignee_rule' => ['kind' => 'role_in_scope', 'role' => $roleKey]]);
+        $rule = ['kind' => 'role_in_scope', 'role' => $roleKey];
+
+        if ($departmentAnsweredIn !== null) {
+            $rule['department_from'] = $departmentAnsweredIn;
+        }
+
+        return $this->state(['assignee_rule' => $rule]);
     }
 
     /** Holders of a role anywhere in the client company. */

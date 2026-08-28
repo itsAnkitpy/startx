@@ -91,8 +91,11 @@ it('keeps a case out of the list of somebody with no business reading it', funct
         auth()->login(whoIsAtMeridian('rakesh'));
         app(PermissionResolver::class)->forget();
 
+        // A hiring request is about a vacancy and has no first name to read, so it is
+        // counted by the process it runs on.
         $names = (new CaseHistory)->cases()
-            ->map(fn (ProcessCase $case) => $case->subject->first_name)->sort()->values()->all();
+            ->map(fn (ProcessCase $case) => $case->subject?->first_name ?? $case->template->name)
+            ->sort()->values()->all();
 
         expect(CaseHistory::canAccess())->toBeTrue()
             ->and($names)->not->toContain('Rohit')

@@ -72,6 +72,7 @@ class MeridianSeeder extends Seeder
 
             $this->casesAlreadyRunning($exit, $people);
             $this->theExitBuiltWithTheMistake($people);
+            $this->hiringRequestsWaitingOnRakesh($this->hiringRequestProcess(), $people, $units);
         });
     }
 
@@ -218,12 +219,27 @@ class MeridianSeeder extends Seeder
             ]);
         };
 
+        // The two roles the hiring chain names. Neither is one a client starts with, which
+        // is the point of them being here: a client adds the roles their own approvals
+        // need, and nothing in our code knows either name. They carry no actions at all —
+        // approving a step is not a granted action, it is whose job the step is — so what
+        // these two demonstrate is exactly that separation.
+        $lineOfBusiness = Role::factory()->keyed('lob_head', 'Line-of-business head')->create();
+        $director = Role::factory()->keyed('director', 'Director')->create();
+
         $grant($hrHead, $people['rakesh'], $units['shimla']);
         $grant($hrHead, $people['priya'], $units['shimla']);
         $grant($financeHead, $people['chandni'], null);
         $grant($hrDirector, $people['chandni'], null);
         $grant($administrator, $people['chandni'], null);
         $grant($administrator, $people['priya'], null);
+
+        // Rakesh holds line-of-business head over the Shimla branch, so a request naming
+        // Shimla is his — and would climb to whoever holds that same role over North
+        // Logistics if Shimla had nobody in it. Chandni holds director over the whole
+        // company, so the expensive ones reach her whichever branch they name.
+        $grant($lineOfBusiness, $people['rakesh'], $units['shimla']);
+        $grant($director, $people['chandni'], null);
     }
 
     /**
@@ -434,6 +450,165 @@ class MeridianSeeder extends Seeder
 
         $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link:');
         $this->command?->line($address);
+    }
+
+    /**
+     * The hiring request: raise it, the branch approves it, and the director approves the
+     * expensive ones as well.
+     *
+     * The whole of it is rows. Nothing in PHP knows what a hiring request is, which is the
+     * claim this process exists to make — the same three tables that carry Meridian's exit
+     * and Vertex's seven clearances carry this too.
+     *
+     * **Both approvals are scoped from the department the request itself names.** A case
+     * about a vacancy has no job row for the engine to read a department from, so without
+     * that the approvals would resolve to nobody and the request could never be approved.
+     * The alternative was sending them to whoever holds the role anywhere in the company,
+     * which in a client with three business lines puts one request in three inboxes.
+     *
+     * **The director's step opens on a figure the client can change**, compared against
+     * the salary threshold in their own settings rather than a number written here. The
+     * case freezes that threshold when it opens, so changing it moves the next request and
+     * leaves the ones in flight where they are.
+     *
+     * **Send-back is deliberately not offered.** The queue screen draws a button for every
+     * outcome a step allows and then decides with no reason and no target, so offering it
+     * here would put a button on screen that throws. It arrives with the inputs it needs.
+     */
+    private function hiringRequestProcess(): ProcessTemplate
+    {
+        $hiring = ProcessTemplate::factory()->named('hiring_request', 'Hiring request')->about('none')->create();
+
+        ProcessStep::factory()->of($hiring)->at(1, 1)->named('Raise request')
+            ->asking($this->hiringRequestForm())
+            ->heldBy('anjali@meridian.test')->offering('approved')->create();
+
+        ProcessStep::factory()->of($hiring)->at(2, 2)->named('Line-of-business approval')
+            ->heldByTheRole('lob_head', 'department')
+            ->offering('approved', 'rejected')->dueIn(48)->create();
+
+        ProcessStep::factory()->of($hiring)->at(3, 3)->named('Director approval')
+            ->heldByTheRole('director', 'department')
+            ->offering('approved', 'rejected')->dueIn(48)
+            ->happensWhen([[
+                'source' => 'payload', 'field' => 'annual_ctc',
+                'operator' => '>', 'setting' => 'hiring_director_threshold',
+            ]])->create();
+
+        $hiring->publish();
+
+        return $hiring;
+    }
+
+    /**
+     * The eight questions a hiring request asks.
+     *
+     * Two of them do more than record something. The department decides who both
+     * approvals go to, and the salary decides whether the director is asked at all — so
+     * the two questions that drive the whole chain are questions on a form a client owns,
+     * not settings in our code.
+     *
+     * Whether the role replaces somebody who has left is here because every comparable
+     * product asks it and this form did not. Greenhouse re-runs a job's approval when it
+     * changes, which is its own answer to how much an approver's decision rests on it.
+     */
+    private function hiringRequestForm(): FormDefinition
+    {
+        $form = FormDefinition::factory()->named('hiring_request', 'Hiring request')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('department', 'Which part of the company', FormField::OrgUnitPicker)->create();
+
+        FormField::factory()->on($form)->at(2)->required()
+            ->asking('designation', 'Designation', FormField::DesignationPicker)->create();
+
+        FormField::factory()->on($form)->at(3)->required()
+            ->asking('replaces_a_leaver', 'Replacement or new headcount', FormField::Select)
+            ->choosing([
+                'replacement' => 'Replacing somebody who has left',
+                'new_headcount' => 'New headcount',
+            ])->create();
+
+        FormField::factory()->on($form)->at(4)->required()
+            ->asking('positions', 'How many positions', FormField::Number)
+            ->limitedBy(['min' => 1, 'max' => 50])->create();
+
+        FormField::factory()->on($form)->at(5)->required()
+            ->asking('annual_ctc', 'Annual CTC offered', FormField::Money)->create();
+
+        FormField::factory()->on($form)->at(6)->required()
+            ->asking('employment_type', 'Employment type', FormField::Select)
+            ->choosing([
+                'permanent' => 'Permanent',
+                'contract' => 'Fixed-term contract',
+                'intern' => 'Intern',
+            ])->create();
+
+        FormField::factory()->on($form)->at(7)
+            ->asking('target_start_date', 'Wanted by', FormField::Date)->create();
+
+        FormField::factory()->on($form)->at(8)->required()
+            ->asking('justification', 'Why the role is needed', FormField::Textarea)
+            ->limitedBy(['max_length' => 2000])->create();
+
+        $form->publish();
+
+        return $form;
+    }
+
+    /**
+     * Two hiring requests already raised and both waiting on Rakesh, one under the
+     * client's salary threshold and one over it.
+     *
+     * Two rather than one so that both branches of the chain can be clicked straight
+     * away: approving the cheaper one finishes it there and then, and approving the
+     * expensive one hands it to Chandni instead. One request would show only whichever
+     * branch it happened to take.
+     *
+     * Anjali raises both. She holds no role and has no queue of her own, which is the
+     * point — anybody may ask for a hire, and the approvals are somebody else's.
+     *
+     * @param  array<string, User>  $people
+     * @param  array{company: OrgUnit, north: OrgUnit, shimla: OrgUnit, pune: OrgUnit}  $units
+     */
+    private function hiringRequestsWaitingOnRakesh(ProcessTemplate $hiring, array $people, array $units): void
+    {
+        $engine = new CaseEngine;
+        $wanted = now()->addMonths(2)->format('Y-m-d');
+
+        $raise = function (array $answers) use ($engine, $hiring, $people): void {
+            $request = $engine->open($hiring, by: $people['anjali']);
+
+            $engine->decide($request, 1, 'approved', $people['anjali'], $answers);
+        };
+
+        $raise([
+            'department' => $units['shimla']->getKey(),
+            'designation' => $this->designationCalled('Operations Officer'),
+            'replaces_a_leaver' => 'replacement',
+            'positions' => 1,
+            'annual_ctc' => 900000,
+            'employment_type' => 'permanent',
+            'target_start_date' => $wanted,
+            'justification' => 'Replacing Deepak Iyer, whose exit is already running.',
+        ]);
+
+        $raise([
+            'department' => $units['shimla']->getKey(),
+            'designation' => $this->designationCalled('Branch Manager'),
+            'replaces_a_leaver' => 'new_headcount',
+            'positions' => 1,
+            'annual_ctc' => 2400000,
+            'employment_type' => 'permanent',
+            'target_start_date' => $wanted,
+            'justification' => 'Second manager for the Shimla branch as the depot volumes grow.',
+        ]);
+    }
+
+    /** One of the client's own designations, by the words on it. */
+    private function designationCalled(string $name): int
+    {
+        return (int) Designation::query()->where('name', $name)->value('id');
     }
 
     /**

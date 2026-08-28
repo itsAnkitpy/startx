@@ -4,9 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
-use App\Models\Designation;
 use App\Models\FormField;
-use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\User;
 use App\Process\AssigneeResolver;
@@ -223,23 +221,16 @@ class MyQueue extends Page
     }
 
     /**
-     * The rows a picker offers, as `id => name`.
+     * The rows a picker offers, as `id => name`, for the list this page draws.
      *
-     * Only the three picker types have any, and each reads the client's own table. The
-     * tenant wall does the scoping, so this is the client's own people, their own
-     * departments and their own designations without a word here saying so.
+     * The panel above each form reads the same list to turn a chosen number back into
+     * words, so it lives with the forms rather than here.
      *
      * @return array<int, string>
      */
     public function optionsFor(FormField $field): array
     {
-        return match ($field->type) {
-            FormField::UserPicker => User::query()->orderBy('name')->pluck('name', 'id')->all(),
-            FormField::OrgUnitPicker => OrgUnit::query()->orderBy('name')->pluck('name', 'id')->all(),
-            FormField::DesignationPicker => Designation::query()->where('active', true)
-                ->orderBy('name')->pluck('name', 'id')->all(),
-            default => [],
-        };
+        return (new StepForm)->optionsFor($field);
     }
 
     /**
@@ -285,11 +276,22 @@ class MyQueue extends Page
 
             // Rewritten under the property path the inputs are bound to, so a refusal
             // lands beside the box it is about instead of at the top of the page.
-            $this->validate(
-                collect($forms->rules($waiting->step, $this->typedInto($waiting), $outcome === 'approved'))->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])->all(),
-                [],
-                collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
-            );
+            $rules = collect($forms->rules($waiting->step, $this->typedInto($waiting), $outcome === 'approved'))
+                ->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])
+                ->all();
+
+            // A step that asks nothing has nothing to check, and asking Livewire to check
+            // nothing is an error rather than a pass: handed an empty list it goes looking
+            // for rules written on the page itself, finds none, and throws. A manager
+            // sign-off and both hiring approvals are only a decision, so every one of them
+            // ended in an error page on the press of the button.
+            if ($rules !== []) {
+                $this->validate(
+                    $rules,
+                    [],
+                    collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
+                );
+            }
         }
 
         $recorded = $this->run(

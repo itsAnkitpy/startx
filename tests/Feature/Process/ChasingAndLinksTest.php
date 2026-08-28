@@ -49,11 +49,15 @@ function theExitOf(string $first): ProcessCase
     return ProcessCase::query()->whereRelation('subject', 'first_name', $first)->sole();
 }
 
-/** The names of the steps waiting on somebody. */
+/**
+ * The names of the steps waiting on somebody. A hiring request is about a vacancy rather
+ * than a person, so it is listed by the process it runs on.
+ */
 function stepsWaitingOn(User $person): array
 {
     return (new AvailableSteps)->waitingOn($person)
-        ->map(fn ($waiting) => $waiting->step->name.' — '.$waiting->case->subject->name)
+        ->map(fn ($waiting) => $waiting->step->name.' — '
+            .($waiting->case->subject?->name ?? $waiting->case->template->name))
         ->sort()->values()->all();
 }
 
