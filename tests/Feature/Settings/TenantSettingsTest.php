@@ -29,6 +29,7 @@ function declareApprovalThreshold(int $default = 1500000): SettingDeclaration
 {
     $declaration = new SettingDeclaration(
         key: 'test_approval_threshold',
+        label: 'Salary above which a hire needs the director',
         type: 'integer',
         default: $default,
         rule: 'integer|min:0',
@@ -147,6 +148,7 @@ it('stamps who changed a value from whoever is signed in, and cannot be told oth
         // The other half of the same rule: a submitted field cannot set it either.
         Settings::declare(new SettingDeclaration(
             key: 'test_second_switch',
+            label: 'A second switch',
             type: 'boolean',
             default: false,
             rule: 'boolean',
@@ -185,6 +187,7 @@ it('refuses a stored value that no longer fits a changed declaration, rather tha
     // route a large hire past the director with nobody told.
     Settings::declare(new SettingDeclaration(
         key: 'test_approval_threshold',
+        label: 'Salary above which a hire needs the director',
         type: 'integer',
         default: 1500000,
         rule: 'integer|min:1000000',
@@ -202,6 +205,7 @@ it('refuses a stored value that no longer fits a changed declaration, rather tha
 it('lets a switch hold nothing where its own rule allows it', function () {
     Settings::declare(new SettingDeclaration(
         key: 'test_stand_in',
+        label: 'Who covers a vacant role',
         type: 'integer',
         default: null,
         rule: 'nullable|integer',
@@ -236,6 +240,7 @@ it('refuses to read or write with no client company in scope', function () {
 it('refuses a declaration whose own default its rule would reject', function () {
     expect(fn () => new SettingDeclaration(
         key: 'test_impossible',
+        label: 'A switch nobody could save',
         type: 'integer',
         default: -5,
         rule: 'integer|min:0',
@@ -246,6 +251,7 @@ it('refuses a declaration whose own default its rule would reject', function () 
 it('refuses a declaration whose kind is not one the system knows', function () {
     expect(fn () => new SettingDeclaration(
         key: 'test_unknown_kind',
+        label: 'A kind nothing can draw',
         type: 'colour',
         default: 'blue',
         rule: 'string',
@@ -320,6 +326,7 @@ it('holds a switch to the kind of value it says it holds', function () {
 
     Settings::declare(new SettingDeclaration(
         key: 'test_second_switch',
+        label: 'A second switch',
         type: 'boolean',
         default: false,
         rule: 'boolean',
@@ -351,6 +358,7 @@ it('holds a switch to the kind of value it says it holds', function () {
 it('refuses a declaration whose kind disagrees with its own rule', function () {
     expect(fn () => new SettingDeclaration(
         key: 'test_mislabelled',
+        label: 'Says a number and holds a word',
         type: 'integer',
         default: 'saturday',
         rule: 'string',

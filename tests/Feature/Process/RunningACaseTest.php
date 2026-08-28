@@ -1120,6 +1120,7 @@ function declareDirectorThresholdForRunning(): void
 {
     Settings::declare(new SettingDeclaration(
         key: 'hiring_director_threshold',
+        label: 'Salary above which a hire needs the director',
         type: 'integer',
         default: 1500000,
         rule: 'integer|min:0',

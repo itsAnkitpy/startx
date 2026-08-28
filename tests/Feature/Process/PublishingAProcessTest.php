@@ -81,6 +81,7 @@ function declareDirectorThreshold(string $type = 'integer', mixed $default = 150
 {
     Settings::declare(new SettingDeclaration(
         key: 'hiring_director_threshold',
+        label: 'Salary above which a hire needs the director',
         type: $type,
         default: $default,
         rule: $rule,
@@ -423,10 +424,12 @@ it('refuses a condition naming a client setting this system does not have', func
     TenantContext::run($this->meridian, function () {
         $hiring = ProcessTemplate::factory()->named('hiring', 'Hiring request')->about('none')->create();
 
+        // A name nothing declares. The salary threshold this process would really name is
+        // declared by the application itself now, so a made-up one is what shows this.
         ProcessStep::factory()->of($hiring)->at(1, 1)->named('Director approval')->create([
             'open_conditions' => [[[
                 'source' => 'payload', 'field' => 'annual_ctc', 'operator' => '>',
-                'setting' => 'hiring_director_threshold',
+                'setting' => 'board_threshold',
             ]]],
         ]);
 

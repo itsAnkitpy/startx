@@ -8,6 +8,7 @@ use App\Models\FormField;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Settings\SettingDeclaration;
 use App\Settings\Settings;
 use Illuminate\Support\Collection;
 
@@ -41,9 +42,9 @@ final readonly class PublishCheck
     private const ListOperators = Comparison::AgainstAList;
 
     /**
-     * How each declared kind of client setting reads in a refusal. No entry for a whole
-     * number, because the only refusal that names a kind is the one for a kind that is
-     * not a whole number.
+     * How each declared kind of client setting reads in a refusal. Only the kinds that
+     * hold no number are here, because the one refusal that names a kind is the one for a
+     * setting a "greater than" cannot be written against.
      */
     private const SettingKinds = [
         'boolean' => 'true or false',
@@ -774,7 +775,8 @@ final readonly class PublishCheck
 
         $kind = Settings::declarationOf($key)->type;
 
-        if (in_array($operator, self::OrderingOperators, true) && $kind !== 'integer') {
+        if (in_array($operator, self::OrderingOperators, true)
+            && ! in_array($kind, SettingDeclaration::NumericTypes, true)) {
             return ["{$at} compares with [{$operator}] against the client setting [{$key}], which holds "
                 .(self::SettingKinds[$kind] ?? $kind).' rather than a number.'];
         }

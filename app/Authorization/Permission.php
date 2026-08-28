@@ -53,6 +53,14 @@ final class Permission
     public const ManageRole = 'manage_role';
 
     /**
+     * Changing the switches the company runs on — the salary above which a hire needs
+     * the director, who picks up a step nobody holds. Separate from {@see ManageRole}
+     * because these change what happens on every case from now on rather than what one
+     * person may do, and a company may well want the second in more hands than the first.
+     */
+    public const ManageSettings = 'manage_settings';
+
+    /**
      * @return list<string>
      */
     public static function all(): array

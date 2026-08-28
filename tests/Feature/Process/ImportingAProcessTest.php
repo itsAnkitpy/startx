@@ -112,6 +112,7 @@ function declareVertexsDirectorThreshold(): void
 {
     Settings::declare(new SettingDeclaration(
         key: 'director_threshold',
+        label: 'Salary above which an exit needs the director',
         type: 'integer',
         default: 1500000,
         rule: 'integer|min:0',

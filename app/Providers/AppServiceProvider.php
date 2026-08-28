@@ -107,14 +107,36 @@ class AppServiceProvider extends ServiceProvider
      */
     private function declareTheSwitchesClientsCanChange(): void
     {
+        // ponytail: this one names a person and is declared as a whole number, so the
+        // settings screen draws it as a number box asking for an internal id. A person
+        // kind, drawing the same picker a form's people question already draws, is the fix
+        // and is a small one — left out here because step 3 was asked for a money kind and
+        // the screen that renders the declared list, and adding a second kind on the way
+        // past is how a step stops being one step.
         Settings::declare(new SettingDeclaration(
             key: AssigneeResolver::StandInSetting,
+            label: 'Who picks up a step nobody holds',
             type: 'integer',
             default: null,
             rule: 'nullable|integer|min:1',
             help: 'Who holds a step when nobody holds the role it asked for. Left unset, such a step '
                 .'stays open with nobody on it and says so on the case, which is safer than it looks: '
                 .'it can never approve or complete itself.',
+        ));
+
+        // Module 05's salary threshold. Nothing in PHP reads this name — a client's own
+        // step writes it into a condition and the engine looks it up — which is what keeps
+        // the hiring flow out of application code entirely.
+        Settings::declare(new SettingDeclaration(
+            key: 'hiring_director_threshold',
+            label: 'Salary above which a hire needs the director',
+            type: 'money',
+            default: 1500000,
+            rule: 'required|integer|min:0',
+            help: 'A hiring request offering more than this a year needs the director to approve it as '
+                .'well as the usual chain. A request already under way keeps the figure that was true '
+                .'when it was raised, so changing this affects the next one rather than the ones in '
+                .'flight.',
         ));
     }
 }
