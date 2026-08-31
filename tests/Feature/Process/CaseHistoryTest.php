@@ -205,3 +205,76 @@ it('does not cry failure on a step that only applies to some exits', function ()
             ->assertDontSee('Never happened');
     });
 });
+
+it('says why a request was sent back, and where it went', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = whoIsAtMeridian('rakesh');
+        $request = ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')->first();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $request->getKey(), 2, 'sent_back')
+            ->set("reasons.{$request->getKey()}.2", 'The start date is before the vacancy exists.')
+            ->call('decide', $request->getKey(), 2, 'sent_back')
+            ->assertHasNoErrors();
+
+        // Without the reason the page says "Sent back" and stops, which reads as a case
+        // that stalled for nothing. It has to say why, and which step it went to.
+        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+            ->assertOk()
+            ->assertSee('Sent back by Rakesh Menon')
+            ->assertSee('Back to Raise request.')
+            ->assertSee('Why: The start date is before the vacancy exists.')
+            ->assertDontSee('Waiting on somebody to answer it again.');
+
+        // Anjali corrects it and sends it on, which puts the approval back in front of
+        // Rakesh. The line about sending it back stops describing where the request is
+        // the moment that happens: read on its own it says the request is still with her.
+        $anjali = whoIsAtMeridian('anjali');
+
+        Livewire::actingAs($anjali)->test(MyQueue::class)
+            ->set("answers.{$request->getKey()}.1.justification", 'Corrected: the start date is now after the vacancy opens.')
+            ->call('decide', $request->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+            ->assertOk()
+            ->assertSee('Sent back by Rakesh Menon')
+            ->assertSee('Waiting on somebody to answer it again.');
+    });
+});
+
+it('stops showing why a step was held once it has been answered', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = whoIsAtMeridian('rakesh');
+        $chandni = whoIsAtMeridian('chandni');
+        $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->set("answers.{$exit->getKey()}.1.id_card_returned", '1')
+            ->call('decide', $exit->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$exit->getKey()}.2.imprest_card_returned", '0')
+            ->set("answers.{$exit->getKey()}.2.recover_from_them", 12000)
+            ->set("answers.{$exit->getKey()}.2.recovery_reason", 'imprest')
+            ->call('askFor', $exit->getKey(), 2, 'held')
+            ->set("reasons.{$exit->getKey()}.2", 'Waiting on the imprest card.')
+            ->call('decide', $exit->getKey(), 2, 'held')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$exit->getKey()}.2.imprest_card_returned", '1')
+            ->call('decide', $exit->getKey(), 2, 'approved')
+            ->assertHasNoErrors();
+
+        // A step somebody held and then cleared has two lines about it in the case's
+        // history, and the later one is the only one that describes it. Showing the
+        // earlier one puts the words she typed to hold the clearance against the day she
+        // cleared it, which reads as money still being argued about.
+        Livewire::actingAs($chandni)->test(CaseHistory::class)
+            ->assertOk()
+            ->assertSee('Finance clearance')
+            ->assertDontSee('Why: Waiting on the imprest card.');
+    });
+});

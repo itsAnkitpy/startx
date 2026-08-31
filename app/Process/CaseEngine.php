@@ -236,8 +236,15 @@ final class CaseEngine
                 throw ProcessRefused::outcomeNotOffered($step->name, $outcome, (array) $step->allowed_outcomes);
             }
 
-            if ($outcome === 'held' && trim((string) $reason) === '') {
-                throw ProcessRefused::needsAReason("Holding [{$step->name}]");
+            // Both outcomes that hand the work back to somebody else have to say why. A
+            // hold is an argument another department has to answer and a send-back is a
+            // correction somebody has to make, and neither is any use as a bare word.
+            // Everything looked at that has a send-back at all demands the comment, and
+            // ServiceNow makes its own hold reason compulsory out of the box.
+            if (in_array($outcome, ['held', 'sent_back'], true) && trim((string) $reason) === '') {
+                throw ProcessRefused::needsAReason($outcome === 'held'
+                    ? "Holding [{$step->name}]"
+                    : "Sending [{$step->name}] back");
             }
 
             $target = $outcome === 'sent_back'
@@ -245,10 +252,18 @@ final class CaseEngine
                 : null;
 
             $attempt = $this->attemptToWriteOn($available, $by, $candidates);
+            $forms = new StepForm;
 
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
-            $attempt->payload = array_merge(
+
+            // Old answers and new put back through what the step is still asking, together.
+            // A step that was held already carries answers, and the new ones can hide one
+            // of them: Chandni holds finance's clearance with a recovery figure on it, then
+            // approves it saying the imprest card came back after all, which takes the
+            // recovery question off the form. Filtering only what she typed this time would
+            // leave the figure on the row, where a later step's condition can still read it.
+            $attempt->payload = $forms->stillAsked($step, array_merge(
                 (array) $attempt->payload,
                 // The form's own rules, applied here and not only on a screen. Whether a
                 // required question is demanded turns on the outcome: approving is the
@@ -257,8 +272,8 @@ final class CaseEngine
                 // three would make each unreachable in the one case it exists for —
                 // Chandni rejects Rakesh's clearance *because* the figure is wrong, and
                 // she sends it back to have it corrected.
-                (new StepForm)->onlyWhatThisStepAsks($step, $payload, $outcome === 'approved'),
-            );
+                $forms->onlyWhatThisStepAsks($step, $payload, $outcome === 'approved'),
+            ));
             $attempt->save();
 
             $this->record($case, 'step_acted', $by, array_filter([
@@ -793,6 +808,29 @@ final class CaseEngine
         } catch (UniqueConstraintViolationException) {
             throw ProcessRefused::somebodyElseHasThatStep($available->step->name);
         }
+    }
+
+    /**
+     * Which earlier steps this one may be sent back to, so a screen can offer them.
+     *
+     * The same two rules the refusal below enforces, asked as a question instead of as a
+     * door: a step in an earlier group, and one this case actually wants. It lives here
+     * rather than on the screen because a screen working it out for itself is a screen
+     * that comes to offer a step the engine then refuses.
+     *
+     * Almost nothing on the market lets an approver choose at all — Workday sends the
+     * event back to whoever raised it, and Jira, Greenhouse and Camunda have no send-back an
+     * approver can reach. So a screen showing this list should only ask when there is
+     * more than one answer in it.
+     *
+     * @return Collection<int, ProcessStep>
+     */
+    public function whereItCanGoBackTo(AvailableStep $from): Collection
+    {
+        return $from->case->template->steps
+            ->filter(fn (ProcessStep $step): bool => $step->group_no < $from->step->group_no
+                && $this->reader->wants($from->case, $step))
+            ->values();
     }
 
     /**

@@ -269,9 +269,13 @@ class MeridianSeeder extends Seeder
             ->heldByTheRole('hr_head')->offering('approved', 'rejected')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
 
+        // Finance is the one step that can be put on hold, and it is the step the whole
+        // hold exists for: money is still being argued about, so neither approving nor
+        // rejecting is honest yet. Chandni holds it with a figure to recover, the clock
+        // keeps running, and she answers it properly once the imprest card turns up.
         ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
             ->asking($this->financeClearanceForm())
-            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected')->dueIn(48)
+            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected', 'held')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
 
         ProcessStep::factory()->of($exit)->at(3, 3)->named('Manager sign-off')
@@ -471,9 +475,11 @@ class MeridianSeeder extends Seeder
      * case freezes that threshold when it opens, so changing it moves the next request and
      * leaves the ones in flight where they are.
      *
-     * **Send-back is deliberately not offered.** The queue screen draws a button for every
-     * outcome a step allows and then decides with no reason and no target, so offering it
-     * here would put a button on screen that throws. It arrives with the inputs it needs.
+     * **Both approvals can send the request back**, which is the third thing an approver
+     * can do with a wrong figure and the only one that keeps the request alive: rejecting
+     * it ends the case and Anjali starts again from nothing. The branch approval has one
+     * place to send it — back to her — and the director's has two, which is the only case
+     * in the demo where anybody is asked to choose.
      */
     private function hiringRequestProcess(): ProcessTemplate
     {
@@ -485,11 +491,11 @@ class MeridianSeeder extends Seeder
 
         ProcessStep::factory()->of($hiring)->at(2, 2)->named('Line-of-business approval')
             ->heldByTheRole('lob_head', 'department')
-            ->offering('approved', 'rejected')->dueIn(48)->create();
+            ->offering('approved', 'rejected', 'sent_back')->dueIn(48)->create();
 
         ProcessStep::factory()->of($hiring)->at(3, 3)->named('Director approval')
             ->heldByTheRole('director', 'department')
-            ->offering('approved', 'rejected')->dueIn(48)
+            ->offering('approved', 'rejected', 'sent_back')->dueIn(48)
             ->happensWhen([[
                 'source' => 'payload', 'field' => 'annual_ctc',
                 'operator' => '>', 'setting' => 'hiring_director_threshold',

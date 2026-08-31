@@ -9,6 +9,7 @@
     @php($queue = $this->queue())
     @php($heldByNobody = $this->heldByNobody($queue))
     @php($byEscalation = $this->cameByEscalation($queue))
+    @php($alreadySaid = $this->whatWasSaidAbout($queue))
 
     @if ($queue->isEmpty())
         <x-filament::section>
@@ -27,6 +28,8 @@
                 @php($mine = $waiting->attempt?->assignee_id === auth()->id())
                 @php($nobodyHolds = in_array($case->getKey().':'.$step->sequence, $heldByNobody, true))
                 @php($escalated = in_array($case->getKey().':'.$step->sequence, $byEscalation, true))
+                @php($onHold = $waiting->attempt?->outcome === 'held')
+                @php($whatWasSaid = $alreadySaid[$case->getKey().':'.$step->sequence] ?? null)
 
                 <x-filament::section>
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -46,10 +49,27 @@
                                     <x-filament::badge color="warning">Due soon</x-filament::badge>
                                 @endif
 
-                                @if ($mine)
+                                {{-- A held step is still open and still this person's, so
+                                     without this it reads as a clearance nobody has got
+                                     round to. The badge is the state; the buttons below stay
+                                     as they are, because ending a hold is answering the step
+                                     properly. --}}
+                                @if ($onHold)
+                                    <x-filament::badge color="warning">On hold</x-filament::badge>
+                                @elseif ($mine)
                                     <x-filament::badge color="info">You picked this up</x-filament::badge>
                                 @endif
                             </div>
+
+                            {{-- What has already been said about this step: why it came
+                                 back, or why it is on hold. Saying it here rather than only
+                                 in the case's history is the whole reason somebody is made
+                                 to type it. --}}
+                            @if ($whatWasSaid)
+                                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
+                                    {{ $whatWasSaid }}
+                                </p>
+                            @endif
 
                             {{-- Escalation adds people and removes nobody, so this card has
                                  to say it arrived rather than let it read as a job that
@@ -136,17 +156,94 @@
                                 </x-filament::button>
                             @endunless
 
+                            {{-- Approving is one press. Every other outcome asks for a reason
+                                 first: the engine refuses a hold and a send-back without one,
+                                 and a rejection with no words on it tells the person whose
+                                 request ended nothing at all. --}}
                             @foreach ($step->allowed_outcomes ?? [] as $outcome)
+                                {{-- Nothing offers a step the state it is already in. A
+                                     clearance on hold needs answering, not holding again,
+                                     and the reason it was held is on the card above. --}}
+                                @continue ($onHold && $outcome === 'held')
+
                                 <x-filament::button
                                     :color="$outcome === 'approved' ? 'success' : ($outcome === 'rejected' ? 'danger' : 'gray')"
-                                    wire:click="decide({{ $case->getKey() }}, {{ $step->sequence }}, '{{ $outcome }}')"
+                                    wire:click="{{ $outcome === 'approved' ? 'decide' : 'askFor' }}({{ $case->getKey() }}, {{ $step->sequence }}, '{{ $outcome }}')"
                                     wire:loading.attr="disabled"
                                 >
-                                    {{ ucfirst(str_replace('_', ' ', $outcome)) }}
+                                    {{ $this->buttonFor($outcome) }}
                                 </x-filament::button>
                             @endforeach
                         </div>
                     </div>
+
+                    {{-- The reason, asked between the button and the decision rather than
+                         beside a form nobody is filling in. Only one card asks at a time. --}}
+                    @php($asked = $case->getKey().':'.$step->sequence)
+
+                    @if (str_starts_with((string) $this->asking, $asked.':'))
+                        @php($outcome = explode(':', $this->asking)[2])
+                        @php($reason = "reasons.{$case->getKey()}.{$step->sequence}")
+                        @php($goesBackTo = $outcome === 'sent_back' ? $this->whereItCanGoBackTo($waiting) : collect())
+
+                        <div style="display: grid; row-gap: 1rem; margin-top: 1rem;">
+                            {{-- Asked only where there is genuinely a choice. From the branch
+                                 approval there is one place to go and the card does not make
+                                 anybody read a list of one. --}}
+                            @if ($goesBackTo->count() > 1)
+                                <x-filament-forms::field-wrapper
+                                    :id="'back-'.$asked"
+                                    label="Which step it goes back to"
+                                    required
+                                    :state-path="'sendBackTo.'.$case->getKey().'.'.$step->sequence"
+                                >
+                                    <x-filament::input.wrapper>
+                                        <x-filament::input.select
+                                            :id="'back-'.$asked"
+                                            wire:model.live="sendBackTo.{{ $case->getKey() }}.{{ $step->sequence }}"
+                                        >
+                                            @foreach ($goesBackTo as $earlier)
+                                                <option value="{{ $earlier->sequence }}">{{ $earlier->name }}</option>
+                                            @endforeach
+                                        </x-filament::input.select>
+                                    </x-filament::input.wrapper>
+                                </x-filament-forms::field-wrapper>
+                            @endif
+
+                            <x-filament-forms::field-wrapper
+                                :id="'reason-'.$asked"
+                                :label="$this->asksFor($outcome)"
+                                :required="$outcome !== 'rejected'"
+                                :state-path="$reason"
+                            >
+                                {{-- `fi-fo-textarea` on the wrapper and no class on the box
+                                     itself, for the reason the question partial gives: Filament
+                                     styles a one-line box with an element selector, so the same
+                                     class on a textarea matches nothing. --}}
+                                <x-filament::input.wrapper :valid="! $errors->has($reason)" class="fi-fo-textarea">
+                                    <textarea
+                                        id="reason-{{ $asked }}"
+                                        rows="3"
+                                        wire:model.live.blur="{{ $reason }}"
+                                    ></textarea>
+                                </x-filament::input.wrapper>
+                            </x-filament-forms::field-wrapper>
+
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <x-filament::button
+                                    :color="$outcome === 'rejected' ? 'danger' : 'gray'"
+                                    wire:click="decide({{ $case->getKey() }}, {{ $step->sequence }}, '{{ $outcome }}')"
+                                    wire:loading.attr="disabled"
+                                >
+                                    {{ $this->buttonFor($outcome) }}
+                                </x-filament::button>
+
+                                <x-filament::button color="gray" wire:click="stopAsking">
+                                    Cancel
+                                </x-filament::button>
+                            </div>
+                        </div>
+                    @endif
                 </x-filament::section>
             @endforeach
         </div>

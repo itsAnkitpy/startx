@@ -46,6 +46,32 @@ function waitingOnThem(User $person): array
         ->sort()->values()->all();
 }
 
+/**
+ * One of the demo's two hiring requests, told apart by the salary on it — one under the
+ * client's threshold and one over it.
+ */
+function theHiringRequestCosting(int $annualCtc): ProcessCase
+{
+    return ProcessCase::query()
+        ->whereRelation('template', 'key', 'hiring_request')
+        ->get()
+        ->sole(fn (ProcessCase $case): bool => (int) ($case->answersSoFar()['annual_ctc'] ?? 0) === $annualCtc);
+}
+
+/**
+ * Whether one named step of one named case is waiting on somebody.
+ *
+ * The demo seeds two hiring requests and both sit at the branch approval, so looking for
+ * that step's name in a person's list passes on the other request whatever happened to
+ * this one — a check that cannot fail.
+ */
+function isWaitingOnThemAt(ProcessCase $case, int $sequence, User $person): bool
+{
+    return (new AvailableSteps)->waitingOn($person)
+        ->contains(fn ($waiting): bool => (int) $waiting->case->getKey() === (int) $case->getKey()
+            && (int) $waiting->step->sequence === $sequence);
+}
+
 it('seeds a company worth looking at', function () {
     TenantContext::run($this->meridian, function () {
         expect(User::query()->count())->toBe(6)
@@ -293,5 +319,152 @@ it('leaves the card unmarked once somebody actually holds the role', function ()
             ->toBe(['Finance clearance — Priya Nair', 'HR clearance — Anjali Rao'])
             ->and(waitingOnThem(atMeridianCalled('priya')))
             ->toContain('HR clearance — Rohit Menon');
+    });
+});
+
+/*
+| Sending a request back, and holding a step — the two outcomes the engine has always had
+| and no screen could reach, because both need words typed into a box that did not exist.
+*/
+
+it('sends a request back to the person who raised it, with their answers still in the boxes', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $anjali = atMeridianCalled('anjali');
+        $expensive = theHiringRequestCosting(2400000);
+
+        // Nobody reads a list here: the branch approval has exactly one place to send it,
+        // which is back to Anjali, so Rakesh types why and presses the button.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $expensive->getKey(), 2, 'sent_back')
+            ->assertDontSee('Which step it goes back to')
+            ->set("reasons.{$expensive->getKey()}.2", 'Above the band for a branch manager.')
+            ->call('decide', $expensive->getKey(), 2, 'sent_back')
+            ->assertHasNoErrors()
+            ->assertOk();
+
+        // Off his list, and back on hers at the step she filled in.
+        expect(waitingOnThem($rakesh))
+            ->toBe([
+                'HR clearance — Anjali Rao',
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+            ])
+            ->and(waitingOnThem($anjali))->toBe(['Raise request — Hiring request']);
+
+        // Her answers are in the boxes rather than an empty form, which is the whole
+        // difference between sending a request back and rejecting it.
+        // And Rakesh's words are on the card she has to correct, not only in the case's
+        // history — which is the whole reason he was made to type them.
+        $hers = Livewire::actingAs($anjali)->test(MyQueue::class)
+            ->assertOk()
+            ->assertSee('Rakesh Menon sent this back: Above the band for a branch manager.');
+
+        expect($hers->get('answers')[$expensive->getKey()][1]['annual_ctc'])->toEqual(2400000);
+
+        // She corrects the figure and sends it on. Under the threshold now, so the
+        // director is never asked and it is Rakesh's again.
+        $hers->set("answers.{$expensive->getKey()}.1.annual_ctc", 900000)
+            ->call('decide', $expensive->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        // Named by the case rather than by the step's name: the demo seeds two hiring
+        // requests and both sit at this approval, so a check that only looks for the name
+        // passes on the other one and cannot fail.
+        expect(waitingOnThem($anjali))->toBe([])
+            ->and(isWaitingOnThemAt($expensive, 2, $rakesh))->toBeTrue();
+    });
+});
+
+it('will not send a request back with nothing typed in the box', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $expensive = theHiringRequestCosting(2400000);
+
+        // Refused under the box it belongs to rather than as a sentence across the top of
+        // the page, and the request has not moved.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $expensive->getKey(), 2, 'sent_back')
+            ->call('decide', $expensive->getKey(), 2, 'sent_back')
+            ->assertHasErrors("reasons.{$expensive->getKey()}.2");
+
+        expect(CaseStep::query()->where('case_id', $expensive->getKey())->where('sequence', 2)->count())->toBe(0)
+            ->and(isWaitingOnThemAt($expensive, 2, $rakesh))->toBeTrue();
+    });
+});
+
+it('asks which step a request goes back to only where there is a choice', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $chandni = atMeridianCalled('chandni');
+        $expensive = theHiringRequestCosting(2400000);
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('decide', $expensive->getKey(), 2, 'approved')
+            ->assertHasNoErrors();
+
+        // The director's approval has two places it could go — back to Anjali, or back to
+        // the branch approval underneath it — so she is asked, and Rakesh never was.
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->call('askFor', $expensive->getKey(), 3, 'sent_back')
+            ->assertSee('Which step it goes back to')
+            ->assertSee('Raise request')
+            ->assertSee('Line-of-business approval');
+    });
+});
+
+it('holds a clearance with a reason, and drops a figure the later answer hides', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $chandni = atMeridianCalled('chandni');
+        $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
+            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        // The clearance cannot be answered honestly yet: the imprest card is missing and
+        // twelve thousand rupees are being argued about.
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$anjalisExit->getKey()}.2.imprest_card_returned", '0')
+            ->set("answers.{$anjalisExit->getKey()}.2.recover_from_them", 12000)
+            ->set("answers.{$anjalisExit->getKey()}.2.recovery_reason", 'imprest')
+            ->call('askFor', $anjalisExit->getKey(), 2, 'held')
+            ->set("reasons.{$anjalisExit->getKey()}.2", 'Waiting on the imprest card before anything is recovered.')
+            ->call('decide', $anjalisExit->getKey(), 2, 'held')
+            ->assertHasNoErrors()
+            ->assertOk();
+
+        // Her own card says so when she comes back to it. A held step is still open and
+        // still hers, so without this it reads as a clearance nobody has got round to —
+        // and it stops offering her the state it is already in.
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->assertOk()
+            ->assertSee('On hold')
+            ->assertSee('Chandni Verma put this on hold: Waiting on the imprest card before anything is recovered.')
+            // Read against the raw page rather than an escaped copy of it: the quotes in
+            // the button's own instruction are written as they stand, so a check that
+            // escaped them would look for something no page ever contains and pass
+            // whether the button is there or not.
+            ->assertDontSee("askFor({$anjalisExit->getKey()}, 2, 'held')", escape: false);
+
+        $held = CaseStep::query()->where('case_id', $anjalisExit->getKey())->where('sequence', 2)->sole();
+
+        // A hold is not a decision: it is still hers to answer, and the figure is on it.
+        expect($held->outcome)->toBe('held')
+            ->and($held->payload['recover_from_them'])->toEqual(12000)
+            ->and(waitingOnThem($chandni))->toContain('Finance clearance — Anjali Rao');
+
+        // The card turns up and she clears it. The figure has to go with the question that
+        // asked for it — the answers on a step are what a later step's condition reads,
+        // and the recovery question is not even on the form any more.
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$anjalisExit->getKey()}.2.imprest_card_returned", '1')
+            ->call('decide', $anjalisExit->getKey(), 2, 'approved')
+            ->assertHasNoErrors();
+
+        expect($held->fresh()->outcome)->toBe('approved')
+            ->and(array_keys($held->fresh()->payload))->toBe(['imprest_card_returned']);
     });
 });

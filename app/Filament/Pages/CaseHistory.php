@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Authorization\Permission;
 use App\Authorization\PermissionResolver;
+use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\OrgUnit;
 use App\Models\ProcessCase;
@@ -116,7 +117,7 @@ class CaseHistory extends Page
         $units = OrgUnit::query()->get()->keyBy('id');
 
         return ProcessCase::query()
-            ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord'])
+            ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord', 'events'])
             ->orderByDesc('opened_at')
             ->get()
             ->filter(fn (ProcessCase $case): bool => $resolver->allows(
@@ -188,11 +189,19 @@ class CaseHistory extends Page
                 $row = $done[$step->sequence] ?? null;
 
                 if ($row !== null) {
+                    // A step that sent the case back is the one row that stops describing
+                    // where the case is. Once the correction has come forward past it, it
+                    // is somebody's turn again — and a line still reading "sent back" says
+                    // the request is with the person who raised it when it is not.
+                    $backWithThem = $row->outcome === 'sent_back'
+                        && in_array((int) $step->sequence, $open, true);
+
                     return [
                         'sequence' => $step->sequence,
                         'name' => $step->name,
-                        'said' => $this->whatWasDone($row),
-                        'tone' => $row->acted_at === null ? 'waiting' : 'done',
+                        'said' => $this->whatWasDone($case, $row)
+                            .($backWithThem ? ' Waiting on somebody to answer it again.' : ''),
+                        'tone' => $row->acted_at === null || $backWithThem ? 'waiting' : 'done',
                     ];
                 }
 
@@ -285,7 +294,7 @@ class CaseHistory extends Page
     }
 
     /** Who did what, and when, in the words somebody reading the case a year later needs. */
-    private function whatWasDone(CaseStep $row): string
+    private function whatWasDone(ProcessCase $case, CaseStep $row): string
     {
         $who = $row->assignee?->name
             ?? ((array) $row->external_assignee)['name']
@@ -297,7 +306,37 @@ class CaseHistory extends Page
 
         $said = self::Said[$row->outcome] ?? $row->outcome;
 
-        return "{$said} by {$who} on ".$row->acted_at->format('j F Y').'.';
+        return "{$said} by {$who} on ".$row->acted_at->format('j F Y').'.'.$this->andWhy($case, $row);
+    }
+
+    /**
+     * Why somebody held a step or sent the case back, and where they sent it.
+     *
+     * Without this the page says "Put on hold" and stops, which reads as a case that
+     * stalled for no reason — and the reason is the whole message. ServiceNow shows its
+     * own hold reason on the ticket beside the state for the same reason, and a request
+     * that came back with no words on it tells the person who has to correct it nothing.
+     *
+     * Read from the line the engine already writes rather than from a second column, so
+     * what the screen says and what the history holds cannot come apart. A step held and
+     * then answered has two of those lines and the later one is the one that stands.
+     */
+    private function andWhy(ProcessCase $case, CaseStep $row): string
+    {
+        $acted = $case->events
+            ->where('type', 'step_acted')
+            ->last(fn (CaseEvent $event): bool => (int) (((array) $event->payload)['sequence'] ?? 0) === (int) $row->sequence);
+
+        if ($acted === null) {
+            return '';
+        }
+
+        $said = (array) $acted->payload;
+        $back = $said['sent_back_to'] ?? null;
+        $step = $back === null ? null : $case->template->steps->firstWhere('sequence', $back)?->name;
+
+        return ($step === null ? '' : " Back to {$step}.")
+            .(trim((string) ($said['reason'] ?? '')) === '' ? '' : ' Why: '.$said['reason']);
     }
 
     /** What the case itself is, in one word. */

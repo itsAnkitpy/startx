@@ -187,8 +187,16 @@ class ProcessCase extends Model
         return $this->steps()->whereNull('superseded_at');
     }
 
+    /**
+     * What happened on this case, oldest first.
+     *
+     * Ordered here rather than by whoever reads it, because every reader wants the same
+     * thing from it: the last line about a step is the one that stands. A step held and
+     * then answered has two, and a screen that took the wrong one would put the words
+     * somebody typed to hold a clearance against the day they cleared it.
+     */
     public function events(): HasMany
     {
-        return $this->hasMany(CaseEvent::class, 'case_id');
+        return $this->hasMany(CaseEvent::class, 'case_id')->orderBy('id');
     }
 }

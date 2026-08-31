@@ -257,6 +257,30 @@ class StepForm
     }
 
     /**
+     * Everything already on a step dropped to what it is still asking.
+     *
+     * A step that was held has answers on it before anybody answers it again, and the
+     * second set can hide a question the first one answered — finance says the imprest
+     * card came back after all, and the question about what it is recovering goes. The
+     * filter above only ever sees the new half, so the old figure would survive on the row
+     * and a later step's condition could still read it.
+     *
+     * Nothing is checked here and nothing is refused. What is on the row was checked when
+     * it was written, and a stored document is a note of where the file went rather than
+     * the upload the shape check expects.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function stillAsked(ProcessStep $step, array $payload): array
+    {
+        return array_intersect_key(
+            $payload,
+            array_flip($this->asking($step, $payload)->pluck('key')->all()),
+        );
+    }
+
+    /**
      * Refuse an answer to a question this step does not ask, and keep only what was
      * actually answered.
      *

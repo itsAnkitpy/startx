@@ -611,6 +611,29 @@ it('makes a step the new answer needs appear on its own after a redo', function 
     });
 });
 
+it('will not send the case back with nothing said about why', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = liveProcess(function (ProcessTemplate $exit) {
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(1, 1)->named('Manager approval')->offering('approved')->create();
+            ProcessStep::factory()->heldByTheRoleAnywhere('exit_team')->of($exit)->at(2, 2)->named('Finance clearance')
+                ->offering('approved', 'sent_back')->create();
+        });
+
+        $hr = User::factory()->holdingTheRole('exit_team')->create();
+        $case = engine()->open($exit, rakesh(), $hr);
+
+        engine()->decide($case, 1, 'approved', $hr);
+
+        // The reason is the whole message. A request that comes back with no words on it
+        // tells the person who has to correct it only that somebody was unhappy — and
+        // every product that has this outcome at all demands the comment.
+        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, sendBackTo: 1))
+            ->toThrow(ProcessRefused::class, 'has to say why');
+
+        expect(whoseTurn($case->fresh()))->toBe(['Finance clearance']);
+    });
+});
+
 it('will not send the case sideways to a step running at the same time', function () {
     TenantContext::run($this->meridian, function () {
         $exit = liveProcess(function (ProcessTemplate $exit) {
@@ -625,10 +648,10 @@ it('will not send the case sideways to a step running at the same time', functio
 
         engine()->decide($case, 1, 'approved', $hr);
 
-        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, sendBackTo: 3))
+        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, reason: 'The last working day is wrong.', sendBackTo: 3))
             ->toThrow(ProcessRefused::class, 'does not run before it');
 
-        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr))
+        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, reason: 'The last working day is wrong.'))
             ->toThrow(ProcessRefused::class, 'has to name the step it goes back to');
     });
 });
@@ -654,7 +677,7 @@ it('will not send the case back to a step this case never needed', function () {
 
         // Rakesh works in Shimla, so the Gurgaon step never ran on this case. Sending it
         // back there would reopen nothing while the history said a step was reopened.
-        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, sendBackTo: 1))
+        expect(fn () => engine()->decide($case->fresh(), 2, 'sent_back', $hr, reason: 'Nothing was checked in Gurgaon.', sendBackTo: 1))
             ->toThrow(ProcessRefused::class, 'which this case never needed');
 
         expect(CaseEvent::query()->where('case_id', $case->getKey())->where('type', 'step_reopened')->count())->toBe(0);
