@@ -76,6 +76,25 @@ it('does not mark a step that has simply not come round yet', function () {
     });
 });
 
+it('says a step is waiting on somebody as soon as it becomes their turn', function () {
+    TenantContext::run($this->meridian, function () {
+        // A hiring request Anjali has already raised. Its first step is answered, so the
+        // branch approval in front of Rakesh is open this minute — nobody has opened the
+        // card yet, which is exactly the state that used to read as a request that had
+        // stalled.
+        $request = ProcessCase::query()
+            ->whereRelation('template', 'key', 'hiring_request')
+            ->whereNull('closed_at')
+            ->firstOrFail();
+
+        $said = collect((new CaseHistory)->whatHappenedOn($request))->pluck('said', 'sequence');
+
+        expect($said[2])->toBe('Waiting on somebody to answer it.')
+            // And the step behind that one really has not come round.
+            ->and($said[3])->toBe('Not yet. It opens when the steps in front of it are done.');
+    });
+});
+
 it('keeps a case out of the list of somebody with no business reading it', function () {
     TenantContext::run($this->meridian, function () {
         // Deepak holds no role at all, so the page does not open for him and he sees

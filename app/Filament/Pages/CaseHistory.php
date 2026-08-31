@@ -10,6 +10,8 @@ use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\User;
+use App\Process\AvailableStep;
+use App\Process\AvailableSteps;
 use App\Process\PublishCheck;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -126,6 +128,27 @@ class CaseHistory extends Page
     }
 
     /**
+     * The steps that are somebody's turn right now, as case number to step numbers.
+     *
+     * Asked of the one class that answers it for the queue and the reminders as well,
+     * rather than worked out a second time here. A step is open once everything in front
+     * of it has closed or was skipped for not applying, and a screen that decided that
+     * for itself is a screen that comes to disagree with the queue about the same case.
+     *
+     * @var array<int, list<int>>
+     */
+    private array $openNow = [];
+
+    /** @return list<int> */
+    private function openRightNow(ProcessCase $case): array
+    {
+        return $this->openNow[(int) $case->getKey()] ??= (new AvailableSteps)
+            ->for($case)
+            ->map(fn (AvailableStep $waiting): int => (int) $waiting->step->sequence)
+            ->all();
+    }
+
+    /**
      * Every step of the version this case opened on, and what happened at it.
      *
      * The steps come from the frozen version rather than from what was done, which is the
@@ -139,9 +162,16 @@ class CaseHistory extends Page
         $done = $case->liveSteps->keyBy('sequence');
         $running = $case->state === ProcessCase::Open;
 
-        // The furthest group this case actually got to. Groups rather than step numbers:
-        // every step in a group opens at once, so a step whose neighbour has been picked
-        // up is waiting its turn rather than missed.
+        // Which of its steps are somebody's turn right now. A step is not waiting merely
+        // because somebody has started it — an approval nobody has opened yet is still
+        // waiting — so this is asked of the engine rather than read off the rows, which
+        // is what the rows cannot tell us. A case that has ended has none.
+        $open = $this->openRightNow($case);
+
+        // The furthest group a case that has ended actually got to. Rows are the right
+        // evidence there and the only evidence: nothing is anybody's turn any more, and
+        // this is what separates a step the ending cut short from one the process
+        // deliberately skipped.
         $reached = (int) $case->template->steps
             ->filter(fn (ProcessStep $step): bool => $done->has($step->sequence))
             ->max('group_no');
@@ -154,7 +184,7 @@ class CaseHistory extends Page
             || $done->contains(fn (CaseStep $row): bool => $row->outcome === 'rejected');
 
         return $case->template->steps
-            ->map(function (ProcessStep $step) use ($case, $done, $reached, $running, $stopped): array {
+            ->map(function (ProcessStep $step) use ($case, $done, $open, $reached, $running, $stopped): array {
                 $row = $done[$step->sequence] ?? null;
 
                 if ($row !== null) {
@@ -169,7 +199,7 @@ class CaseHistory extends Page
                 return [
                     'sequence' => $step->sequence,
                     'name' => $step->name,
-                    ...$this->whyThereIsNoRow($case, $step, $reached, $running, $stopped),
+                    ...$this->whyThereIsNoRow($case, $step, $open, $reached, $running, $stopped),
                 ];
             })
             ->all();
@@ -190,6 +220,7 @@ class CaseHistory extends Page
     private function whyThereIsNoRow(
         ProcessCase $case,
         ProcessStep $step,
+        array $open,
         int $reached,
         bool $running,
         bool $stopped,
@@ -201,16 +232,20 @@ class CaseHistory extends Page
             ];
         }
 
-        if ($running && $step->group_no > $reached) {
+        // Somebody's turn this minute, and nobody has opened it yet. Said before anything
+        // else, because a step waiting on a person is the one thing on this page somebody
+        // can act on — and calling it "not yet" is what made a live approval read as a
+        // case that had stalled.
+        if ($running && in_array((int) $step->sequence, $open, true)) {
             return [
-                'said' => 'Not yet. It opens when the steps in front of it are done.',
+                'said' => 'Waiting on somebody to answer it.',
                 'tone' => 'later',
             ];
         }
 
         if ($running) {
             return [
-                'said' => 'Waiting on somebody to answer it.',
+                'said' => 'Not yet. It opens when the steps in front of it are done.',
                 'tone' => 'later',
             ];
         }
