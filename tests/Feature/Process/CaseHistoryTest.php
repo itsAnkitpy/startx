@@ -149,7 +149,7 @@ it('does not cry failure on an exit somebody turned down', function () {
 
         Livewire::actingAs(whoIsAtMeridian('chandni'))->test(CaseHistory::class)
             ->assertOk()
-            ->assertSee('The exit ended before this came round.')
+            ->assertSee('The case ended before this came round.')
             ->assertDontSee('steps never happened');
     });
 });
@@ -201,7 +201,7 @@ it('does not cry failure on a step that only applies to some exits', function ()
 
         Livewire::actingAs($chandni)->test(CaseHistory::class)
             ->assertOk()
-            ->assertSee('Not needed on this exit. It only opens in some cases, and this was not one.')
+            ->assertSee('Not needed this time. It only opens in some cases, and this was not one.')
             ->assertDontSee('Never happened');
     });
 });
@@ -243,7 +243,7 @@ it('says why a request was sent back, and where it went', function () {
     });
 });
 
-it('stops showing why a step was held once it has been answered', function () {
+it('keeps the reason a step was held off the line saying it was cleared, and under it instead', function () {
     TenantContext::run($this->meridian, function () {
         $rakesh = whoIsAtMeridian('rakesh');
         $chandni = whoIsAtMeridian('chandni');
@@ -269,12 +269,66 @@ it('stops showing why a step was held once it has been answered', function () {
             ->assertHasNoErrors();
 
         // A step somebody held and then cleared has two lines about it in the case's
-        // history, and the later one is the only one that describes it. Showing the
-        // earlier one puts the words she typed to hold the clearance against the day she
-        // cleared it, which reads as money still being argued about.
+        // history. On the line saying it was cleared, the hold reason reads as money still
+        // being argued about on the day it was settled — so it does not go there. Under
+        // it, with its own date, it is the only record that the argument happened at all.
+        $clearance = collect((new CaseHistory)->whatHappenedOn($exit->fresh()))->firstWhere('sequence', 2);
+        $before = implode(' ', $clearance['earlier']);
+
+        expect($clearance['said'])->toContain('Approved by Chandni Verma')
+            ->not->toContain('Waiting on the imprest card.')
+            ->and($before)->toContain('Put on hold by Chandni Verma')
+            ->and($before)->toContain('Why: Waiting on the imprest card.');
+
         Livewire::actingAs($chandni)->test(CaseHistory::class)
             ->assertOk()
             ->assertSee('Finance clearance')
-            ->assertDontSee('Why: Waiting on the imprest card.');
+            ->assertSee('Earlier at this step:')
+            ->assertSee('Why: Waiting on the imprest card.');
+    });
+});
+
+it('keeps the send-back on the case after the same approval has been given second time round', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = whoIsAtMeridian('rakesh');
+        $anjali = whoIsAtMeridian('anjali');
+        $request = ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')->first();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $request->getKey(), 2, 'sent_back')
+            ->set("reasons.{$request->getKey()}.2", 'The salary is above the band for this designation.')
+            ->call('decide', $request->getKey(), 2, 'sent_back')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($anjali)->test(MyQueue::class)
+            ->set("answers.{$request->getKey()}.1.justification", 'Corrected: the salary is now inside the band.')
+            ->call('decide', $request->getKey(), 1, 'approved')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('decide', $request->getKey(), 2, 'approved')
+            ->assertHasNoErrors();
+
+        // Approving it the second time replaces the row that sent it back, so a page built
+        // from rows alone says "Approved" and the send-back has gone. Both passes belong on
+        // the case: whoever reads it a year later has to see that the figure was questioned
+        // once, why, and what was done about it.
+        $steps = collect((new CaseHistory)->whatHappenedOn($request->fresh()));
+        $approval = $steps->firstWhere('sequence', 2);
+        $raising = $steps->firstWhere('sequence', 1);
+
+        expect($approval['said'])->toContain('Approved by Rakesh Menon')
+            ->and(implode(' ', $approval['earlier']))
+            ->toContain('Sent back by Rakesh Menon')
+            ->toContain('Why: The salary is above the band for this designation.')
+            // And the step it went back to says so itself, rather than leaving somebody to
+            // work out from further down the page why it was approved twice.
+            ->and(implode(' ', $raising['earlier']))
+            ->toContain('Sent back to here by Rakesh Menon');
+
+        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+            ->assertOk()
+            ->assertSee('Earlier at this step:')
+            ->assertSee('Why: The salary is above the band for this designation.');
     });
 });

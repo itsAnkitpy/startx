@@ -56,20 +56,40 @@
                              ships compiled reach the browser. --}}
                         <div style="display: grid; row-gap: 0.5rem;">
                             @foreach ($steps as $step)
-                                <div class="flex flex-wrap items-baseline gap-2">
-                                    <span class="text-sm font-medium text-gray-950 dark:text-white">
-                                        {{ $step['sequence'] }}. {{ $step['name'] }}
-                                    </span>
+                                <div>
+                                    <div class="flex flex-wrap items-baseline gap-2">
+                                        <span class="text-sm font-medium text-gray-950 dark:text-white">
+                                            {{ $step['sequence'] }}. {{ $step['name'] }}
+                                        </span>
 
-                                    <span
-                                        @class([
-                                            'text-sm',
-                                            'text-gray-500 dark:text-gray-400' => $step['tone'] !== 'missed',
-                                            'font-medium text-danger-600 dark:text-danger-400' => $step['tone'] === 'missed',
-                                        ])
-                                    >
-                                        {{ $step['said'] }}
-                                    </span>
+                                        <span
+                                            @class([
+                                                'text-sm',
+                                                'text-gray-500 dark:text-gray-400' => $step['tone'] !== 'missed',
+                                                'font-medium text-danger-600 dark:text-danger-400' => $step['tone'] === 'missed',
+                                            ])
+                                        >
+                                            {{ $step['said'] }}
+                                        </span>
+                                    </div>
+
+                                    {{-- A step that came round more than once. The line above
+                                         says where it stands; these say what happened before
+                                         it, oldest first, so a correction stops erasing the
+                                         send-back that asked for it. --}}
+                                    @if ($step['earlier'] !== [])
+                                        <div style="margin-top: 0.25rem; padding-left: 1.25rem; display: grid; row-gap: 0.25rem;">
+                                            <span class="text-sm text-gray-500 dark:text-gray-400">
+                                                Earlier at this step:
+                                            </span>
+
+                                            @foreach ($step['earlier'] as $pass)
+                                                <span class="text-sm text-gray-500 dark:text-gray-400">
+                                                    {{ $pass }}
+                                                </span>
+                                            @endforeach
+                                        </div>
+                                    @endif
                                 </div>
                             @endforeach
                         </div>

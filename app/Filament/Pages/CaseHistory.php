@@ -117,7 +117,7 @@ class CaseHistory extends Page
         $units = OrgUnit::query()->get()->keyBy('id');
 
         return ProcessCase::query()
-            ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord', 'events'])
+            ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord', 'events.actor'])
             ->orderByDesc('opened_at')
             ->get()
             ->filter(fn (ProcessCase $case): bool => $resolver->allows(
@@ -156,7 +156,12 @@ class CaseHistory extends Page
      * whole point: a step nobody ever touched has no row anywhere, and listing only the
      * rows would hide exactly the failure this page exists to show.
      *
-     * @return list<array{sequence: int, name: string, said: string, tone: string}>
+     * A step can come round more than once — sent back and answered again, or held and
+     * then cleared — and the row the engine keeps is one per step, so the line above can
+     * only ever say what happened last. What came before it is under `earlier`, read from
+     * the case's own trail, which is where every pass survives.
+     *
+     * @return list<array{sequence: int, name: string, said: string, tone: string, earlier: list<string>}>
      */
     public function whatHappenedOn(ProcessCase $case): array
     {
@@ -202,6 +207,7 @@ class CaseHistory extends Page
                         'said' => $this->whatWasDone($case, $row)
                             .($backWithThem ? ' Waiting on somebody to answer it again.' : ''),
                         'tone' => $row->acted_at === null || $backWithThem ? 'waiting' : 'done',
+                        'earlier' => $this->earlierPassesAt($case, $step, $row->acted_at !== null),
                     ];
                 }
 
@@ -209,6 +215,7 @@ class CaseHistory extends Page
                     'sequence' => $step->sequence,
                     'name' => $step->name,
                     ...$this->whyThereIsNoRow($case, $step, $open, $reached, $running, $stopped),
+                    'earlier' => $this->earlierPassesAt($case, $step, false),
                 ];
             })
             ->all();
@@ -236,7 +243,7 @@ class CaseHistory extends Page
     ): array {
         if ($stopped && $step->group_no >= $reached) {
             return [
-                'said' => 'The exit ended before this came round.',
+                'said' => 'The case ended before this came round.',
                 'tone' => 'stopped',
             ];
         }
@@ -268,7 +275,7 @@ class CaseHistory extends Page
                 'tone' => 'missed',
             ]
             : [
-                'said' => 'Not needed on this exit. It only opens in some cases, and this was not one.',
+                'said' => 'Not needed this time. It only opens in some cases, and this was not one.',
                 'tone' => 'skipped',
             ];
     }
@@ -306,7 +313,73 @@ class CaseHistory extends Page
 
         $said = self::Said[$row->outcome] ?? $row->outcome;
 
-        return "{$said} by {$who} on ".$row->acted_at->format('j F Y').'.'.$this->andWhy($case, $row);
+        $acted = $case->events
+            ->where('type', 'step_acted')
+            ->last(fn (CaseEvent $event): bool => $this->isAbout($event, $row->sequence));
+
+        return "{$said} by {$who} on ".$row->acted_at->format('j F Y').'.'
+            .($acted === null ? '' : $this->andWhy($case, (array) $acted->payload));
+    }
+
+    /**
+     * Every pass at a step the line above does not already describe, oldest first.
+     *
+     * Read from the trail rather than from the replaced rows, and that is the whole
+     * design: a replaced row cannot be paired back to its own line in the trail by any
+     * honest rule, because a step held and then cleared is one row with two lines against
+     * it. Every line already carries who, when, the outcome, the reason and where a
+     * send-back went, so nothing new is stored and nothing extra is read — the trail is
+     * already loaded for this page.
+     *
+     * Jira Service Management is the shape: a step that comes round again is a new round,
+     * the panel says where it is now, and the earlier rounds stay readable underneath.
+     * Salesforce draws the trail flat instead and sells a component to make it legible
+     * again, which is what that costs.
+     *
+     * @return list<string>
+     */
+    private function earlierPassesAt(ProcessCase $case, ProcessStep $step, bool $theLineAboveTookTheLast): array
+    {
+        $passes = $case->events
+            ->whereIn('type', ['step_acted', 'step_reopened'])
+            ->filter(fn (CaseEvent $event): bool => $this->isAbout($event, $step->sequence))
+            ->values();
+
+        if ($theLineAboveTookTheLast) {
+            $passes = $passes->slice(0, -1);
+        }
+
+        return $passes
+            ->map(fn (CaseEvent $event): string => $this->whatTheTrailSays($case, $event))
+            ->all();
+    }
+
+    /** Whether a line in the trail is about one step of the process. */
+    private function isAbout(CaseEvent $event, int $sequence): bool
+    {
+        return (int) (((array) $event->payload)['sequence'] ?? 0) === $sequence;
+    }
+
+    /**
+     * One earlier pass, in the same words the line above the step uses.
+     *
+     * A step being sent back to is written into the trail as its own line, so it is said
+     * here too — without it a step approved twice reads as approved twice for no reason,
+     * and the explanation sits several steps further down the page.
+     */
+    private function whatTheTrailSays(ProcessCase $case, CaseEvent $event): string
+    {
+        $said = (array) $event->payload;
+
+        $who = $event->actor?->name
+            ?? ((array) ($said['answered_by'] ?? []))['name']
+            ?? 'somebody';
+
+        $what = $event->type === 'step_reopened'
+            ? 'Sent back to here'
+            : (self::Said[$said['outcome'] ?? ''] ?? 'Answered');
+
+        return "{$what} by {$who} on ".$event->created_at->format('j F Y').'.'.$this->andWhy($case, $said);
     }
 
     /**
@@ -318,20 +391,12 @@ class CaseHistory extends Page
      * that came back with no words on it tells the person who has to correct it nothing.
      *
      * Read from the line the engine already writes rather than from a second column, so
-     * what the screen says and what the history holds cannot come apart. A step held and
-     * then answered has two of those lines and the later one is the one that stands.
+     * what the screen says and what the history holds cannot come apart.
+     *
+     * @param  array<string, mixed>  $said  One line of the trail, as the engine wrote it.
      */
-    private function andWhy(ProcessCase $case, CaseStep $row): string
+    private function andWhy(ProcessCase $case, array $said): string
     {
-        $acted = $case->events
-            ->where('type', 'step_acted')
-            ->last(fn (CaseEvent $event): bool => (int) (((array) $event->payload)['sequence'] ?? 0) === (int) $row->sequence);
-
-        if ($acted === null) {
-            return '';
-        }
-
-        $said = (array) $acted->payload;
         $back = $said['sent_back_to'] ?? null;
         $step = $back === null ? null : $case->template->steps->firstWhere('sequence', $back)?->name;
 
