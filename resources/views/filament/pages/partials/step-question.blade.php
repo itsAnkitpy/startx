@@ -1,6 +1,11 @@
 {{--
     One question on one step, rendered by its type.
 
+    `$under` is where this form's answers live on the page — `answers` on a screen showing
+    one form, `answers.7.2` on the queue, which shows several at once. Everything below is
+    built from it, so the same twelve question types serve every screen that asks anything
+    and there is never a second copy of them to fall behind.
+
     Everything here is a Filament component rather than utility classes: this project has
     no front-end build, so the only styles that reach the browser are the ones Filament
     ships compiled. A class we invent here does nothing at all.
@@ -9,8 +14,8 @@
     server against the client's own question definitions, because the browser is the half
     of this an employee controls.
 --}}
-@php($path = "answers.{$caseId}.{$sequence}.{$field->key}")
-@php($id = "q-{$caseId}-{$sequence}-{$field->key}")
+@php($path = $under.'.'.$field->key)
+@php($id = 'q-'.str_replace('.', '-', $path))
 @php($valid = ! $errors->has($path))
 
 {{--
@@ -111,7 +116,7 @@
                  `.live` to add and no button to press — and the file goes to Livewire's
                  holding area, not to ours: nothing is written anywhere it survives until
                  this step is actually decided. --}}
-            @php($attached = $this->attachedTo($caseId, $sequence, $field->key))
+            @php($attached = $this->attachedTo($path))
 
             <div style="display: grid; row-gap: 0.5rem; justify-items: start;">
                 <input

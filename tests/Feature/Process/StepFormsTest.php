@@ -1163,7 +1163,9 @@ it('lets HR attach the photograph of a returned card, on the card Ankit opens', 
         // with the same class would look right and do nothing when pressed, so the tag is
         // part of what is checked.
         expect($screen->html())->toMatch(
-            '/<label\s[^>]*class="fi-btn[^"]*" for="q-'.$anjalis->getKey().'-1-id_card_photo"/',
+            // The box's id is built from where its answer lives on the page, which is what
+            // lets one partial serve the queue and the screen a request is raised from.
+            '/<label\s[^>]*class="fi-btn[^"]*" for="q-answers-'.$anjalis->getKey().'-1-id_card_photo"/',
         );
 
         // And the step the browser actually takes first, which handing the page a file

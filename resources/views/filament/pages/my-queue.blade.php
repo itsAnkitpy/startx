@@ -107,8 +107,7 @@
                                         @foreach ($questions as $field)
                                             @include('filament.pages.partials.step-question', [
                                                 'field' => $field,
-                                                'caseId' => $case->getKey(),
-                                                'sequence' => $step->sequence,
+                                                'under' => "answers.{$case->getKey()}.{$step->sequence}",
                                             ])
                                         @endforeach
                                     </div>

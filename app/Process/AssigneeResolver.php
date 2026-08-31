@@ -159,20 +159,45 @@ final class AssigneeResolver
     }
 
     /**
-     * The first level of candidates with anybody usable in it, or null when no level has.
-     *
-     * Null and an empty collection are different answers here and the difference is what
-     * the stand-in hangs off: nothing found at any level is the vacancy the stand-in
-     * exists for, and an escalation finding nothing is simply a step that does not widen.
+     * The first level of candidates with anybody usable in it, for a rule read against a
+     * case.
      *
      * @param  array<string, mixed>  $rule
      * @return Collection<int, User>|null
      */
     private function nearestLevelThatCanAct(ProcessCase $case, array $rule, ?int $subjectId): ?Collection
     {
-        foreach ($this->levelsFor($case, $rule) as $level) {
-            $people = $this->whichOfThemCanAct($level, $subjectId);
-            $people = $this->withWhoeverIsCoveringThem($people, $case, $subjectId);
+        return $this->firstLevelWithAnybody(
+            $this->levelsFor($case, $rule),
+            (string) $case->template->key,
+            $subjectId,
+        );
+    }
+
+    /**
+     * Walk levels nearest first and stop at the first one with somebody usable in it.
+     *
+     * The one walk, whether the candidates came from a case or from a first step with no
+     * case behind it. It is written once because the order inside it is a rule rather
+     * than a convenience — who may act is filtered first and cover is added to whoever
+     * survived — and a rule stated once and written twice is a rule that gets changed
+     * once.
+     *
+     * Null and an empty collection are different answers here and the difference is what
+     * the stand-in hangs off: nothing found at any level is the vacancy the stand-in
+     * exists for, and an escalation finding nothing is simply a step that does not widen.
+     *
+     * @param  iterable<int, list<int>>  $levels
+     * @return Collection<int, User>|null
+     */
+    private function firstLevelWithAnybody(iterable $levels, string $processKey, ?int $subjectId): ?Collection
+    {
+        foreach ($levels as $level) {
+            $people = $this->withWhoeverIsCoveringThem(
+                $this->whichOfThemCanAct($level, $subjectId),
+                $processKey,
+                $subjectId,
+            );
 
             if ($people->isNotEmpty()) {
                 return $people;
@@ -180,6 +205,50 @@ final class AssigneeResolver
         }
 
         return null;
+    }
+
+    /**
+     * Who may raise a case of this process, asked before there is a case to ask about.
+     *
+     * The screen a request is raised from has to answer this, and every other question in
+     * this class is asked of a case that already exists. So only the two ways of finding
+     * people that do not read a case can answer it: the step naming a person, and the step
+     * naming a role held anywhere in the company. The other four each need something a
+     * case carries — who it is about, who raised it, or an answer that has not been typed
+     * yet — so a first step written that way names nobody who could start it, and the
+     * process simply is not offered.
+     *
+     * A step naming somebody whose account is gone climbs to their manager, because that
+     * is who the engine would hand the step to a moment later — the right to raise and
+     * the duty to answer stay the same person either way.
+     *
+     * That is the same shape ServiceNow and Jira Service Management use, and it is why
+     * there is no separate action for raising: the right to start belongs to the thing
+     * being started. A client who wants anybody to be able to ask writes that as the first
+     * step's rule — whoever holds a role, anywhere — with a role every employee is given.
+     *
+     * **Deliberately narrower than what the engine will accept a moment later.** The stand-in
+     * catches a step of a live case that nobody holds; there is no case here to warn on
+     * and nothing has gone wrong yet, so a process nobody can start is simply not on the
+     * list. Cover is read, because somebody standing in for Anjali while she is away must
+     * be able to raise what Anjali raises.
+     *
+     * @return Collection<int, User>
+     */
+    public function whoCanRaiseIt(ProcessStep $first, string $processKey): Collection
+    {
+        $rule = (array) $first->assignee_rule;
+
+        $levels = match ($rule['kind'] ?? null) {
+            'specific_user' => $this->thePersonNamed((string) ($rule['email'] ?? '')),
+            'role_global' => $this->everyHolderOfARole((string) ($rule['role'] ?? '')),
+            default => [],
+        };
+
+        // The same walk every other question in this class takes, so a filter added to it
+        // reaches the raise screen and the queue on the same day. There is no stand-in at
+        // the end of it, exactly as an escalation has none.
+        return $this->firstLevelWithAnybody($levels, $processKey, null) ?? new Collection;
     }
 
     public function isForSomebodyWithNoAccount(ProcessStep $step): bool
@@ -458,7 +527,7 @@ final class AssigneeResolver
      * @param  Collection<int, User>  $people
      * @return Collection<int, User>
      */
-    private function withWhoeverIsCoveringThem(Collection $people, ProcessCase $case, ?int $subjectId): Collection
+    private function withWhoeverIsCoveringThem(Collection $people, string $processKey, ?int $subjectId): Collection
     {
         if ($people->isEmpty()) {
             return $people;
@@ -466,7 +535,7 @@ final class AssigneeResolver
 
         $covers = Delegation::query()
             ->whereIn('user_id', $people->modelKeys())
-            ->where('process_key', $case->template->key)
+            ->where('process_key', $processKey)
             ->asOf(CarbonImmutable::now())
             ->orderBy('user_id')
             ->get();

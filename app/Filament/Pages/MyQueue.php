@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Exceptions\ProcessRefused;
+use App\Filament\Pages\Concerns\DrawsAStepsForm;
 use App\Models\CaseEvent;
 use App\Models\FormField;
 use App\Models\ProcessCase;
@@ -17,7 +18,6 @@ use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 
 /**
@@ -36,6 +36,8 @@ use Illuminate\Support\Collection;
  */
 class MyQueue extends Page
 {
+    use DrawsAStepsForm;
+
     protected string $view = 'filament.pages.my-queue';
 
     protected static ?string $navigationLabel = 'My queue';
@@ -184,27 +186,6 @@ class MyQueue extends Page
     }
 
     /**
-     * What somebody has attached to one question on one card, by the name they gave it.
-     *
-     * Only ever the name. The file has gone nowhere of ours yet and does not until the
-     * step is decided, and the one address that exists for it meanwhile is Livewire's
-     * own, which always hands the file over to be saved rather than shown — it is built
-     * for previewing an image inside a page, not for opening a clearance scan. Looking at
-     * a document before approving it therefore needs an address of our own, and that is a
-     * decision rather than a detail: it is a second way to reach a file nothing has
-     * checked against a case yet.
-     *
-     * The card names what is attached either way, which is what tells a chosen file apart
-     * from none once the page redraws.
-     */
-    public function attachedTo(int $caseId, int $sequence, string $key): ?string
-    {
-        $chosen = $this->answers[$caseId][$sequence][$key] ?? null;
-
-        return $chosen instanceof UploadedFile ? $chosen->getClientOriginalName() : null;
-    }
-
-    /**
      * The documents already attached to this case by steps that are done.
      *
      * This is what makes a clearance verifiable rather than taken on trust: finance
@@ -218,19 +199,6 @@ class MyQueue extends Page
     public function documentsOn(AvailableStep $waiting): Collection
     {
         return (new CaseDocuments)->on($waiting->case);
-    }
-
-    /**
-     * The rows a picker offers, as `id => name`, for the list this page draws.
-     *
-     * The panel above each form reads the same list to turn a chosen number back into
-     * words, so it lives with the forms rather than here.
-     *
-     * @return array<int, string>
-     */
-    public function optionsFor(FormField $field): array
-    {
-        return (new StepForm)->optionsFor($field);
     }
 
     /**
@@ -263,35 +231,11 @@ class MyQueue extends Page
             && (int) $step->step->sequence === $sequence);
 
         if ($waiting !== null) {
-            $forms = new StepForm;
-            $under = "answers.{$caseId}.{$sequence}.";
-
-            // An empty box dropped before anything is checked, because the engine drops it
-            // too and what is left has to be the same on both sides. A yes/no left on "Not
-            // answered" is an empty string, which Laravel treats as an answer and the
-            // engine does not — so without this the screen let it through and the engine
-            // refused it, and the person got a sentence at the top of the page about a box
-            // with no mark against it.
-            $this->answers[$caseId][$sequence] = $forms->answered($this->typedInto($waiting));
-
-            // Rewritten under the property path the inputs are bound to, so a refusal
-            // lands beside the box it is about instead of at the top of the page.
-            $rules = collect($forms->rules($waiting->step, $this->typedInto($waiting), $outcome === 'approved'))
-                ->mapWithKeys(fn (mixed $rules, string $key): array => [$under.$key => $rules])
-                ->all();
-
-            // A step that asks nothing has nothing to check, and asking Livewire to check
-            // nothing is an error rather than a pass: handed an empty list it goes looking
-            // for rules written on the page itself, finds none, and throws. A manager
-            // sign-off and both hiring approvals are only a decision, so every one of them
-            // ended in an error page on the press of the button.
-            if ($rules !== []) {
-                $this->validate(
-                    $rules,
-                    [],
-                    collect($forms->labels($waiting->step))->mapWithKeys(fn (string $label, string $key): array => [$under.$key => $label])->all(),
-                );
-            }
+            $this->checkedAgainstTheForm(
+                $waiting->step,
+                "answers.{$caseId}.{$sequence}",
+                $outcome === 'approved',
+            );
         }
 
         $recorded = $this->run(
