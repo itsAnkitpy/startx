@@ -179,3 +179,75 @@ it('counts one person holding the role twice as one grant, not two answers', fun
             ->and($this->resolver->allows($anjali, Permission::ViewPerson, $tree['depot']))->toBeFalse();
     });
 });
+
+/*
+| The same grants read the other way round: not "may she act here", but "where may she
+| act at all". A list has to ask the second question — asking the first and getting yes
+| would show an HR head responsible for one branch every person in the company.
+*/
+
+it('names only the branch a grant covers', function () {
+    TenantContext::run($this->meridian, function () {
+        $tree = meridianStructure();
+        $rakesh = User::factory()->named('Rakesh Menon')->create();
+
+        $rakesh->roleAssignments()->create([
+            'role_id' => $tree['role']->getKey(),
+            'org_unit_id' => $tree['freight']->getKey(),
+            'includes_descendants' => false,
+        ]);
+
+        expect($this->resolver->reachableUnitIds($rakesh, Permission::ViewPerson))
+            ->toEqual([$tree['freight']->getKey()]);
+    });
+});
+
+it('names everything below the branch when the grant reaches downwards', function () {
+    TenantContext::run($this->meridian, function () {
+        $tree = meridianStructure();
+        $rakesh = User::factory()->named('Rakesh Menon')->create();
+
+        $rakesh->roleAssignments()->create([
+            'role_id' => $tree['role']->getKey(),
+            'org_unit_id' => $tree['freight']->getKey(),
+            'includes_descendants' => true,
+        ]);
+
+        $reachable = $this->resolver->reachableUnitIds($rakesh, Permission::ViewPerson);
+
+        sort($reachable);
+
+        expect($reachable)->toEqual(collect([
+            $tree['freight'], $tree['freightNorth'], $tree['depot'],
+        ])->map->getKey()->sort()->values()->all())
+            // The sibling branch is the point of the test: it is what a list would wrongly
+            // show if this answered "anywhere at all".
+            ->not->toContain($tree['retail']->getKey());
+    });
+});
+
+it('says everywhere when the grant names no part of the company', function () {
+    TenantContext::run($this->meridian, function () {
+        $tree = meridianStructure();
+        $chandni = User::factory()->named('Chandni Verma')->create();
+
+        $chandni->roleAssignments()->create([
+            'role_id' => $tree['role']->getKey(),
+            'org_unit_id' => null,
+            'includes_descendants' => false,
+        ]);
+
+        // Null rather than every unit id: a list narrowed to a list of everything would
+        // still miss a row that sits under no unit at all.
+        expect($this->resolver->reachableUnitIds($chandni, Permission::ViewPerson))->toBeNull();
+    });
+});
+
+it('says nowhere to somebody holding the action on nothing', function () {
+    TenantContext::run($this->meridian, function () {
+        meridianStructure();
+        $anjali = User::factory()->named('Anjali Rao')->create();
+
+        expect($this->resolver->reachableUnitIds($anjali, Permission::ViewPerson))->toEqual([]);
+    });
+});

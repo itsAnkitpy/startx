@@ -16,6 +16,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Form;
 use Filament\Schemas\Schema;
+use UnitEnum;
 
 /**
  * The switches this client company runs on, and the one screen that changes them.
@@ -41,6 +42,8 @@ use Filament\Schemas\Schema;
 class CompanySettings extends Page
 {
     protected string $view = 'filament.pages.company-settings';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Company setup';
 
     protected static ?string $navigationLabel = 'Settings';
 

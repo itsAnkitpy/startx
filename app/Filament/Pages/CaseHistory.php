@@ -18,6 +18,7 @@ use App\Process\SubjectPanel;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
+use UnitEnum;
 
 /**
  * Every case this client has run, and what actually happened at each of its steps.
@@ -50,11 +51,20 @@ class CaseHistory extends Page
 {
     protected string $view = 'filament.pages.case-history';
 
+    protected static string|UnitEnum|null $navigationGroup = 'Your work';
+
     protected static ?string $navigationLabel = 'Cases';
 
     protected static ?string $title = 'Cases';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
+
+    /**
+     * Third in its group, behind the queue and raising something. Not left unset: an
+     * unset sort is read as the lowest there is, so this screen quietly became the first
+     * thing in the menu and the page everybody landed on after signing in.
+     */
+    protected static ?int $navigationSort = 1;
 
     /**
      * How each outcome reads on the case, in the words of what was actually done rather

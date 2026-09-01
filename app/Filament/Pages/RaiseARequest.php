@@ -16,6 +16,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use UnitEnum;
 
 /**
  * The screen a request is started from, and the first thing in this product a person can
@@ -44,6 +45,8 @@ class RaiseARequest extends Page
     use DrawsAStepsForm;
 
     protected string $view = 'filament.pages.raise-a-request';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Your work';
 
     protected static ?string $navigationLabel = 'Raise a request';
 

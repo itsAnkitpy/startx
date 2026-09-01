@@ -21,6 +21,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
+use UnitEnum;
 
 /**
  * What is waiting on the person signed in, and the two buttons that act on it.
@@ -41,6 +42,8 @@ class MyQueue extends Page
     use DrawsAStepsForm;
 
     protected string $view = 'filament.pages.my-queue';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Your work';
 
     protected static ?string $navigationLabel = 'My queue';
 

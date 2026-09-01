@@ -44,6 +44,9 @@ class PermissionResolver
     /** @var array<string, list<int>> */
     private array $ancestors = [];
 
+    /** @var array<string, list<int>|null> */
+    private array $reachable = [];
+
     /**
      * @param  OrgUnit|null  $unit  The unit the record being acted on sits in. Null asks
      *                              whether the person holds the action anywhere at all,
@@ -63,6 +66,53 @@ class PermissionResolver
     }
 
     /**
+     * Which parts of the structure this person may act on for this action.
+     *
+     * `null` means everywhere in the client company — either the grant names no unit, or
+     * there is no structure in the way. An empty list means nowhere, which is the honest
+     * answer for somebody holding the action on no grant at all.
+     *
+     * This exists because {@see allows()} with no unit answers "anywhere at all", which is
+     * the right question for opening a screen and the wrong one for filling it. A list
+     * that trusts the screen check shows an HR head responsible for one branch every
+     * person in the company. Each list applies this to its own rows, because the column
+     * that says which unit a row sits in differs — a department is its own unit, a person
+     * reaches one through their current job.
+     *
+     * @return list<int>|null
+     */
+    public function reachableUnitIds(User $user, string $permission): ?array
+    {
+        $key = (TenantContext::id() ?? '-').'|'.$user->getKey().'|'.$permission;
+
+        if (array_key_exists($key, $this->reachable)) {
+            return $this->reachable[$key];
+        }
+
+        $ids = [];
+
+        foreach ($this->grantsCarrying($user, $permission) as $grant) {
+            if ($grant->org_unit_id === null) {
+                return $this->reachable[$key] = null;
+            }
+
+            $unit = OrgUnit::query()->find($grant->org_unit_id);
+
+            if ($unit === null) {
+                continue;
+            }
+
+            // Granted on one unit reaches that unit alone unless the grant was told to
+            // reach downwards — the same rule allows() applies, read the other way round.
+            $ids = [...$ids, ...($grant->includes_descendants
+                ? $unit->selfAndDescendantIds()
+                : [(int) $unit->getKey()])];
+        }
+
+        return $this->reachable[$key] = array_values(array_unique($ids));
+    }
+
+    /**
      * Forget everything remembered so far. Needed only where a grant is changed and the
      * same request then asks again — a test, or a screen that grants a role and
      * immediately re-renders.
@@ -72,6 +122,7 @@ class PermissionResolver
         $this->answers = [];
         $this->grants = [];
         $this->ancestors = [];
+        $this->reachable = [];
     }
 
     private function resolve(User $user, string $permission, ?OrgUnit $unit): bool
