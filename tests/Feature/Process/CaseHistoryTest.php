@@ -5,6 +5,7 @@ use App\Authorization\PermissionResolver;
 use App\Filament\Pages\CaseHistory;
 use App\Filament\Pages\MyQueue;
 use App\Models\FormDefinition;
+use App\Models\FormField;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -378,5 +379,68 @@ it('keeps the screen shut to somebody who has neither raised anything nor been g
         $this->actingAs(whoIsAtMeridian('anjali'));
 
         expect(CaseHistory::canAccess())->toBeTrue();
+    });
+});
+
+it('heads a case about nobody with its number and what it was raised asking for', function () {
+    TenantContext::run($this->meridian, function () {
+        $page = new CaseHistory;
+
+        $requests = ProcessCase::query()
+            ->whereRelation('template', 'key', 'hiring_request')
+            ->orderBy('id')
+            ->get();
+
+        // Both of these read "Hiring request" and nothing else until now, and Chandni sees
+        // every one the company has ever raised — so eight of them were eight identical
+        // headings with no way to tell one from another.
+        expect($page->whoseCase($requests[0]))
+            ->toBe('#'.$requests[0]->getKey().' · Shimla branch · Operations Officer')
+            ->and($page->whoseCase($requests[1]))
+            ->toBe('#'.$requests[1]->getKey().' · Shimla branch · Branch Manager');
+
+        // A case about somebody still reads as theirs. There is a name to head it with,
+        // so nothing here is needed and a number in front of it would be noise.
+        $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        expect($page->whoseCase($exit))->toBe("Anjali Rao's Exit");
+    });
+});
+
+it('passes over an opening question a client wrote as prose, rather than cutting it short', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjali = whoIsAtMeridian('anjali');
+
+        // A client is free to open their own form with a paragraph, and half a paragraph
+        // is not a heading. The second question is what heads it instead.
+        $form = FormDefinition::factory()->named('budget_request', 'Budget request')->create();
+
+        FormField::factory()->on($form)->at(1)->required()
+            ->asking('case_for_it', 'The case for it', FormField::Textarea)->create();
+
+        FormField::factory()->on($form)->at(2)->required()
+            ->asking('what_for', 'What it is for', FormField::Text)->create();
+
+        $form->publish();
+
+        $budget = ProcessTemplate::factory()->named('budget_request', 'Budget request')->about('none')->create();
+
+        ProcessStep::factory()->of($budget)->at(1, 1)->named('Raise it')
+            ->asking($form)->heldBy('anjali@meridian.test')->offering('approved')->create();
+
+        $budget->publish();
+
+        $engine = new CaseEngine;
+        $case = $engine->open($budget, by: $anjali);
+
+        $engine->decide($case, 1, 'approved', $anjali, [
+            'case_for_it' => 'The Shimla desk has run two people short since April and the '
+                .'overtime is now costing more than the third salary would.',
+            'what_for' => 'A third workstation',
+        ]);
+
+        expect($page = (new CaseHistory)->whoseCase($case->fresh()))
+            ->toBe('#'.$case->getKey().' · A third workstation')
+            ->and($page)->not->toContain('overtime');
     });
 });

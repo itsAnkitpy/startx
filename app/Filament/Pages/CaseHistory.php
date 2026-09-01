@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
 use App\Process\PublishCheck;
+use App\Process\SubjectPanel;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
@@ -68,6 +69,14 @@ class CaseHistory extends Page
         'closed_disputed' => 'Closed with the disagreement on the record',
         'force_closed' => 'Closed over the hold',
     ];
+
+    /**
+     * How much of an answer fits in a heading before it stops being one. A client's own
+     * form decides what identifies a request, and a client is free to open theirs with a
+     * paragraph — half a paragraph is not a heading, so a long answer is passed over
+     * rather than cut short.
+     */
+    private const HeadingRoom = 40;
 
     /**
      * Whether each version already read would be refused if it were made live today,
@@ -448,13 +457,37 @@ class CaseHistory extends Page
         };
     }
 
-    /** Whose case it is, or that it is about nobody — a hiring request is about a vacancy. */
+    /**
+     * Whose case it is, or — where it is about nobody — its number and what it asked for.
+     *
+     * A hiring request is about a vacancy, so there is no name to head it with and every
+     * one of them read "Hiring request". On the screen of somebody who sees the whole
+     * company that was eight identical headings with nothing to tell them apart.
+     *
+     * What it says instead is the first two things the client's own form asks, in the
+     * client's own order, because whoever wrote the form put the question that identifies
+     * a request at the top of it. Nothing here names a process or a question, which is
+     * what keeps it true of a budget request or anything else a client builds about
+     * nobody.
+     *
+     * **The number leads, because two requests really can be the same request.** Same
+     * department, same designation, raised twice — no description separates those, and
+     * ServiceNow and Jira Service Management both lead their own lists with a reference
+     * for exactly that reason. The process's own name is still on the card, on the line
+     * underneath.
+     */
     public function whoseCase(ProcessCase $case): string
     {
         $subject = $case->subject;
 
-        return $subject instanceof User
-            ? $subject->name."'s ".$case->template->name
-            : $case->template->name;
+        if ($subject instanceof User) {
+            return $subject->name."'s ".$case->template->name;
+        }
+
+        $asked = collect((new SubjectPanel)->of($case)['facts'])
+            ->filter(fn (string $answer): bool => mb_strlen($answer) <= self::HeadingRoom)
+            ->take(2);
+
+        return '#'.$case->getKey().($asked->isEmpty() ? ' '.$case->template->name : ' · '.$asked->implode(' · '));
     }
 }
