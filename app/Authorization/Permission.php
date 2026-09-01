@@ -61,6 +61,24 @@ final class Permission
     public const ManageSettings = 'manage_settings';
 
     /**
+     * Editing the two lists a client keeps beside their structure — their designations
+     * and their offices. One name for both, because four names each would give a client
+     * twelve tick-boxes for two short lists nobody guards separately.
+     *
+     * Reading them needs nothing: a designation and an office are already shown to
+     * whoever is filling in a form that picks one.
+     */
+    public const ManageReferenceList = 'manage_reference_list';
+
+    /**
+     * An office's working calendar — the weekdays it does not work, and the dates it is
+     * closed. Apart from {@see ManageReferenceList} because these are the only two
+     * fields on an office whose mistakes move a legal deadline, so a client may well
+     * want them in fewer hands than the office's name and address.
+     */
+    public const ManageWorkingCalendar = 'manage_working_calendar';
+
+    /**
      * @return list<string>
      */
     public static function all(): array
