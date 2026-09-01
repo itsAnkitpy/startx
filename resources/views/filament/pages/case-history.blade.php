@@ -14,7 +14,8 @@
             <div class="py-8 text-center">
                 <p class="text-base font-medium text-gray-950 dark:text-white">No cases yet.</p>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    A case appears here the moment somebody's exit, or any other process, is started.
+                    A case appears here as soon as one starts that you can see — including anything
+                    you raise yourself.
                 </p>
             </div>
         </x-filament::section>

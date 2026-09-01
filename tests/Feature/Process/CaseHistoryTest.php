@@ -1,5 +1,6 @@
 <?php
 
+use App\Authorization\Permission;
 use App\Authorization\PermissionResolver;
 use App\Filament\Pages\CaseHistory;
 use App\Filament\Pages\MyQueue;
@@ -330,5 +331,52 @@ it('keeps the send-back on the case after the same approval has been given secon
             ->assertOk()
             ->assertSee('Earlier at this step:')
             ->assertSee('Why: The salary is above the band for this designation.');
+    });
+});
+
+it('lets the person who raised a request read what happened to it, and nothing else', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjali = whoIsAtMeridian('anjali');
+        $rakesh = whoIsAtMeridian('rakesh');
+
+        // Anjali holds no role at all, so every case at Meridian was out of her reach —
+        // including the two hiring requests she raised herself.
+        expect(app(PermissionResolver::class)->allows($anjali, Permission::ViewPerson))->toBeFalse();
+
+        $request = ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')->first();
+
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $request->getKey(), 2, 'rejected')
+            ->set("reasons.{$request->getKey()}.2", 'The branch has no budget for another officer this year.')
+            ->call('decide', $request->getKey(), 2, 'rejected')
+            ->assertHasNoErrors();
+
+        // The reason was written correctly and shown to everybody except her, which is the
+        // one person it was written for.
+        Livewire::actingAs($anjali)->test(CaseHistory::class)
+            ->assertOk()
+            ->assertSee('Rejected by Rakesh Menon')
+            ->assertSee('Why: The branch has no budget for another officer this year.')
+            // Somebody else's exit is still none of her business.
+            ->assertDontSee('Finance clearance');
+
+        $this->actingAs($anjali);
+
+        expect((new CaseHistory)->cases()->map(fn (ProcessCase $case): string => $case->template->key)->all())
+            ->toBe(['hiring_request', 'hiring_request']);
+    });
+});
+
+it('keeps the screen shut to somebody who has neither raised anything nor been given the run of it', function () {
+    TenantContext::run($this->meridian, function () {
+        // Deepak is an operations officer holding nothing, and the hiring request's first
+        // step is Anjali's alone, so he has never started a case and never will here.
+        $this->actingAs(whoIsAtMeridian('deepak'));
+
+        expect(CaseHistory::canAccess())->toBeFalse();
+
+        $this->actingAs(whoIsAtMeridian('anjali'));
+
+        expect(CaseHistory::canAccess())->toBeTrue();
     });
 });

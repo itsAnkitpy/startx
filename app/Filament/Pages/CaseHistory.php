@@ -37,6 +37,11 @@ use Illuminate\Support\Collection;
  * behind them, and not one of them is a failure. Marking those red would spend the mark
  * on ordinary Tuesdays and leave nothing to say with when the real thing happens.
  *
+ * **It is also where somebody reads their own request back.** A person who raises one and
+ * holds nothing else sees the cases they started and no others, on this same page, because
+ * everything they need — every step, who answered it, when, and why — is already drawn
+ * here and a second screen would be the same page with one filter changed.
+ *
  * Read-only. Deciding anything is the queue screen's job, and module 12's editor is where
  * a process is changed.
  */
@@ -74,16 +79,24 @@ class CaseHistory extends Page
     private array $versionIsFlawed = [];
 
     /**
-     * Whoever holds the action of seeing people, anywhere in the company at all. The rows
-     * are each checked again in turn against the department the case's own person was in
-     * — the question this one answers is only whether there is any point opening the page.
+     * Whoever holds the action of seeing people anywhere in the company, and anybody who
+     * has started a case of their own. The rows are each checked again in turn — the
+     * question this one answers is only whether there is any point opening the page.
+     *
+     * Anjali holds nothing and raises hiring requests, so without the second half of this
+     * she can have a request turned down with a reason written on it and no screen in the
+     * product that says so.
      */
     public static function canAccess(): bool
     {
         $person = auth()->user();
 
-        return $person instanceof User
-            && app(PermissionResolver::class)->allows($person, Permission::ViewPerson);
+        if (! $person instanceof User) {
+            return false;
+        }
+
+        return app(PermissionResolver::class)->allows($person, Permission::ViewPerson)
+            || ProcessCase::query()->where('initiated_by', $person->getKey())->exists();
     }
 
     /**
@@ -100,6 +113,13 @@ class CaseHistory extends Page
      * So a case with no department at all is one that never had one — about a candidate or
      * about a vacancy — and that falls back to holding the action anywhere, which is the
      * same answer a person with no job row already gets on their own record.
+     *
+     * **And a case somebody started is theirs to read, whatever else they may do here.**
+     * Workday is the shape: a worker's own list holds every process they submitted or took
+     * part in, and opening one shows the same history an approver reads. Jira Service
+     * Management and ServiceNow build a second screen for this instead, because their
+     * approver's view carries private notes and service clocks a customer may not see —
+     * neither of which exists on this page, and Anjali works for the same company.
      *
      * @return Collection<int, ProcessCase>
      */
@@ -120,12 +140,26 @@ class CaseHistory extends Page
             ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord', 'events.actor'])
             ->orderByDesc('opened_at')
             ->get()
-            ->filter(fn (ProcessCase $case): bool => $resolver->allows(
-                $person,
-                Permission::ViewPerson,
-                $units[$case->subjectEmploymentRecord?->org_unit_id] ?? null,
-            ))
+            ->filter(fn (ProcessCase $case): bool => self::theyStartedIt($case, $person)
+                || $resolver->allows(
+                    $person,
+                    Permission::ViewPerson,
+                    $units[$case->subjectEmploymentRecord?->org_unit_id] ?? null,
+                ))
             ->values();
+    }
+
+    /**
+     * Whether this is a case the person reading started themselves.
+     *
+     * Read off the case rather than asked of the permission rules, because it is not a
+     * permission: nobody grants it, nobody can take it away, and it is true of the person
+     * whether or not their role lets them see anybody in the company.
+     */
+    private static function theyStartedIt(ProcessCase $case, User $person): bool
+    {
+        return $case->initiated_by !== null
+            && (int) $case->initiated_by === (int) $person->getKey();
     }
 
     /**
