@@ -101,6 +101,46 @@ function grant(User $person, string $roleKey, ?OrgUnit $over = null, bool $reach
     ]);
 }
 
+it('never answers one client company with another one remembered answer', function () {
+    $vertex = Tenant::factory()->create(['name' => 'Vertex Foods', 'slug' => 'vertex-remembered']);
+
+    // The same role name at two client companies, held by a different person at each. A
+    // role's name means nothing to any check, which is exactly why the same name turning up
+    // twice is ordinary rather than a coincidence.
+    $meridiansOwn = TenantContext::run($this->meridian, function () {
+        $rakesh = personIn(meridiansStructure()['shimla'], 'Rakesh Menon');
+        grant($rakesh, 'hr_head');
+
+        return [$rakesh, anExitWhoseOneStepIs(fn ($step) => $step->heldByTheRoleAnywhere('hr_head'))];
+    });
+
+    $vertexsOwn = TenantContext::run($vertex, function () {
+        $meera = personIn(OrgUnit::create(['type' => 'company', 'name' => 'Vertex Foods']), 'Meera Joshi');
+        grant($meera, 'hr_head');
+
+        return [$meera, anExitWhoseOneStepIs(fn ($step) => $step->heldByTheRoleAnywhere('hr_head'))];
+    });
+
+    // One resolver asked about both. Nothing does this today — every screen makes its own —
+    // but module 06's scheduled pass walks the client companies inside one process, and a
+    // remembered answer is handed back without going near the database, so the wall that
+    // separates the two companies would never be consulted.
+    $resolver = new AssigneeResolver;
+
+    $atMeridian = TenantContext::run($this->meridian, fn () => $resolver->whoCanRaiseIt(
+        $meridiansOwn[1]->steps()->first(), 'exit'
+    ));
+
+    $atVertex = TenantContext::run($vertex, fn () => $resolver->whoCanRaiseIt(
+        $vertexsOwn[1]->steps()->first(), 'exit'
+    ));
+
+    expect($atMeridian->pluck('id')->all())->toBe([$meridiansOwn[0]->getKey()])
+        // Vertex's own person, not Meridian's, and not nobody either — asked second, it is
+        // the one that would come back wrong.
+        ->and($atVertex->pluck('id')->all())->toBe([$vertexsOwn[0]->getKey()]);
+});
+
 /**
  * A live exit whose only step is the one being tested.
  *

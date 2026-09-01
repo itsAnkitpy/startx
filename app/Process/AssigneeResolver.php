@@ -2,6 +2,7 @@
 
 namespace App\Process;
 
+use App\Authorization\PermissionResolver;
 use App\Models\CaseEvent;
 use App\Models\Delegation;
 use App\Models\EmploymentRecord;
@@ -13,6 +14,7 @@ use App\Models\RoleAssignment;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
 use App\Settings\Settings;
+use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -89,6 +91,39 @@ final class AssigneeResolver
      * check on a job row.
      */
     private const LongestReportingLine = 50;
+
+    /**
+     * Answers already worked out while this object has been alive.
+     *
+     * This does not store anything and does not contradict the paragraph above: one of
+     * these objects is made fresh at each entry point and thrown away with the work, so
+     * the longest it remembers anything is a single walk. What it stops is the same
+     * question being asked over and over inside one walk. The navigation is what forced
+     * it — deciding whether to draw the "raise a request" link means asking, of every live
+     * process, who may start it, and a client's processes mostly point at the same handful
+     * of roles. Twenty-one live processes asked the database eighty-five times to draw one
+     * menu link; the questions below are now asked once each per distinct answer.
+     *
+     * **Every key carries the client company**, for the same reason
+     * {@see PermissionResolver} puts it in its own: a remembered
+     * answer is handed back without going near the database, so the wall that keeps one
+     * client's rows away from another is never consulted. Nothing today holds one of these
+     * across two companies — each entry point makes its own — but module 06's scheduled
+     * pass loops over client companies inside one process, and with the company in the key
+     * forgetting is impossible rather than merely unlikely.
+     *
+     * @var array<string, int|null>
+     */
+    private array $roleIds = [];
+
+    /** @var array<string, list<int>> */
+    private array $roleHolders = [];
+
+    /** @var array<string, Collection<int, User>> */
+    private array $peopleWhoCanAct = [];
+
+    /** @var array<string, Collection<int, Delegation>> */
+    private array $coversFor = [];
 
     /**
      * The people who may act on this step right now.
@@ -357,7 +392,11 @@ final class AssigneeResolver
             return;
         }
 
-        yield RoleAssignment::query()->where('role_id', $roleId)->pluck('user_id')->all();
+        yield $this->roleHolders[$this->forThisCompany($roleKey)] ??= RoleAssignment::query()
+            ->where('role_id', $roleId)
+            ->pluck('user_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
     }
 
     /**
@@ -462,11 +501,25 @@ final class AssigneeResolver
         return is_numeric($answer) ? OrgUnit::query()->find((int) $answer) : null;
     }
 
+    /**
+     * A key for something remembered, stamped with the client company in scope.
+     */
+    private function forThisCompany(string $key): string
+    {
+        return (TenantContext::id() ?? '-').'|'.$key;
+    }
+
     private function idOfTheRoleCalled(string $roleKey): ?int
     {
+        $key = $this->forThisCompany($roleKey);
+
+        if (array_key_exists($key, $this->roleIds)) {
+            return $this->roleIds[$key];
+        }
+
         $id = Role::query()->where('key', $roleKey)->value('id');
 
-        return $id === null ? null : (int) $id;
+        return $this->roleIds[$key] = ($id === null ? null : (int) $id);
     }
 
     /**
@@ -492,11 +545,18 @@ final class AssigneeResolver
             return new Collection;
         }
 
-        return User::query()
+        sort($candidateIds);
+
+        $answer = $this->peopleWhoCanAct[$this->forThisCompany(implode(',', $candidateIds).'|'.($subjectId ?? '-'))] ??= User::query()
             ->whereIn('id', $candidateIds)
             ->where('active', true)
             ->orderBy('id')
             ->get();
+
+        // Fresh copies, because a caller writes onto what it gets back — whoever a person
+        // is covering for is hung on the person. Handing out the remembered copies would
+        // carry one process's cover into the next one asked about.
+        return $answer->map(fn (User $person): User => clone $person);
     }
 
     /**
@@ -533,12 +593,21 @@ final class AssigneeResolver
             return $people;
         }
 
-        $covers = Delegation::query()
-            ->whereIn('user_id', $people->modelKeys())
-            ->where('process_key', $processKey)
+        // Every cover these people have running today, whatever it is a cover for, kept
+        // and then narrowed to the one process being asked about. Asked per process it was
+        // one query per process; a person is covered for a handful of processes at most, so
+        // reading all of theirs at once and picking is the same rows and one query.
+        $ids = $people->modelKeys();
+
+        sort($ids);
+
+        $covers = ($this->coversFor[$this->forThisCompany(implode(',', $ids))] ??= Delegation::query()
+            ->whereIn('user_id', $ids)
             ->asOf(CarbonImmutable::now())
             ->orderBy('user_id')
-            ->get();
+            ->get())
+            ->where('process_key', $processKey)
+            ->values();
 
         if ($covers->isEmpty()) {
             return $people;

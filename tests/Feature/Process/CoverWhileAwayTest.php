@@ -8,6 +8,7 @@ use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Process\AssigneeResolver;
 use App\Process\CaseEngine;
 use App\Tenancy\TenantContext;
 
@@ -135,6 +136,39 @@ it('stops delivering the step once the cover’s dates have run out', function (
             ->toThrow(ProcessRefused::class, 'is not yours to act on');
 
         expect((new CaseEngine)->decide($case, 1, 'approved', $rakesh)->outcome)->toBe('approved');
+    });
+});
+
+it('does not carry a cover into another process asked about in the same breath', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = workingAt('Rakesh Menon');
+        $chandni = workingAt('Chandni Verma');
+
+        // Rakesh's exit, which Chandni holds while he is away. And a kit request that is
+        // Chandni's own work, nothing to do with Rakesh.
+        $exit = aProcessHeldBy('exit', 'Exit', $rakesh);
+        $kit = aProcessHeldBy('kit_request', 'Kit request', $chandni);
+
+        Delegation::factory()->covering($rakesh, $chandni)->create(['process_key' => 'exit']);
+
+        // One resolver for both questions, which is how the menu asks them — it looks at
+        // every live process in turn and remembers what it has already worked out.
+        $resolver = new AssigneeResolver;
+
+        $onTheExit = $resolver->whoCanRaiseIt($exit->steps()->first(), 'exit');
+        $onTheKit = $resolver->whoCanRaiseIt($kit->steps()->first(), 'kit_request');
+
+        $coveringOnTheExit = $onTheExit->first(fn (User $person) => $person->is($chandni));
+        $onHerOwnRequest = $onTheKit->first(fn (User $person) => $person->is($chandni));
+
+        // On the exit she is there because she is covering Rakesh, and the queue says so.
+        expect($coveringOnTheExit)->not->toBeNull()
+            ->and($coveringOnTheExit->coveringFor->is($rakesh))->toBeTrue();
+
+        // On her own kit request she is there in her own right, and must not be shown as
+        // covering for Rakesh — that would put his name on an approval she gave herself.
+        expect($onHerOwnRequest)->not->toBeNull()
+            ->and($onHerOwnRequest->relationLoaded('coveringFor'))->toBeFalse();
     });
 });
 

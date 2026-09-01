@@ -16,6 +16,7 @@ use App\Process\AvailableSteps;
 use App\Process\StepForm;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 /*
@@ -127,6 +128,85 @@ it('lets whoever is covering somebody raise what that person raises', function (
             // somebody put in their place.
             ->and(RaiseARequest::whatTheyCanRaise($anjali)->pluck('name')->all())
             ->toBe(['Hiring request']);
+    });
+});
+
+it('asks barely more to draw the menu when a client runs twenty more processes', function () {
+    TenantContext::run($this->meridian, function () {
+        $this->actingAs(theRaiserCalled('anjali'));
+
+        $asked = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            RaiseARequest::canAccess();
+            $questions = count(DB::getQueryLog());
+            DB::disableQueryLog();
+
+            return $questions;
+        };
+
+        $withMeridiansOwn = $asked();
+
+        // Twenty more live processes, every one of them opening with a step held by the
+        // client's HR heads — which is what a real client's processes mostly look like. The
+        // menu is drawn on every screen in the signed-in area, so this is the price of
+        // every page load, not of one page.
+        for ($extra = 0; $extra < 20; $extra++) {
+            $process = ProcessTemplate::factory()->named('extra_'.$extra, 'Extra '.$extra)
+                ->about('none')->create();
+
+            ProcessStep::factory()->of($process)->at(1, 1)->named('Ask')->offering('approved')
+                ->create(['assignee_rule' => ['kind' => 'role_global', 'role' => 'hr_head']]);
+
+            $process->publish();
+        }
+
+        // Named "Extra", so all twenty are looked at before the hiring request Anjali can
+        // actually raise — the worst order there is rather than a flattering one.
+        expect(RaiseARequest::whatTheyCanRaise(theRaiserCalled('anjali'))->pluck('name')->all())
+            ->toBe(['Hiring request']);
+
+        // Who holds a role is asked once and then remembered for the rest of the walk, so
+        // twenty more processes pointing at the same role cost a handful of questions
+        // rather than four each.
+        expect($asked())->toBeLessThanOrEqual($withMeridiansOwn + 4);
+    });
+});
+
+it('stops the menu question at the first thing a person can raise', function () {
+    TenantContext::run($this->meridian, function () {
+        $this->actingAs(theRaiserCalled('anjali'));
+
+        // Named so that Meridian's hiring request, the one Anjali can raise, is reached
+        // first and the twenty behind it never need looking at.
+        for ($extra = 0; $extra < 20; $extra++) {
+            $process = ProcessTemplate::factory()->named('later_'.$extra, 'Zzz '.$extra)
+                ->about('none')->create();
+
+            ProcessStep::factory()->of($process)->at(1, 1)->named('Ask')->offering('approved')
+                ->create(['assignee_rule' => ['kind' => 'role_global', 'role' => 'hr_head']]);
+
+            $process->publish();
+        }
+
+        $asked = function (callable $question): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $question();
+            $questions = count(DB::getQueryLog());
+            DB::disableQueryLog();
+
+            return $questions;
+        };
+
+        // Looked up before either measurement, because a lookup inside one of them would
+        // be counted as part of it and the comparison would flatter whichever side had it.
+        $anjali = theRaiserCalled('anjali');
+
+        // Drawing the link only needs to know there is something. Filling the page needs
+        // the whole list, and costs more — which is the difference being claimed.
+        expect($asked(fn () => RaiseARequest::canAccess()))
+            ->toBeLessThan($asked(fn () => RaiseARequest::whatTheyCanRaise($anjali)));
     });
 });
 

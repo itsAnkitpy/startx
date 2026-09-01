@@ -12,6 +12,7 @@ use App\Process\AssigneeResolver;
 use App\Process\CaseEngine;
 use App\Process\StepForm;
 use BackedEnum;
+use Closure;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
@@ -80,8 +81,8 @@ class RaiseARequest extends Page
      * once and kept for as long as this object lives, which is one press.
      *
      * The navigation asks it separately, because whether the link is drawn at all is
-     * decided before any page exists. That ask is not saved here and is the reason the
-     * plan carries a note about a client with many live processes.
+     * decided before any page exists. That ask stops at the first process the person can
+     * start, so it is a fraction of this one.
      *
      * @var Collection<int, ProcessTemplate>|null
      */
@@ -100,7 +101,12 @@ class RaiseARequest extends Page
     {
         $person = auth()->user();
 
-        return $person instanceof User && static::whatTheyCanRaise($person)->isNotEmpty();
+        // Whether there is one, not which ones there are. This is asked on every screen in
+        // the signed-in area, because the menu is drawn on every screen, and each process
+        // it looks at costs a question to the database — so it stops at the first process
+        // this person can start instead of finishing the list nobody is going to read.
+        return $person instanceof User
+            && static::liveProcesses()->first(static::whoeverCanStartIt($person)) !== null;
     }
 
     /**
@@ -117,33 +123,54 @@ class RaiseARequest extends Page
      */
     public static function whatTheyCanRaise(User $person): Collection
     {
-        $assignees = new AssigneeResolver;
+        return static::liveProcesses()->filter(static::whoeverCanStartIt($person))->values();
+    }
 
+    /**
+     * Every live process a person could conceivably start, before anybody is asked whether
+     * they may start it.
+     *
+     * @return Collection<int, ProcessTemplate>
+     */
+    private static function liveProcesses(): Collection
+    {
         return ProcessTemplate::query()
             ->where('status', ProcessTemplate::Published)
             ->where('subject_kind', '!=', 'employee')
             ->with('steps')
             ->orderBy('name')
-            ->get()
-            ->filter(function (ProcessTemplate $process) use ($assignees, $person): bool {
-                $first = $process->steps->first();
+            ->get();
+    }
 
-                if ($first === null) {
-                    return false;
-                }
+    /**
+     * The test one process is put to for one person, shared by both questions above so
+     * they cannot answer differently — and closing over a single resolver, which is what
+     * lets it recognise the same role twice instead of asking again.
+     *
+     * @return Closure(ProcessTemplate): bool
+     */
+    private static function whoeverCanStartIt(User $person): Closure
+    {
+        $assignees = new AssigneeResolver;
 
-                // A first step that cannot be approved cannot be raised. Raising is
-                // answering that step and approving it, so a step offering only a
-                // rejection or a hold would take the whole form and then refuse every
-                // press — better never offered than offered and impossible.
-                if (! in_array('approved', (array) $first->allowed_outcomes, true)) {
-                    return false;
-                }
+        return function (ProcessTemplate $process) use ($assignees, $person): bool {
+            $first = $process->steps->first();
 
-                return $assignees->whoCanRaiseIt($first, (string) $process->key)
-                    ->contains(fn (User $candidate) => $candidate->is($person));
-            })
-            ->values();
+            if ($first === null) {
+                return false;
+            }
+
+            // A first step that cannot be approved cannot be raised. Raising is answering
+            // that step and approving it, so a step offering only a rejection or a hold
+            // would take the whole form and then refuse every press — better never offered
+            // than offered and impossible.
+            if (! in_array('approved', (array) $first->allowed_outcomes, true)) {
+                return false;
+            }
+
+            return $assignees->whoCanRaiseIt($first, (string) $process->key)
+                ->contains(fn (User $candidate) => $candidate->is($person));
+        };
     }
 
     /**
