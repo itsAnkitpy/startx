@@ -69,12 +69,12 @@ function meridiansBranchCalled(string $name): OrgUnit
 }
 
 /**
- * Give somebody a role carrying exactly these actions over the whole company and nothing
- * else.
+ * Give somebody a role carrying exactly these actions and nothing else, over the whole
+ * company or over one named part of it.
  *
  * @param  list<string>  $actions
  */
-function giveMeridianPersonARoleCarrying(User $person, string $key, array $actions): void
+function giveMeridianPersonARoleCarrying(User $person, string $key, array $actions, ?OrgUnit $over = null): void
 {
     $role = Role::query()->create(['key' => $key, 'name' => $key]);
 
@@ -84,7 +84,7 @@ function giveMeridianPersonARoleCarrying(User $person, string $key, array $actio
 
     $role->assignments()->create([
         'user_id' => $person->getKey(),
-        'org_unit_id' => null,
+        'org_unit_id' => $over?->getKey(),
         'includes_descendants' => false,
     ]);
 
@@ -236,6 +236,36 @@ it('keeps the sign-in switch off the form for somebody who may not switch an acc
             ->assertFormFieldDoesNotExist('active');
 
         Livewire::actingAs(whoIsOnMeridiansPayroll('chandni'))->test(EditUser::class, ['record' => $deepak->getKey()])
+            ->assertFormFieldExists('active');
+    });
+});
+
+it('keeps the sign-in switch off somebody in a branch the switcher does not cover', function () {
+    TenantContext::run($this->meridian, function () {
+        // Two grants that are each ordinary on their own: stopping somebody signing in,
+        // over Shimla; and keeping details up to date, across the whole company. Rohit is
+        // in Pune, so neither grant reaches his sign-in switch. Asking only whether the
+        // switching action was held somewhere let the two combine into one that did.
+        $splitGrants = whoIsOnMeridiansPayroll('anjali');
+        giveMeridianPersonARoleCarrying($splitGrants, 'switches_off_in_shimla', [
+            Permission::DeactivatePerson,
+        ], over: meridiansBranchCalled('Shimla branch'));
+        giveMeridianPersonARoleCarrying($splitGrants, 'keeps_details_everywhere', [
+            Permission::ViewPerson,
+            Permission::UpdatePerson,
+        ]);
+
+        Livewire::actingAs($splitGrants)->test(EditUser::class, [
+            'record' => whoIsOnMeridiansPayroll('rohit')->getKey(),
+        ])
+            ->assertOk()
+            ->assertFormFieldDoesNotExist('active');
+
+        // And it is still on the form for somebody in the branch the grant does name.
+        Livewire::actingAs($splitGrants)->test(EditUser::class, [
+            'record' => whoIsOnMeridiansPayroll('deepak')->getKey(),
+        ])
+            ->assertOk()
             ->assertFormFieldExists('active');
     });
 });
@@ -489,6 +519,48 @@ it('masks a bank number for whoever may read it and says it is withheld to whoev
             // Nor may he add one: entering a number needs being able to check the one
             // already there.
             ->assertActionHidden(TestAction::make('create')->table());
+    });
+});
+
+it('withholds a joiner\'s bank number from a reader who covers one branch, until they have a department', function () {
+    TenantContext::run($this->meridian, function () {
+        // Somebody added but not yet given their joining row, which is the window their
+        // numbers are typed in. With no department on them there is nothing to narrow the
+        // question to, so a reader responsible for one branch was answered "yes, anywhere
+        // at all" and read a joiner nobody had said was theirs.
+        $joiner = User::factory()->create(['first_name' => 'Meera', 'last_name' => 'Pillai']);
+
+        $account = EmployeeStatutoryId::create([
+            'user_id' => $joiner->getKey(),
+            'type' => 'bank_account',
+            'country' => 'IN',
+            'value' => '50100888899990',
+        ]);
+
+        $numbersAsSeenBy = fn (User $reader) => Livewire::actingAs($reader)
+            ->test(StatutoryNumbersRelationManager::class, [
+                'ownerRecord' => $joiner,
+                'pageClass' => EditUser::class,
+            ]);
+
+        $shimlaOnly = whoIsOnMeridiansPayroll('anjali');
+        giveMeridianPersonARoleCarrying($shimlaOnly, 'reads_numbers_in_shimla', [
+            Permission::ViewPerson,
+            Permission::ViewStatutoryId,
+        ], over: meridiansBranchCalled('Shimla branch'));
+
+        $numbersAsSeenBy($shimlaOnly)
+            ->assertOk()
+            ->assertTableColumnStateSet('value', 'On file — not yours to see', $account)
+            ->assertActionHidden(TestAction::make('showTheWholeNumber')->table($account))
+            ->assertActionHidden(TestAction::make('create')->table());
+
+        // Chandni's grant covers the whole company, so a person with no department yet is
+        // still hers to read — which is what keeps a joiner's numbers enterable at all.
+        $numbersAsSeenBy(whoIsOnMeridiansPayroll('chandni'))
+            ->assertOk()
+            ->assertTableColumnStateSet('value', '•••• 9990', $account)
+            ->assertActionExists(TestAction::make('showTheWholeNumber')->table($account));
     });
 });
 

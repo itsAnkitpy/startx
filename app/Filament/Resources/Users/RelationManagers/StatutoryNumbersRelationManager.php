@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\Users\RelationManagers;
 
-use App\Authorization\Permission;
-use App\Authorization\PermissionResolver;
 use App\Models\AadhaarVerification;
 use App\Models\EmployeeStatutoryId;
 use App\Models\User;
@@ -164,11 +162,7 @@ class StatutoryNumbersRelationManager extends RelationManager
         /** @var User $person */
         $person = $this->getOwnerRecord();
 
-        return app(PermissionResolver::class)->allows(
-            $this->actor(),
-            Permission::ViewStatutoryId,
-            $person->lastKnownOrgUnit(),
-        );
+        return EmployeeStatutoryId::mayBeReadBy($this->actor(), $person);
     }
 
     /**

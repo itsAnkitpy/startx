@@ -122,20 +122,39 @@ class UserForm
                         // somebody's details up to date, because it is the one that stops
                         // them working. Hidden means not written, so somebody without it
                         // cannot switch an account off by submitting the form anyway.
+                        //
+                        // Asked about the person in front of us, not about the action in
+                        // general. Somebody who may switch accounts off in one branch and
+                        // may edit details across the whole company holds neither power
+                        // over the other branch's people, and asking the unnarrowed
+                        // question here let those two grants combine into one that stops
+                        // somebody signing in.
                         Toggle::make('active')
                             ->label('Can sign in')
                             ->helperText('Turn this off when somebody leaves. Their record and their history stay exactly as they are.')
                             ->default(true)
-                            ->visible(fn (): bool => self::maySwitchAnAccountOff()),
+                            ->visible(fn (?User $record): bool => self::maySwitchTheirAccountOff($record)),
                     ]),
             ]);
     }
 
-    public static function maySwitchAnAccountOff(): bool
+    /**
+     * Whether the person signed in may stop this person signing in.
+     *
+     * Nobody exists yet on the form that adds somebody, so there is no branch to ask
+     * about and the plain question is the only one there is — the same reasoning the
+     * statutory numbers already use for a record that does not exist yet.
+     */
+    public static function maySwitchTheirAccountOff(?User $subject): bool
     {
         $person = auth()->user();
 
-        return $person instanceof User
-            && app(PermissionResolver::class)->allows($person, Permission::DeactivatePerson);
+        if (! $person instanceof User) {
+            return false;
+        }
+
+        return $subject === null
+            ? app(PermissionResolver::class)->allows($person, Permission::DeactivatePerson)
+            : $person->can('deactivate', $subject);
     }
 }

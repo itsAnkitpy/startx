@@ -70,10 +70,6 @@ class EmployeeStatutoryIdPolicy
      */
     public function delete(User $user, EmployeeStatutoryId $identifier): bool
     {
-        return $this->permissions->allows(
-            $user,
-            Permission::ViewStatutoryId,
-            $identifier->user?->lastKnownOrgUnit(),
-        );
+        return EmployeeStatutoryId::mayBeReadBy($user, $identifier->user);
     }
 }

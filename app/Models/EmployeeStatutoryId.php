@@ -108,21 +108,40 @@ class EmployeeStatutoryId extends Model
      * The identifier as a given reader may see it: the value itself, or a marker saying
      * it is on file and withheld.
      *
-     * The question is narrowed to the part of the structure the person belongs to, so
-     * an HR head responsible for one branch does not read tax numbers across the
-     * company — including after that person leaves, which is when their bank account is
-     * most in demand and was previously readable by anyone holding the permission
-     * anywhere.
+     * Narrowed to the part of the structure the person belongs to by
+     * {@see mayBeReadBy()}, so an HR head responsible for one branch does not read tax
+     * numbers across the company — including after that person leaves, which is when
+     * their bank account is most in demand.
      */
     public function valueFor(User $reader): string
     {
-        $allowed = app(PermissionResolver::class)->allows(
-            $reader,
-            Permission::ViewStatutoryId,
-            $this->user?->lastKnownOrgUnit(),
-        );
+        return self::mayBeReadBy($reader, $this->user) ? (string) $this->value : self::Withheld;
+    }
 
-        return $allowed ? (string) $this->value : self::Withheld;
+    /**
+     * Whether this reader may read the numbers on one person's file.
+     *
+     * The one place that question is answered, because three paths ask it — the value on
+     * a row, the control that adds one, and the one that removes one — and they have to
+     * agree. A reader allowed to see which numbers are on file but not to read them can
+     * otherwise delete what they were just told was not theirs to see.
+     *
+     * **Somebody with no job row yet needs the whole company, not "anywhere at all".**
+     * A joiner has no department until their joining is recorded, and the numbers are
+     * typed during exactly that window. With no department to narrow to, asking the
+     * ordinary question answers yes to anybody holding the action in any branch — so an
+     * HR head responsible for one branch could read a joiner destined for another. The
+     * honest answer while there is nothing to narrow to is that only a grant covering
+     * the whole client company reaches them.
+     */
+    public static function mayBeReadBy(User $reader, ?User $subject): bool
+    {
+        $permissions = app(PermissionResolver::class);
+        $unit = $subject?->lastKnownOrgUnit();
+
+        return $unit === null
+            ? $permissions->reachableUnitIds($reader, Permission::ViewStatutoryId) === null
+            : $permissions->allows($reader, Permission::ViewStatutoryId, $unit);
     }
 
     private function refuseUnknownType(): void
