@@ -186,6 +186,60 @@ class EmploymentRecord extends Model
     }
 
     /**
+     * Record a change to somebody's job: a new row, and the row that was true until now
+     * closed off the day before it starts.
+     *
+     * This is the act the people screen offers, and it is deliberately not an update.
+     * A promotion, a transfer or a change of manager leaves every earlier row exactly as
+     * it was, which is the whole reason this is history rather than columns on the
+     * account — a case closed last March still reads the department that was true last
+     * March.
+     *
+     * Two values are carried forward rather than asked for. The joining date, because
+     * {@see refuseARestartedJoiningDate} refuses a row that restarts it while somebody is
+     * still employed, and a promotion is not a new stint. And the employee number, because
+     * it is the same person; a change may still set a different one by passing it.
+     *
+     * The order inside the transaction matters, the same way it does for a withdrawal:
+     * the open row is closed before the new one is written, because the index allowing one
+     * open row per person counts the old one until it has an end date.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public static function recordAChange(User $person, array $attributes): self
+    {
+        return DB::transaction(function () use ($person, $attributes): self {
+            $current = self::currentFor($person);
+            $startsOn = Carbon::parse($attributes['effective_from']);
+
+            $current?->update([
+                'effective_to' => $startsOn->copy()->subDay()->toDateString(),
+            ]);
+
+            return $person->employmentRecords()->create([
+                ...$attributes,
+                'joining_date' => $current?->joining_date ?? $startsOn,
+                'employee_code' => filled($attributes['employee_code'] ?? null)
+                    ? $attributes['employee_code']
+                    : $current?->employee_code,
+                'effective_to' => null,
+            ]);
+        });
+    }
+
+    /**
+     * The row that is true today, or null for somebody with no job recorded yet and for
+     * somebody whose only row has been withdrawn.
+     *
+     * Read by the screen that records a change, which has to know what it is closing off
+     * and which dates it may refuse before the database does.
+     */
+    public static function currentFor(User $person): ?self
+    {
+        return $person->employmentRecords()->whereNull('effective_to')->first();
+    }
+
+    /**
      * Withdraw a row entered by mistake, which is not the same act as a job change: a
      * job change is a new row, a withdrawal says this row never should have existed.
      *
@@ -388,6 +442,22 @@ class EmploymentRecord extends Model
             throw EmployeeRecordRefused::selfManaged($subjectId);
         }
 
+        if (self::wouldLoopReportingLine($subjectId, $managerId)) {
+            throw EmployeeRecordRefused::reportingLineLoop($subjectId, $managerId);
+        }
+    }
+
+    /**
+     * Does naming this manager put the reporting line back round to the person it starts
+     * from?
+     *
+     * The walk itself, apart from the refusal above, so a form can ask the same question
+     * under its own box before the row is written. Without that, an administrator naming
+     * somebody's own junior as their manager — an ordinary slip, and three clicks away in
+     * the demo — reached the client as an error page.
+     */
+    public static function wouldLoopReportingLine(int $subjectId, int $managerId): bool
+    {
         for ($step = 0; $step < self::MAX_REPORTING_DEPTH; $step++) {
             $above = self::query()
                 ->where('user_id', $managerId)
@@ -395,14 +465,16 @@ class EmploymentRecord extends Model
                 ->value('reports_to_id');
 
             if ($above === null) {
-                return;
+                return false;
             }
 
             if ((int) $above === $subjectId) {
-                throw EmployeeRecordRefused::reportingLineLoop($subjectId, (int) $this->getAttribute('reports_to_id'));
+                return true;
             }
 
             $managerId = (int) $above;
         }
+
+        return false;
     }
 }
