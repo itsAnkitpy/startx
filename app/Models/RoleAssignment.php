@@ -3,8 +3,12 @@
 namespace App\Models;
 
 use App\Authorization\AdministratorFloor;
+use App\Authorization\Permission;
+use App\Authorization\PermissionResolver;
+use App\Policies\RoleAssignmentPolicy;
 use App\Tenancy\BelongsToTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -55,6 +59,36 @@ class RoleAssignment extends Model
                 AdministratorFloor::refuseRemoval($assignment);
             }
         });
+    }
+
+    /**
+     * The grants this person may see: the ones over the parts of the company their own
+     * grant covers, plus every grant covering the whole company — because a question
+     * asked about no part of the company is the question "do they hold this action
+     * anywhere", which is what {@see RoleAssignmentPolicy::view()} answers for one row.
+     *
+     * Here rather than on the screen because two screens ask it: the list of who holds a
+     * role, and the count of holders beside the role's name. A count that disagreed with
+     * the list would tell somebody responsible for one branch that three people hold a
+     * role and then show them one.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $person): void
+    {
+        if (! $person instanceof User) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $covered = app(PermissionResolver::class)->reachableUnitIds($person, Permission::ViewRole);
+
+        if ($covered === null) {
+            return;
+        }
+
+        $query->where(fn (Builder $theirs): Builder => $theirs
+            ->whereIn('org_unit_id', $covered)
+            ->orWhereNull('org_unit_id'));
     }
 
     public function user(): BelongsTo

@@ -28,6 +28,14 @@ use Illuminate\Database\Query\JoinClause;
  * A client newly created and sitting at one administrator is not an error either —
  * that would break setting a client up on their first day. It is a prompt to appoint
  * a second. Only a removal is refused.
+ *
+ * **The two being counted are administrators over the whole client company.** An
+ * administrator for one branch cannot grant a role over the rest of the company, so
+ * two of those are not two people who can put anything back. Counting them was what
+ * let a client hand the administrator role to two people in one branch, drop both
+ * company-wide administrators, and be left unable to grant a role anywhere else
+ * — permanently, since we build no rescue path. Removing a branch-scoped
+ * administrator grant is therefore never refused: losing it locks nobody out.
  */
 class AdministratorFloor
 {
@@ -47,6 +55,17 @@ class AdministratorFloor
             : (int) $assignment->role_id;
 
         if (! self::isAdministratorRole($roleId)) {
+            return;
+        }
+
+        // A grant over one part of the company is not one of the two being kept, so
+        // losing it is not a lockout. Read the value the grant is moving away from, for
+        // the same reason the role is read that way.
+        $unitId = $assignment->isDirty('org_unit_id')
+            ? $assignment->getOriginal('org_unit_id')
+            : $assignment->org_unit_id;
+
+        if ($unitId !== null) {
             return;
         }
 
@@ -80,6 +99,7 @@ class AdministratorFloor
     {
         $holdsAdministrator = RoleAssignment::query()
             ->where('user_id', $user->getKey())
+            ->whereNull('org_unit_id')
             ->whereIn('role_id', self::administratorRoleIds())
             ->exists();
 
@@ -95,7 +115,7 @@ class AdministratorFloor
     }
 
     /**
-     * How many people in the client company in scope would still be administrators,
+     * How many people in the client company in scope administer the whole of it,
      * counting only accounts that can actually sign in.
      */
     public static function count(): int
@@ -115,6 +135,7 @@ class AdministratorFloor
                     ->on('users.tenant_id', '=', 'role_assignments.tenant_id');
             })
             ->where('roles.key', Role::AdministratorKey)
+            ->whereNull('role_assignments.org_unit_id')
             ->where('users.active', true);
 
         if ($exceptAssignmentId !== null) {
@@ -125,14 +146,15 @@ class AdministratorFloor
             $query->where('role_assignments.user_id', '!=', $exceptUserId);
         }
 
-        // One person may hold the administrator role over two different units and is
-        // still one administrator.
+        // People, not grants. The database already holds one company-wide grant per
+        // person per role, so this is belt rather than braces.
         return $query->distinct()->count('role_assignments.user_id');
     }
 
     /**
      * Whether handing a grant to this account would add an administrator the client did
-     * not already have.
+     * not already have. Somebody administering one branch counts as new here, because
+     * the grant being handed over covers the whole company.
      */
     private static function wouldBeANewAdministrator(int $userId): bool
     {
@@ -140,6 +162,7 @@ class AdministratorFloor
 
         return $canSignIn && ! RoleAssignment::query()
             ->where('user_id', $userId)
+            ->whereNull('org_unit_id')
             ->whereIn('role_id', self::administratorRoleIds())
             ->exists();
     }

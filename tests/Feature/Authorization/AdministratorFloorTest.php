@@ -130,17 +130,65 @@ it('refuses to delete the account of an administrator when only one would remain
     });
 })->throws(TooFewAdministrators::class);
 
-it('counts one person administering two branches as one administrator', function () {
+it('counts one person holding the administrator role twice as one administrator', function () {
     TenantContext::run($this->meridian, function () {
         $role = StarterRoles::seed()[Role::AdministratorKey];
         $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
-        $retail = OrgUnit::create(['type' => 'business_line', 'name' => 'Retail Fulfilment']);
 
         $anjali = User::factory()->named('Anjali Rao')->create();
+        $anjali->roleAssignments()->create(['role_id' => $role->getKey()]);
         $anjali->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $freight->getKey()]);
-        $anjali->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $retail->getKey()]);
 
         expect(AdministratorFloor::count())->toBe(1);
+    });
+});
+
+it('does not count somebody who administers one branch as one of the two', function () {
+    TenantContext::run($this->meridian, function () {
+        $role = StarterRoles::seed()[Role::AdministratorKey];
+        $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
+
+        User::factory()->named('Deepak Iyer')->create()
+            ->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $freight->getKey()]);
+
+        // Two of these are not two people who can put anything back: an administrator for
+        // one branch cannot grant a role over the rest of the company.
+        expect(AdministratorFloor::count())->toBe(0);
+    });
+});
+
+it('refuses to remove a company-wide administrator when branch administrators are all that would be left', function () {
+    TenantContext::run($this->meridian, function () {
+        $role = StarterRoles::seed()[Role::AdministratorKey];
+        $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
+
+        $grants = appointAdministrators(2);
+
+        User::factory()->named('Deepak Iyer')->create()
+            ->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $freight->getKey()]);
+
+        // The whole lockout this rule exists to prevent: a client hands the administrator
+        // role to people in one branch, drops the administrators covering everything, and
+        // is left unable to grant a role anywhere else — for good.
+        $grants[0]->delete();
+    });
+})->throws(TooFewAdministrators::class);
+
+it('lets a branch administrator go without asking about the floor', function () {
+    TenantContext::run($this->meridian, function () {
+        $role = StarterRoles::seed()[Role::AdministratorKey];
+        $freight = OrgUnit::create(['type' => 'business_line', 'name' => 'Freight']);
+
+        // Only one administrator covers the whole company, which is below the floor
+        // already. Taking a branch administrator away still locks nobody out.
+        appointAdministrators(1);
+
+        $branch = User::factory()->named('Deepak Iyer')->create()
+            ->roleAssignments()->create(['role_id' => $role->getKey(), 'org_unit_id' => $freight->getKey()]);
+
+        $branch->delete();
+
+        expect(RoleAssignment::query()->whereKey($branch->getKey())->exists())->toBeFalse();
     });
 });
 

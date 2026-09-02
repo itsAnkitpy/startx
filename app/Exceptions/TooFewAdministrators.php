@@ -16,18 +16,18 @@ class TooFewAdministrators extends RuntimeException
 {
     public static function onRemoval(int $remaining): self
     {
-        return new self(self::sentence($remaining).' Appoint another administrator first, then remove this one.');
+        return new self(self::sentence($remaining).' Appoint another administrator over the whole company first, then remove this one.');
     }
 
     public static function onAccountDeletion(int $remaining): self
     {
-        return new self(self::sentence($remaining).' Appoint another administrator first. Note that an account is normally deactivated rather than deleted, which keeps the person\'s history readable.');
+        return new self(self::sentence($remaining).' Appoint another administrator over the whole company first. Note that an account is normally deactivated rather than deleted, which keeps the person\'s history readable.');
     }
 
     private static function sentence(int $remaining): string
     {
         $floor = AdministratorFloor::Minimum;
 
-        return "This would leave the company with {$remaining} administrator(s), and it must keep at least {$floor}.";
+        return "This would leave the company with {$remaining} administrator(s) over the whole of it, and it must keep at least {$floor}.";
     }
 }

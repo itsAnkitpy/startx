@@ -113,6 +113,19 @@ class PermissionResolver
     }
 
     /**
+     * Whether this person may perform the action over the whole client company rather
+     * than over some part of it.
+     *
+     * Written here so that no caller has to know which of the two answers from
+     * {@see reachableUnitIds()} means everywhere — the one place that has already been
+     * got wrong is the one worth not repeating.
+     */
+    public function allowsEverywhere(User $user, string $permission): bool
+    {
+        return $this->reachableUnitIds($user, $permission) === null;
+    }
+
+    /**
      * Forget everything remembered so far. Needed only where a grant is changed and the
      * same request then asks again — a test, or a screen that grants a role and
      * immediately re-renders.

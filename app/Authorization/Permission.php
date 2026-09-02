@@ -79,6 +79,112 @@ final class Permission
     public const ManageWorkingCalendar = 'manage_working_calendar';
 
     /**
+     * The same actions, in the words a client reads on the roles screen, grouped by the
+     * thing each one is about.
+     *
+     * Deliberately a method rather than constants: {@see all()} reads this class's
+     * constants by reflection, so anything added there becomes a permission name, and an
+     * array of labels sitting among them would be handed to the roles screen as an action
+     * to grant. A test checks that every name in {@see all()} appears here, so a name
+     * added by a later module without words is a failing test rather than a blank line on
+     * a client's screen.
+     *
+     * The words are here rather than in the screen because this is the file somebody edits
+     * when they add a name, and the two belong within a few lines of each other.
+     *
+     * @return list<array{key: string, heading: string, description: string, actions: array<string, array{label: string, description: string}>}>
+     */
+    public static function describedForAClient(): array
+    {
+        return [
+            [
+                'key' => 'structure',
+                'heading' => 'Departments and branches',
+                'description' => 'Your company structure — the screen that lists every department and branch.',
+                'actions' => [
+                    self::ViewOrgUnit => [
+                        'label' => 'See the departments and branches',
+                        'description' => 'Somebody sees only the parts of the company their own grant covers.',
+                    ],
+                    self::CreateOrgUnit => [
+                        'label' => 'Add a department or branch',
+                        'description' => 'Only under a part of the company they already cover.',
+                    ],
+                    self::UpdateOrgUnit => [
+                        'label' => 'Rename one, move it, or archive it',
+                        'description' => 'Archiving stops it being offered on new records and leaves everything already recorded against it alone.',
+                    ],
+                    self::DeleteOrgUnit => [
+                        'label' => 'Delete one outright',
+                        'description' => 'Nothing on the screens does this today — a department that is finished with is archived instead, because deleting one would take every job, grant and case that named it with it. Ticking this changes nothing yet.',
+                    ],
+                ],
+            ],
+            [
+                'key' => 'people',
+                'heading' => 'People and their records',
+                'description' => 'The people screen, the jobs each person has held, and the numbers on file for them.',
+                'actions' => [
+                    self::ViewPerson => [
+                        'label' => 'See the people at the company',
+                        'description' => 'Only the people in the parts of the company their own grant covers.',
+                    ],
+                    self::CreatePerson => [
+                        'label' => 'Add somebody',
+                        'description' => 'A joiner, with the details they sign in with.',
+                    ],
+                    self::UpdatePerson => [
+                        'label' => "Change somebody's details, and record a change to their job",
+                        'description' => 'A promotion or a move adds a dated row. Nothing already recorded is rewritten.',
+                    ],
+                    self::DeactivatePerson => [
+                        'label' => 'Stop somebody signing in',
+                        'description' => 'For a leaver. Their record and their whole history stay exactly as they are.',
+                    ],
+                    self::ViewStatutoryId => [
+                        'label' => "Read somebody's tax and bank numbers",
+                        'description' => 'Kept apart from seeing their record on purpose: these are the numbers your company is legally exposed by. Tick it for whoever actually hands details to payroll. Without it the numbers read as withheld rather than as empty.',
+                    ],
+                ],
+            ],
+            [
+                'key' => 'lists',
+                'heading' => "Your company's own lists",
+                'description' => 'The short lists you keep beside your structure, and the calendar your deadlines are counted against.',
+                'actions' => [
+                    self::ManageReferenceList => [
+                        'label' => 'Keep the designations and offices up to date',
+                        'description' => 'Adding, renaming and retiring the jobs your people hold and the offices they work from. Reading them needs nothing — they are already shown to anybody filling in a form that picks one.',
+                    ],
+                    self::ManageWorkingCalendar => [
+                        'label' => "Set an office's working calendar",
+                        'description' => 'The weekdays an office does not work and the dates it is closed. These are the two fields whose mistakes move a legal deadline.',
+                    ],
+                ],
+            ],
+            [
+                'key' => 'control',
+                'heading' => 'Roles and company settings',
+                'description' => 'Who can do what, and the switches every case is decided against.',
+                'actions' => [
+                    self::ViewRole => [
+                        'label' => 'See the list of your roles',
+                        'description' => 'The names, what each is for, how many actions each carries and how many people hold it. Opening a role to read what it can do, or to see who holds it, needs the one below as well.',
+                    ],
+                    self::ManageRole => [
+                        'label' => 'Change what a role can do, and grant it or take it away',
+                        'description' => 'The strongest one here: somebody with this can give themselves anything else on this screen, over any part of the company they cover. Granted over one branch it hands roles out in that branch only — changing what a role can do needs it over your whole company, because a role\'s actions apply wherever anybody holds it. Your Administrator role always keeps this one and the one above it, so nobody can lock your company out of its own roles.',
+                    ],
+                    self::ManageSettings => [
+                        'label' => 'Change the company settings',
+                        'description' => 'The salary above which a hire needs the director, and who picks up a step nobody holds. These change what happens on every case from now on.',
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * @return list<string>
      */
     public static function all(): array

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Authorization\Permission;
 use App\Exceptions\SystemRoleProtected;
 use App\Tenancy\BelongsToTenant;
 use Database\Factories\RoleFactory;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * A role belonging to one client company. Meridian and Vertex can both hold a role
@@ -85,6 +88,66 @@ class Role extends Model
     public function assignments(): HasMany
     {
         return $this->hasMany(RoleAssignment::class);
+    }
+
+    /**
+     * A permanent internal name for a role a client has just named, unique within their
+     * company.
+     *
+     * The client never sees it and never types it. It exists because the database holds
+     * one name per company for it, and because two roles a client happens to name alike
+     * would otherwise collide on a name nobody ever chose — an error page about a field
+     * that is not on the form.
+     */
+    public static function keyFor(string $name): string
+    {
+        // Cut to fit the column with room for the number below. A name of 255 accented
+        // letters slugs longer than it started, because each one is spelled out, and the
+        // database refusing it is exactly the error page this method exists to avoid.
+        $stem = Str::limit(Str::slug($name, '_'), 240, '') ?: 'role';
+        $key = $stem;
+        $next = 2;
+
+        while (static::query()->where('key', $key)->exists()) {
+            $key = $stem.'_'.$next++;
+        }
+
+        return $key;
+    }
+
+    /**
+     * Make this role's actions exactly these, adding what is missing and removing what is
+     * no longer ticked.
+     *
+     * **The Administrator role always keeps seeing roles and managing them.** Unticking
+     * either would take the roles screen away from the only role that can put it back, and
+     * we deliberately build no platform rescue path for a locked-out client — the same
+     * reasoning that gives a client a two-administrator floor. Forced here rather than on
+     * the screen so that every way of writing a role's actions is covered.
+     *
+     * @param  list<string>  $names
+     */
+    public function keepOnlyTheseActions(array $names): void
+    {
+        $names = array_values(array_unique(array_filter(
+            $names,
+            fn (mixed $name): bool => is_string($name) && Permission::exists($name),
+        )));
+
+        if ($this->key === self::AdministratorKey) {
+            $names = array_values(array_unique([...$names, Permission::ViewRole, Permission::ManageRole]));
+        }
+
+        // Both halves together: the unticked ones go and the ticked ones arrive, or
+        // neither happens. Otherwise a failure between the two leaves the role holding
+        // less than either list, and everybody holding it quietly loses what it could do.
+        DB::transaction(function () use ($names): void {
+            $this->permissions()->whereNotIn('permission', $names)->delete();
+
+            foreach ($names as $name) {
+                $this->permissions()->firstOrCreate(['permission' => $name]);
+            }
+        });
     }
 
     /**
