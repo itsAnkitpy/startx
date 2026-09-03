@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Authorization\StarterRoles;
+use App\Models\Delegation;
 use App\Models\Designation;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
@@ -73,7 +74,35 @@ class MeridianSeeder extends Seeder
             $this->casesAlreadyRunning($exit, $people);
             $this->theExitBuiltWithTheMistake($people);
             $this->hiringRequestsWaitingOnRakesh($this->hiringRequestProcess(), $people, $units);
+            $this->priyaCoveringRakeshWhileHeIsAway($people);
         });
+    }
+
+    /**
+     * Rakesh is away for a fortnight and Priya holds his hiring approvals while he is.
+     *
+     * The one cover the demo ships, and it is set on the hiring request rather than on
+     * exits deliberately: Priya already holds HR head over Shimla, so Rakesh's exits reach
+     * her on her own account and a cover over them would change nothing anybody could
+     * watch. The two hiring requests waiting on Rakesh reach him alone, through a role
+     * only he holds — so with this row in place they appear in Priya's queue marked as
+     * covering for him, and the day the dates run out they leave it again with nothing
+     * having been run.
+     *
+     * The fortnight straddles today rather than sitting on fixed dates, so the cover is
+     * live whenever the demo is rebuilt.
+     *
+     * @param  array<string, User>  $people
+     */
+    private function priyaCoveringRakeshWhileHeIsAway(array $people): void
+    {
+        Delegation::query()->create([
+            'user_id' => $people['rakesh']->getKey(),
+            'delegate_id' => $people['priya']->getKey(),
+            'process_key' => 'hiring_request',
+            'effective_from' => now()->subDays(3)->toDateString(),
+            'effective_to' => now()->addDays(10)->toDateString(),
+        ]);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Authorization;
 
 use App\Models\Role;
+use App\Policies\DelegationPolicy;
 
 /**
  * Every action a person can be granted. Constants rather than rows, because a name
@@ -77,6 +78,18 @@ final class Permission
      * want them in fewer hands than the office's name and address.
      */
     public const ManageWorkingCalendar = 'manage_working_calendar';
+
+    /**
+     * Setting who holds somebody's approvals while they are away.
+     *
+     * A cover names two people and no part of the company, so unlike every other action
+     * here there is nothing for a grant over one branch to narrow it down to — and
+     * handing one person's approvals to another is exactly the act that must not be
+     * reachable from a corner of the company. {@see DelegationPolicy} asks
+     * for it over the whole company for that reason, the same way changing what a role
+     * can do does.
+     */
+    public const ManageCover = 'manage_cover';
 
     /**
      * The same actions, in the words a client reads on the roles screen, grouped by the
@@ -164,8 +177,8 @@ final class Permission
             ],
             [
                 'key' => 'control',
-                'heading' => 'Roles and company settings',
-                'description' => 'Who can do what, and the switches every case is decided against.',
+                'heading' => 'Roles, cover and company settings',
+                'description' => 'Who can do what, who stands in when somebody is away, and the switches every case is decided against.',
                 'actions' => [
                     self::ViewRole => [
                         'label' => 'See the list of your roles',
@@ -174,6 +187,10 @@ final class Permission
                     self::ManageRole => [
                         'label' => 'Change what a role can do, and grant it or take it away',
                         'description' => 'The strongest one here: somebody with this can give themselves anything else on this screen, over any part of the company they cover. Granted over one branch it hands roles out in that branch only — changing what a role can do needs it over your whole company, because a role\'s actions apply wherever anybody holds it. Your Administrator role always keeps this one and the one above it, so nobody can lock your company out of its own roles.',
+                    ],
+                    self::ManageCover => [
+                        'label' => 'Set who covers somebody while they are away',
+                        'description' => 'Naming a stand-in hands one person\'s approvals to another for a fortnight, so this one only counts when it covers your whole company — a grant over a single branch does not give it. Anything the person away has already opened stays with them.',
                     ],
                     self::ManageSettings => [
                         'label' => 'Change the company settings',

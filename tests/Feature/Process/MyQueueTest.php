@@ -106,9 +106,18 @@ it('shows each person only the steps that are theirs', function () {
                 'Line-of-business approval — Hiring request',
             ]);
 
-        // Priya shares that role over the same branch, so she sees the same two.
+        // Priya shares that role over the same branch, so she sees the same two — and both
+        // hiring approvals as well, which are not hers at all: the demo seeds Rakesh away
+        // for a fortnight with Priya holding his hiring approvals, and a cover adds her to
+        // the people a step belongs to without taking him off it. Remove that cover and
+        // the last two lines go.
         expect(waitingOnThem(atMeridianCalled('priya')))
-            ->toBe(['HR clearance — Anjali Rao', 'HR clearance — Deepak Iyer']);
+            ->toBe([
+                'HR clearance — Anjali Rao',
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+                'Line-of-business approval — Hiring request',
+            ]);
 
         // Nobody holds HR head over Pune, so Rohit's clearance falls to the stand-in the
         // client named. Anjali's is there for a different reason — it is five days past a
@@ -145,7 +154,13 @@ it('takes a shared step out of the other person\'s list once somebody picks it u
                 'Line-of-business approval — Hiring request',
                 'Line-of-business approval — Hiring request',
             ])
-            ->and(waitingOnThem($priya))->toBe(['HR clearance — Deepak Iyer']);
+            // The two hiring approvals stay with Priya throughout, because she is covering
+            // Rakesh on them rather than sharing them with him.
+            ->and(waitingOnThem($priya))->toBe([
+                'HR clearance — Deepak Iyer',
+                'Line-of-business approval — Hiring request',
+                'Line-of-business approval — Hiring request',
+            ]);
     });
 });
 

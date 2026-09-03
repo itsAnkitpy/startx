@@ -92,3 +92,73 @@ it('runs twice without complaining', function () {
         expect($administrator->permissions()->whereIn('permission', $this->newActions)->count())->toBe(2);
     });
 });
+
+/*
+| And the same cost paid a third time, by module 05.2's step 6.
+|
+| Its own migration is separate because it ships with the cover screen rather than with the
+| designations and offices screens, and because it takes the action back off only the
+| Administrator roles it put it on — the migration above sweeps every role that holds
+| either of its two, which was noted at the time as worth not repeating.
+*/
+
+/** Run the cover migration the way it runs on a real database: no company in scope. */
+function grantSettingCoverToEveryAdministrator(): void
+{
+    $migration = require database_path(
+        'migrations/2026_09_03_100000_grant_setting_cover_to_existing_administrators.php'
+    );
+
+    $migration->up();
+}
+
+it('puts setting cover on an administrator role that predates it', function () {
+    $chandni = TenantContext::run($this->meridian, function () {
+        $administrator = Role::query()->where('key', Role::AdministratorKey)->sole();
+
+        // Wind Meridian back to how it was set up before the cover screen existed.
+        $administrator->permissions()->where('permission', Permission::ManageCover)->delete();
+
+        return User::query()->where('work_email', 'chandni@meridian.test')->sole();
+    });
+
+    $resolver = app(PermissionResolver::class);
+
+    TenantContext::run($this->meridian, function () use ($resolver, $chandni) {
+        expect($resolver->allows($chandni, Permission::ManageCover))->toBeFalse();
+    });
+
+    grantSettingCoverToEveryAdministrator();
+
+    $resolver->forget();
+
+    TenantContext::run($this->meridian, function () use ($resolver, $chandni) {
+        // Over the whole company, which is what the cover screen asks for.
+        expect($resolver->allowsEverywhere($chandni, Permission::ManageCover))->toBeTrue();
+    });
+});
+
+it('leaves a role a client ticked it onto alone when it is rolled back', function () {
+    $hrHead = TenantContext::run($this->meridian, function () {
+        $role = Role::query()->where('key', 'hr_head')->sole();
+
+        // A client who decided their own HR head should set cover too.
+        $role->permissions()->create(['permission' => Permission::ManageCover]);
+
+        return $role;
+    });
+
+    $migration = require database_path(
+        'migrations/2026_09_03_100000_grant_setting_cover_to_existing_administrators.php'
+    );
+
+    $migration->down();
+
+    TenantContext::run($this->meridian, function () use ($hrHead) {
+        expect($hrHead->permissions()->where('permission', Permission::ManageCover)->exists())->toBeTrue();
+
+        $administrator = Role::query()->where('key', Role::AdministratorKey)->sole();
+
+        expect($administrator->permissions()->where('permission', Permission::ManageCover)->exists())->toBeFalse();
+    });
+});

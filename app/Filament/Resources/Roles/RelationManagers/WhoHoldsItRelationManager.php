@@ -50,7 +50,7 @@ class WhoHoldsItRelationManager extends RelationManager
             ->components([
                 Select::make('user_id')
                     ->label('Who')
-                    ->options(fn (): array => $this->everybodyHere())
+                    ->options(fn (): array => User::everybodyHere())
                     ->required()
                     ->searchable()
                     ->rule(fn (Get $get): Closure => $this->notHeldOverTheSamePartAlready($get))
@@ -260,27 +260,6 @@ class WhoHoldsItRelationManager extends RelationManager
                 $fail($named.' already holds this role over '.$over.'. Choose a different part of the company, or somebody else.');
             }
         };
-    }
-
-    /**
-     * Everybody at this client company who can still sign in, by their whole name.
-     *
-     * Not narrowed to the granter's own part of the company, deliberately: the grant's
-     * reach is what the permission boundary is about, and somebody sitting in Pune can
-     * perfectly well be given a role that covers Shimla. This is the same answer the
-     * "Reports to" box on a person's job gives, and it carries the same known cost — a
-     * branch HR head reads every name in the company here.
-     *
-     * @return array<int, string>
-     */
-    private function everybodyHere(): array
-    {
-        return User::query()
-            ->where('active', true)
-            ->orderBy('first_name')
-            ->get()
-            ->mapWithKeys(fn (User $person): array => [$person->getKey() => $person->name])
-            ->all();
     }
 
     private function roleBeingKept(): Role

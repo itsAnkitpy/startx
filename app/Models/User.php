@@ -95,6 +95,33 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Everybody at this client company who can still sign in, ready for a picker.
+     *
+     * Assembled here rather than in a screen because the full name is not a column — it
+     * is put together from three of them — so a picker cannot be filled from a
+     * relationship the way every other one in the product is. Two screens now ask the
+     * same question: who a role is granted to, and who is away or covering.
+     *
+     * Not narrowed to any part of the company, deliberately and in both places. Somebody
+     * sitting in Pune can perfectly well hold a role covering Shimla, or cover a Shimla
+     * manager's approvals for a fortnight, so the part of the company somebody sits in is
+     * not what either question is about. It carries the same known cost the "Reports to"
+     * box on a person's job carries: somebody responsible for one branch reads every name
+     * in the company here. Revisit when a client has thousands of staff, not before.
+     *
+     * @return array<int, string>
+     */
+    public static function everybodyHere(): array
+    {
+        return static::query()
+            ->where('active', true)
+            ->orderBy('first_name')
+            ->get()
+            ->mapWithKeys(fn (self $person): array => [$person->getKey() => $person->name])
+            ->all();
+    }
+
+    /**
      * Every job this person has held here, newest first. A promotion, a transfer or a
      * rehire is a row in this list.
      */

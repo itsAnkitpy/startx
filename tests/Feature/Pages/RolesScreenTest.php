@@ -195,7 +195,7 @@ it('writes the ticked actions onto the role and takes the unticked ones off', fu
             ->assertSee('Departments and branches')
             ->assertSee('People and their records')
             ->assertSee("Your company's own lists")
-            ->assertSee('Roles and company settings')
+            ->assertSee('Roles, cover and company settings')
             ->fillForm([
                 'actions.structure' => [],
                 'actions.people' => [Permission::ViewPerson, Permission::UpdatePerson],
