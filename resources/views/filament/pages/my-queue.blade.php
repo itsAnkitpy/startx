@@ -10,6 +10,7 @@
     @php($heldByNobody = $this->heldByNobody($queue))
     @php($byEscalation = $this->cameByEscalation($queue))
     @php($alreadySaid = $this->whatWasSaidAbout($queue))
+    @php($coveringFor = $this->coveringSomebodyOn($queue))
 
     @if ($queue->isEmpty())
         <x-filament::section>
@@ -28,6 +29,7 @@
                 @php($mine = $waiting->attempt?->assignee_id === auth()->id())
                 @php($nobodyHolds = in_array($case->getKey().':'.$step->sequence, $heldByNobody, true))
                 @php($escalated = in_array($case->getKey().':'.$step->sequence, $byEscalation, true))
+                @php($awayPerson = $coveringFor[$case->getKey().':'.$step->sequence] ?? null)
                 @php($onHold = $waiting->attempt?->outcome === 'held')
                 @php($whatWasSaid = $alreadySaid[$case->getKey().':'.$step->sequence] ?? null)
 
@@ -79,6 +81,19 @@
                                     This came to you because it is past its deadline. It is still open to
                                     the people it belonged to, and it stays theirs — you have been added,
                                     not handed it.
+                                </p>
+                            @endif
+
+                            {{-- Marked for the same reason as the two above: a card that
+                                 arrived because you are standing in for a colleague looks
+                                 exactly like your own work, and this is the one of the
+                                 three where somebody else's decision is being made. --}}
+                            @if ($awayPerson)
+                                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
+                                    This is {{ $awayPerson }}'s to decide. You have it because you are
+                                    covering for {{ $awayPerson }} while they are away, and whatever you
+                                    answer is recorded in both names. It stops reaching you when the cover
+                                    ends.
                                 </p>
                             @endif
 

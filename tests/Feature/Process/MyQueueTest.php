@@ -224,6 +224,31 @@ it('loads for somebody with nothing waiting on them', function () {
     });
 });
 
+it('says on the card whose approval it is when somebody is covering', function () {
+    TenantContext::run($this->meridian, function () {
+        // The demo seeds Rakesh away for a fortnight with Priya holding his hiring
+        // approvals. Both of them look exactly like her own work on the card, and
+        // approving one believing it was hers is the decision nobody can unpick.
+        Livewire::actingAs(atMeridianCalled('priya'))->test(MyQueue::class)
+            ->assertOk()
+            // Without the apostrophe: Livewire escapes what it is given and the words
+            // sitting in the template are not escaped, so the two never match on one.
+            ->assertSee('This is Rakesh Menon')
+            ->assertSee('covering for Rakesh Menon while they are away');
+    });
+});
+
+it('leaves a card unmarked when the step is genuinely that person\'s own', function () {
+    TenantContext::run($this->meridian, function () {
+        // Rakesh sees the same two hiring approvals, because a cover adds Priya without
+        // taking him off them. They are his, so nothing on his cards says otherwise.
+        Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
+            ->assertOk()
+            ->assertSee('Line-of-business approval')
+            ->assertDontSee('covering for');
+    });
+});
+
 it('marks a step that has blown its deadline', function () {
     TenantContext::run($this->meridian, function () {
         // Anjali's exit was opened five days ago against a two-day target, so its

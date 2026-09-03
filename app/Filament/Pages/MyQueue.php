@@ -266,6 +266,48 @@ class MyQueue extends Page
     }
 
     /**
+     * Which of these are somebody else's approvals, reached only because this person is
+     * covering for them while they are away — and whose.
+     *
+     * The same reasoning as the two markers above, and it is the reason a cover is worth
+     * recording at all. Priya holding Rakesh's hiring approvals for a fortnight sees two
+     * cards that look exactly like her own work, and approving one believing it was hers
+     * is the decision nobody can unpick afterwards. The card says whose it is and why she
+     * has it.
+     *
+     * Read from the resolver's own answer rather than from the cover rows, so the screen
+     * and the line the engine writes into the case's history when she answers cannot
+     * disagree about who she was standing in for.
+     *
+     * One resolver across the whole list, so the covers running today are read once
+     * however many cards there are.
+     *
+     * @param  Collection<int, AvailableStep>  $queue
+     * @return array<string, string>
+     */
+    public function coveringSomebodyOn(Collection $queue): array
+    {
+        $resolver = new AssigneeResolver;
+        $person = (int) $this->person()->getKey();
+        $covering = [];
+
+        foreach ($queue as $waiting) {
+            $asResolved = $resolver->resolve($waiting->case, $waiting->step, $waiting->escalationOwed)
+                ->first(fn (User $candidate) => (int) $candidate->getKey() === $person);
+
+            $away = $asResolved?->relationLoaded('coveringFor') === true
+                ? $asResolved->getRelation('coveringFor')
+                : null;
+
+            if ($away instanceof User) {
+                $covering[$waiting->case->getKey().':'.$waiting->step->sequence] = $away->name;
+            }
+        }
+
+        return $covering;
+    }
+
+    /**
      * Which of these only reached this person because the step ran past its deadline.
      *
      * The difference is the whole rule underneath it: an overdue step widens to whoever it
