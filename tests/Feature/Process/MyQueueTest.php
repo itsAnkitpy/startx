@@ -508,3 +508,117 @@ it('holds a clearance with a reason, and drops a figure the later answer hides',
             ->and(array_keys($held->fresh()->payload))->toBe(['imprest_card_returned']);
     });
 });
+
+/*
+| Narrowing the list, and the order it comes in.
+|
+| Four cards is what Ankit saw when he asked for this: two exit clearances and two hiring
+| approvals in one scroll with nothing to tell them apart by. These three check that the
+| list can now be cut down to one kind of work, cut down to one state, and that whatever
+| has blown its deadline is read first.
+*/
+
+it('narrows the queue to one kind of work', function () {
+    TenantContext::run($this->meridian, function () {
+        $hiringRequests = ProcessCase::query()
+            ->whereRelation('template', 'key', 'hiring_request')
+            ->pluck('id')
+            ->sort()
+            ->values()
+            ->all();
+
+        $screen = Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class);
+
+        // The mixture Ankit was shown: two exits and two hiring approvals together.
+        expect($screen->instance()->getTableRecords())->toHaveCount(4);
+
+        $screen->filterTable('process', 'hiring_request');
+
+        // Named by the case each card is for rather than by the step's name, because both
+        // hiring requests sit at the same approval and a check on that name alone would
+        // pass on the wrong one.
+        expect(
+            collect($screen->instance()->getTableRecords()->keys())
+                ->map(fn (string $card): int => (int) explode(':', $card)[0])
+                ->sort()
+                ->values()
+                ->all()
+        )->toBe($hiringRequests);
+
+        // And the exit clearances have actually gone off the screen, not merely out of
+        // the list behind it. On the clearance's own name rather than on whose exit it is:
+        // a hiring request asks who the new person will report to, so every colleague's
+        // name is on the page whichever cards are showing.
+        $screen->assertSee('Line-of-business approval')->assertDontSee('HR clearance');
+    });
+});
+
+it('narrows the queue to what is past its deadline', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+
+        $screen = Livewire::actingAs(atMeridianCalled('chandni'))->test(MyQueue::class);
+
+        // Three clearances, one of which blew a two-working-day deadline five days ago and
+        // reached Chandni for that reason alone.
+        expect($screen->instance()->getTableRecords())->toHaveCount(3);
+
+        $screen->filterTable('state', 'late');
+
+        expect($screen->instance()->getTableRecords()->keys()->all())
+            ->toBe([$anjalisExit->getKey().':1']);
+
+        $screen->assertSee('Anjali Rao')->assertDontSee('Rohit Menon');
+    });
+});
+
+it('reads the ones past their deadline first, most overdue at the top', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+        $deepaksExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole();
+
+        // Deepak's clearance is second in the list as the demo seeds it and is not late.
+        // Opened two months ago it is the worse of the two breaches, so it has to lead —
+        // which is a different answer from the order the list arrives in.
+        $deepaksExit->update(['opened_at' => now()->subDays(60)]);
+
+        $shown = Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
+            ->instance()->getTableRecords()->keys()->all();
+
+        expect($shown[0])->toBe($deepaksExit->getKey().':1')
+            ->and($shown[1])->toBe($anjalisExit->getKey().':1');
+
+        // And the two hiring approvals, which run no clock at all because a hiring request
+        // is about nobody and there is no office calendar to count one against, sit at the
+        // back rather than in front of a breach on a missing date.
+        expect(
+            collect($shown)->skip(2)
+                ->map(fn (string $card): int => (int) explode(':', $card)[0])
+                ->sort()
+                ->values()
+                ->all()
+        )->toBe(
+            ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')
+                ->pluck('id')->sort()->values()->all()
+        );
+    });
+});
+
+it('says a filter is hiding things rather than that nothing is waiting', function () {
+    TenantContext::run($this->meridian, function () {
+        $screen = Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class);
+
+        // Four things are waiting on Rakesh and not one of them is on hold.
+        expect($screen->instance()->getTableRecords())->toHaveCount(4);
+
+        $screen->filterTable('state', 'on_hold');
+
+        expect($screen->instance()->getTableRecords())->toHaveCount(0);
+
+        // Telling him nothing is waiting on him is untrue while four things are, and it
+        // is the sentence that sends somebody away from their own queue believing it is
+        // empty. The list is empty because of what he asked for, and it has to say so.
+        $screen->assertDontSee('Nothing is waiting on you.')
+            ->assertSee('Nothing waiting on you matches the filter.');
+    });
+});

@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Exceptions\ProcessRefused;
 use App\Filament\Pages\Concerns\DrawsAStepsForm;
+use App\Filament\Resources\Cases\CaseResource;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\FormField;
@@ -19,6 +20,12 @@ use App\Process\StepForm;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\ViewColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use UnitEnum;
@@ -37,9 +44,10 @@ use UnitEnum;
  * and the rules on their steps, which is the whole claim of module 03 — so if this page
  * is right, resolving on read is right.
  */
-class MyQueue extends Page
+class MyQueue extends Page implements HasTable
 {
     use DrawsAStepsForm;
+    use InteractsWithTable;
 
     protected string $view = 'filament.pages.my-queue';
 
@@ -160,6 +168,195 @@ class MyQueue extends Page
                     ->all()),
             );
         }
+    }
+
+    /**
+     * The queue as a list a person can narrow, drawn by Filament's own table.
+     *
+     * **It is a table of one column and every row is the card that was here before**, and
+     * that is the decision rather than an accident of the framework. A step is answered
+     * where it is read: the questions the client wrote, the person's details above them
+     * and the documents below all sit inside the row, so nobody opens anything to approve
+     * anything. A table of ordinary cells would put a click in front of every approval on
+     * the screen a client's staff touch most.
+     *
+     * What the framework is here for is the half that was missing — the filter control
+     * with its own indicators and its own reset, the empty state, and somewhere for paging
+     * and searching to be turned on the day a client needs them. All of it is the same
+     * furniture as the cases screen next door, so the two read as one product.
+     *
+     * The narrowing and the ordering are done here in PHP rather than by the database,
+     * because this list is worked out from the open cases on every load and has no query
+     * to attach a `where` to. That is module 03's claim and not a shortcut.
+     */
+    public function table(Table $table): Table
+    {
+        return $table
+            ->records(fn (array $filters): Collection => $this->cards($filters))
+            ->columns([
+                // Stacked rather than declared on its own, and that is the switch rather
+                // than decoration: Filament draws a header-and-cells table until a column
+                // layout says otherwise, and a form cannot live in a cell of one.
+                Stack::make([
+                    ViewColumn::make('card')->view('filament.tables.columns.what-is-waiting'),
+                ]),
+            ])
+            // One card to a row, full width, on every size of screen.
+            ->contentGrid(['default' => 1])
+            // ponytail: no paging and no search box. Meridian's busiest queue is four
+            // cards and both are a line each on this table when a real client's list is
+            // long enough to need them.
+            ->paginated(false)
+            ->filters([
+                // The same two the cases screen offers and in the same words, read from
+                // the same list of the client's processes, so a person moving between the
+                // two screens is not asked to learn a second vocabulary.
+                SelectFilter::make('process')
+                    ->label('Process')
+                    ->options(fn (): array => CaseResource::processNames()),
+
+                // Each of these is a badge somebody can already see on a card, which is
+                // what keeps the filter honest: picking one cannot show a card that does
+                // not carry the mark it was picked by.
+                SelectFilter::make('state')
+                    ->label('State')
+                    ->options([
+                        'late' => 'Past its deadline',
+                        'due_soon' => 'Due soon',
+                        'on_hold' => 'On hold',
+                        'yours' => 'You picked it up',
+                        'untouched' => 'Nobody has started it',
+                    ]),
+            ])
+            // Two different empty lists, and saying the wrong one is worse than saying
+            // nothing. A queue with four things in it, narrowed to a state none of them
+            // is in, told Rakesh nothing was waiting on him — the one sentence that sends
+            // somebody away from their own work believing there is none. Which of the two
+            // it is comes from the same marks the filter button already shows him, so the
+            // words and the chips beside them can never disagree.
+            ->emptyStateHeading(fn (): string => $this->queueIsNarrowed()
+                ? 'Nothing waiting on you matches the filter.'
+                : 'Nothing is waiting on you.')
+            ->emptyStateDescription(fn (): string => $this->queueIsNarrowed()
+                ? 'Clear the filter to see everything that is waiting on you.'
+                : 'When a step of a live case becomes yours, it appears here on its own — nobody has to send it.')
+            ->emptyStateIcon('heroicon-o-inbox');
+    }
+
+    /**
+     * Whether the list on screen has been cut down by what somebody asked for.
+     *
+     * Read from the marks the table itself puts above the list rather than from the
+     * filters, so what the empty list says and what the chips beside it show cannot come
+     * to disagree — and so a search box or a third filter turned on later is covered
+     * without this being touched.
+     */
+    private function queueIsNarrowed(): bool
+    {
+        return $this->getTable()->getFilterIndicators() !== [];
+    }
+
+    /**
+     * One row of the table for each step waiting on this person, late ones first.
+     *
+     * **The three marks are worked out once for the whole list and carried on the row**,
+     * rather than asked per card. Each of them costs a query or a walk through the rule
+     * that says who a step belongs to, so a card that worked out its own marks would
+     * multiply all of it by the number of cards on screen.
+     *
+     * Narrowed before the marks are worked out and not after, so filtering the list down
+     * to one card also cuts the work of drawing it.
+     *
+     * @param  array<string, array<string, mixed>>  $filters
+     * @return Collection<string, array<string, mixed>>
+     */
+    private function cards(array $filters): Collection
+    {
+        $waiting = $this->narrowedBy($filters, $this->queue())
+            // By each step's own target date, worst breach first — which puts everything
+            // past its target above everything still inside it without a second rule
+            // saying so, because a step is late exactly when that date has gone by. A step
+            // with no target of its own can never be late and sits at the back rather than
+            // jumping the queue on a missing date. Ties broken by whichever has been
+            // waiting longest, which is the order somebody sorting the pile by hand would
+            // put them in.
+            ->sortBy(fn (AvailableStep $step): array => [
+                $step->dueAt?->getTimestamp() ?? PHP_INT_MAX,
+                $step->availableSince->getTimestamp(),
+            ])
+            ->values();
+
+        if ($waiting->isEmpty()) {
+            return collect();
+        }
+
+        $heldByNobody = $this->heldByNobody($waiting);
+        $byEscalation = $this->cameByEscalation($waiting);
+        $alreadySaid = $this->whatWasSaidAbout($waiting);
+        $coveringFor = $this->coveringSomebodyOn($waiting);
+
+        return $waiting->mapWithKeys(function (AvailableStep $step) use (
+            $heldByNobody,
+            $byEscalation,
+            $alreadySaid,
+            $coveringFor,
+        ): array {
+            $at = $step->case->getKey().':'.$step->step->sequence;
+
+            return [$at => [
+                'waiting' => $step,
+                'nobodyHolds' => in_array($at, $heldByNobody, true),
+                'escalated' => in_array($at, $byEscalation, true),
+                'whatWasSaid' => $alreadySaid[$at] ?? null,
+                'coveringFor' => $coveringFor[$at] ?? null,
+            ]];
+        });
+    }
+
+    /**
+     * The list with whichever filters are set applied to it.
+     *
+     * @param  array<string, array<string, mixed>>  $filters
+     * @param  Collection<int, AvailableStep>  $queue
+     * @return Collection<int, AvailableStep>
+     */
+    private function narrowedBy(array $filters, Collection $queue): Collection
+    {
+        $process = $filters['process']['value'] ?? null;
+        $state = $filters['state']['value'] ?? null;
+
+        return $queue
+            // On the process's permanent name rather than the version it is running, the
+            // same as the cases screen: a client asking for their exits wants every exit,
+            // not the ones that opened on whichever version is live today.
+            ->when(filled($process), fn (Collection $steps): Collection => $steps->filter(
+                fn (AvailableStep $step): bool => $step->case->template->key === $process,
+            ))
+            ->when(filled($state), fn (Collection $steps): Collection => $steps->filter(
+                fn (AvailableStep $step): bool => $this->isIn($step, (string) $state),
+            ));
+    }
+
+    /**
+     * Whether one waiting step is in the state somebody picked, in the same words the card
+     * puts on its badge.
+     *
+     * A state nobody offers narrows nothing rather than hiding the whole list, because the
+     * value comes off the browser and a dropdown's own list of options does not stop
+     * another one being sent.
+     */
+    private function isIn(AvailableStep $step, string $state): bool
+    {
+        $held = $step->attempt?->outcome === 'held';
+
+        return match ($state) {
+            'late' => $step->escalationOwed,
+            'due_soon' => ! $step->escalationOwed && $step->nudgesOwed > 0,
+            'on_hold' => $held,
+            'yours' => ! $held && (int) $step->attempt?->assignee_id === (int) $this->person()->getKey(),
+            'untouched' => $step->attempt === null,
+            default => true,
+        };
     }
 
     /**
