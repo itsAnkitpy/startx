@@ -2,8 +2,10 @@
 
 use App\Authorization\Permission;
 use App\Authorization\PermissionResolver;
-use App\Filament\Pages\CaseHistory;
 use App\Filament\Pages\MyQueue;
+use App\Filament\Resources\Cases\CaseResource;
+use App\Filament\Resources\Cases\Pages\ListCases;
+use App\Filament\Resources\Cases\Pages\ViewCase;
 use App\Models\FormDefinition;
 use App\Models\FormField;
 use App\Models\ProcessCase;
@@ -12,6 +14,7 @@ use App\Models\ProcessTemplate;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\CaseEngine;
+use App\Process\CaseHistory;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
 use Livewire\Livewire;
@@ -23,6 +26,11 @@ use Livewire\Livewire;
 | finished without a sign-off looks exactly like one that got it. These run against the
 | demo company as it is seeded, including the one process in it that was built with the
 | mistake publishing now refuses.
+|
+| The screen is two halves since the list became a table: a case's own page carries the
+| story, and the list carries only what tells one case from another plus the one mark
+| saying a step went unasked. So the assertions about words are made on the page of the
+| case they are about.
 */
 
 beforeEach(function () {
@@ -35,6 +43,12 @@ beforeEach(function () {
 function whoIsAtMeridian(string $first): User
 {
     return User::query()->where('work_email', $first.'@meridian.test')->sole();
+}
+
+/** One case's own page, as the person reading it. */
+function theCasePageFor(ProcessCase $case, User $reader)
+{
+    return Livewire::actingAs($reader)->test(ViewCase::class, ['record' => $case->getKey()]);
 }
 
 it('shows an exit finishing with an approval nobody was ever asked for', function () {
@@ -54,26 +68,37 @@ it('shows an exit finishing with an approval nobody was ever asked for', functio
         expect($priyas->fresh()->state)->toBe(ProcessCase::Closed)
             ->and($priyas->fresh()->steps()->where('sequence', 2)->exists())->toBeFalse();
 
-        Livewire::actingAs($chandni)->test(CaseHistory::class)
+        theCasePageFor($priyas, $chandni)
             ->assertOk()
             ->assertSee('A step never happened')
             ->assertSee('Manager sign-off')
             ->assertSee('Never happened. Nobody was ever asked, and the case carried on without it.');
+
+        // And the mark is on the list as well, because a client should not have to open
+        // two hundred cases to find the one that finished without an approval.
+        Livewire::actingAs($chandni)->test(ListCases::class)
+            ->assertOk()
+            ->assertSee('A step never happened');
     });
 });
 
 it('does not mark a step that has simply not come round yet', function () {
     TenantContext::run($this->meridian, function () {
-        // Anjali's exit is on the real process and nobody has touched it, so all four of
-        // its steps have no row anywhere and not one of them is a failure.
-        Livewire::actingAs(whoIsAtMeridian('chandni'))->test(CaseHistory::class)
-            ->assertOk()
-            ->assertSee('Anjali Rao')
-            ->assertSee('It opens when the steps in front of it are done');
-
+        $chandni = whoIsAtMeridian('chandni');
         $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        expect(collect((new CaseHistory)->whatHappenedOn($anjalis))->pluck('tone')->all())
+        // Anjali's exit is on the real process and nobody has touched it, so all four of
+        // its steps have no row anywhere and not one of them is a failure.
+        Livewire::actingAs($chandni)->test(ListCases::class)
+            ->assertOk()
+            ->assertSee('Anjali Rao')
+            ->assertDontSee('never happened');
+
+        theCasePageFor($anjalis, $chandni)
+            ->assertOk()
+            ->assertSee('It opens when the steps in front of it are done');
+
+        expect(collect((new CaseHistory)->stepByStep($anjalis))->pluck('tone')->all())
             ->toBe(['later', 'later', 'later', 'later']);
     });
 });
@@ -89,7 +114,7 @@ it('says a step is waiting on somebody as soon as it becomes their turn', functi
             ->whereNull('closed_at')
             ->firstOrFail();
 
-        $said = collect((new CaseHistory)->whatHappenedOn($request))->pluck('said', 'sequence');
+        $said = collect((new CaseHistory)->stepByStep($request))->pluck('said', 'sequence');
 
         expect($said[2])->toBe('Waiting on somebody to answer it.')
             // And the step behind that one really has not come round.
@@ -99,13 +124,13 @@ it('says a step is waiting on somebody as soon as it becomes their turn', functi
 
 it('keeps a case out of the list of somebody with no business reading it', function () {
     TenantContext::run($this->meridian, function () {
-        // Deepak holds no role at all, so the page does not open for him and he sees
+        // Deepak holds no role at all, so the screen does not open for him and he sees
         // nobody's case — the same rule the rest of the product applies to seeing a
         // person's record.
         auth()->login(whoIsAtMeridian('deepak'));
 
-        expect(CaseHistory::canAccess())->toBeFalse()
-            ->and((new CaseHistory)->cases()->count())->toBe(0);
+        expect(CaseResource::canAccess())->toBeFalse()
+            ->and(CaseResource::getEloquentQuery()->count())->toBe(0);
 
         // Rakesh clears HR for Shimla and may see people there, so the Shimla exits are
         // his to read and Rohit's, in Pune, is not.
@@ -114,11 +139,11 @@ it('keeps a case out of the list of somebody with no business reading it', funct
 
         // A hiring request is about a vacancy and has no first name to read, so it is
         // counted by the process it runs on.
-        $names = (new CaseHistory)->cases()
+        $names = CaseResource::getEloquentQuery()->get()
             ->map(fn (ProcessCase $case) => $case->subject?->first_name ?? $case->template->name)
             ->sort()->values()->all();
 
-        expect(CaseHistory::canAccess())->toBeTrue()
+        expect(CaseResource::canAccess())->toBeTrue()
             ->and($names)->not->toContain('Rohit')
             ->and($names)->toContain('Anjali');
     });
@@ -146,13 +171,13 @@ it('does not cry failure on an exit somebody turned down', function () {
         // them is an approval that never happened.
         (new CaseEngine)->decide($anjalis, 1, 'rejected', whoIsAtMeridian('priya'), reason: 'She is staying.');
 
-        expect(collect((new CaseHistory)->whatHappenedOn($anjalis->fresh()))->pluck('tone')->all())
+        expect(collect((new CaseHistory)->stepByStep($anjalis->fresh()))->pluck('tone')->all())
             ->toBe(['done', 'stopped', 'stopped', 'stopped']);
 
-        Livewire::actingAs(whoIsAtMeridian('chandni'))->test(CaseHistory::class)
+        theCasePageFor($anjalis->fresh(), whoIsAtMeridian('chandni'))
             ->assertOk()
             ->assertSee('The case ended before this came round.')
-            ->assertDontSee('steps never happened');
+            ->assertDontSee('never happened');
     });
 });
 
@@ -162,7 +187,7 @@ it('does not cry failure on an exit that was withdrawn', function () {
 
         (new CaseEngine)->cancel($deepaks, whoIsAtMeridian('priya'), 'He withdrew his resignation.');
 
-        expect(collect((new CaseHistory)->whatHappenedOn($deepaks->fresh()))->pluck('tone')->all())
+        expect(collect((new CaseHistory)->stepByStep($deepaks->fresh()))->pluck('tone')->all())
             ->toBe(['stopped', 'stopped', 'stopped', 'stopped']);
     });
 });
@@ -198,10 +223,10 @@ it('does not cry failure on a step that only applies to some exits', function ()
         (new CaseEngine)->decide($deepaks, 1, 'approved', $chandni, ['imprest_card_returned' => true]);
 
         expect($deepaks->fresh()->state)->toBe(ProcessCase::Closed)
-            ->and(collect((new CaseHistory)->whatHappenedOn($deepaks->fresh()))->pluck('tone')->all())
+            ->and(collect((new CaseHistory)->stepByStep($deepaks->fresh()))->pluck('tone')->all())
             ->toBe(['done', 'skipped']);
 
-        Livewire::actingAs($chandni)->test(CaseHistory::class)
+        theCasePageFor($deepaks->fresh(), $chandni)
             ->assertOk()
             ->assertSee('Not needed this time. It only opens in some cases, and this was not one.')
             ->assertDontSee('Never happened');
@@ -221,7 +246,7 @@ it('says why a request was sent back, and where it went', function () {
 
         // Without the reason the page says "Sent back" and stops, which reads as a case
         // that stalled for nothing. It has to say why, and which step it went to.
-        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+        theCasePageFor($request->fresh(), $rakesh)
             ->assertOk()
             ->assertSee('Sent back by Rakesh Menon')
             ->assertSee('Back to Raise request.')
@@ -238,7 +263,7 @@ it('says why a request was sent back, and where it went', function () {
             ->call('decide', $request->getKey(), 1, 'approved')
             ->assertHasNoErrors();
 
-        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+        theCasePageFor($request->fresh(), $rakesh)
             ->assertOk()
             ->assertSee('Sent back by Rakesh Menon')
             ->assertSee('Waiting on somebody to answer it again.');
@@ -274,7 +299,7 @@ it('keeps the reason a step was held off the line saying it was cleared, and und
         // history. On the line saying it was cleared, the hold reason reads as money still
         // being argued about on the day it was settled — so it does not go there. Under
         // it, with its own date, it is the only record that the argument happened at all.
-        $clearance = collect((new CaseHistory)->whatHappenedOn($exit->fresh()))->firstWhere('sequence', 2);
+        $clearance = collect((new CaseHistory)->stepByStep($exit->fresh()))->firstWhere('sequence', 2);
         $before = implode(' ', $clearance['earlier']);
 
         expect($clearance['said'])->toContain('Approved by Chandni Verma')
@@ -282,10 +307,10 @@ it('keeps the reason a step was held off the line saying it was cleared, and und
             ->and($before)->toContain('Put on hold by Chandni Verma')
             ->and($before)->toContain('Why: Waiting on the imprest card.');
 
-        Livewire::actingAs($chandni)->test(CaseHistory::class)
+        theCasePageFor($exit->fresh(), $chandni)
             ->assertOk()
             ->assertSee('Finance clearance')
-            ->assertSee('Earlier at this step:')
+            ->assertSee('Earlier at this step')
             ->assertSee('Why: Waiting on the imprest card.');
     });
 });
@@ -315,7 +340,7 @@ it('keeps the send-back on the case after the same approval has been given secon
         // from rows alone says "Approved" and the send-back has gone. Both passes belong on
         // the case: whoever reads it a year later has to see that the figure was questioned
         // once, why, and what was done about it.
-        $steps = collect((new CaseHistory)->whatHappenedOn($request->fresh()));
+        $steps = collect((new CaseHistory)->stepByStep($request->fresh()));
         $approval = $steps->firstWhere('sequence', 2);
         $raising = $steps->firstWhere('sequence', 1);
 
@@ -328,9 +353,9 @@ it('keeps the send-back on the case after the same approval has been given secon
             ->and(implode(' ', $raising['earlier']))
             ->toContain('Sent back to here by Rakesh Menon');
 
-        Livewire::actingAs($rakesh)->test(CaseHistory::class)
+        theCasePageFor($request->fresh(), $rakesh)
             ->assertOk()
-            ->assertSee('Earlier at this step:')
+            ->assertSee('Earlier at this step')
             ->assertSee('Why: The salary is above the band for this designation.');
     });
 });
@@ -354,17 +379,22 @@ it('lets the person who raised a request read what happened to it, and nothing e
 
         // The reason was written correctly and shown to everybody except her, which is the
         // one person it was written for.
-        Livewire::actingAs($anjali)->test(CaseHistory::class)
+        theCasePageFor($request->fresh(), $anjali)
             ->assertOk()
             ->assertSee('Rejected by Rakesh Menon')
-            ->assertSee('Why: The branch has no budget for another officer this year.')
-            // Somebody else's exit is still none of her business.
-            ->assertDontSee('Finance clearance');
+            ->assertSee('Why: The branch has no budget for another officer this year.');
 
         $this->actingAs($anjali);
 
-        expect((new CaseHistory)->cases()->map(fn (ProcessCase $case): string => $case->template->key)->all())
-            ->toBe(['hiring_request', 'hiring_request']);
+        // Somebody else's exit is still none of her business, on the list and on its own
+        // address — the list narrows the rows and the record's own check refuses the
+        // address, because a screen that only narrows is a screen you walk round.
+        $somebodyElsesExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole();
+
+        expect(CaseResource::getEloquentQuery()->get()->map(fn (ProcessCase $case): string => $case->template->key)->all())
+            ->toBe(['hiring_request', 'hiring_request'])
+            ->and($anjali->can('view', $somebodyElsesExit))->toBeFalse()
+            ->and($anjali->can('view', $request->fresh()))->toBeTrue();
     });
 });
 
@@ -374,17 +404,17 @@ it('keeps the screen shut to somebody who has neither raised anything nor been g
         // step is Anjali's alone, so he has never started a case and never will here.
         $this->actingAs(whoIsAtMeridian('deepak'));
 
-        expect(CaseHistory::canAccess())->toBeFalse();
+        expect(CaseResource::canAccess())->toBeFalse();
 
         $this->actingAs(whoIsAtMeridian('anjali'));
 
-        expect(CaseHistory::canAccess())->toBeTrue();
+        expect(CaseResource::canAccess())->toBeTrue();
     });
 });
 
-it('heads a case about nobody with its number and what it was raised asking for', function () {
+it('says what a case about nobody was raised asking for', function () {
     TenantContext::run($this->meridian, function () {
-        $page = new CaseHistory;
+        $history = new CaseHistory;
 
         $requests = ProcessCase::query()
             ->whereRelation('template', 'key', 'hiring_request')
@@ -393,17 +423,17 @@ it('heads a case about nobody with its number and what it was raised asking for'
 
         // Both of these read "Hiring request" and nothing else until now, and Chandni sees
         // every one the company has ever raised — so eight of them were eight identical
-        // headings with no way to tell one from another.
-        expect($page->whoseCase($requests[0]))
-            ->toBe('#'.$requests[0]->getKey().' · Shimla branch · Operations Officer')
-            ->and($page->whoseCase($requests[1]))
-            ->toBe('#'.$requests[1]->getKey().' · Shimla branch · Branch Manager');
+        // headings with no way to tell one from another. The case's number is not in here:
+        // the list gives it a column of its own and the case's page puts it in the title,
+        // so saying it here printed it twice on one line.
+        expect($history->whatItIsAbout($requests[0]))->toBe('Shimla branch · Operations Officer')
+            ->and($history->whatItIsAbout($requests[1]))->toBe('Shimla branch · Branch Manager');
 
         // A case about somebody still reads as theirs. There is a name to head it with,
-        // so nothing here is needed and a number in front of it would be noise.
+        // so nothing else is needed.
         $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        expect($page->whoseCase($exit))->toBe("Anjali Rao's Exit");
+        expect($history->whatItIsAbout($exit))->toBe("Anjali Rao's Exit");
     });
 });
 
@@ -439,8 +469,8 @@ it('passes over an opening question a client wrote as prose, rather than cutting
             'what_for' => 'A third workstation',
         ]);
 
-        expect($page = (new CaseHistory)->whoseCase($case->fresh()))
-            ->toBe('#'.$case->getKey().' · A third workstation')
-            ->and($page)->not->toContain('overtime');
+        expect($heading = (new CaseHistory)->whatItIsAbout($case->fresh()))
+            ->toBe('A third workstation')
+            ->and($heading)->not->toContain('overtime');
     });
 });

@@ -162,3 +162,48 @@ it('leaves a role a client ticked it onto alone when it is rolled back', functio
         expect($administrator->permissions()->where('permission', Permission::ManageCover)->exists())->toBeFalse();
     });
 });
+
+/*
+| And a fourth time, by module 05.2's step 7.
+|
+| Settling who takes on a leaver's work is done from the leaver's own exit, so an existing
+| client whose administrator never got the action would open that exit and find nothing
+| there to do it with.
+*/
+
+/** Run the handover migration the way it runs on a real database: no company in scope. */
+function grantSettlingAHandoverToEveryAdministrator(): void
+{
+    $migration = require database_path(
+        'migrations/2026_09_03_150000_grant_settling_a_handover_to_existing_administrators.php'
+    );
+
+    $migration->up();
+}
+
+it('puts settling a handover on an administrator role that predates it', function () {
+    $chandni = TenantContext::run($this->meridian, function () {
+        $administrator = Role::query()->where('key', Role::AdministratorKey)->sole();
+
+        // Wind Meridian back to how it was set up before the handover reached a screen.
+        $administrator->permissions()->where('permission', Permission::SettleHandover)->delete();
+
+        return User::query()->where('work_email', 'chandni@meridian.test')->sole();
+    });
+
+    $resolver = app(PermissionResolver::class);
+
+    TenantContext::run($this->meridian, function () use ($resolver, $chandni) {
+        expect($resolver->allows($chandni, Permission::SettleHandover))->toBeFalse();
+    });
+
+    grantSettlingAHandoverToEveryAdministrator();
+
+    $resolver->forget();
+
+    TenantContext::run($this->meridian, function () use ($resolver, $chandni) {
+        // Over the whole company, which is what the exit's own screen asks for: the roles
+        // being moved can cover the whole company themselves.
+        expect($resolver->allowsEverywhere($chandni, Permission::SettleHandover))->toBeTrue();
+    });
+});

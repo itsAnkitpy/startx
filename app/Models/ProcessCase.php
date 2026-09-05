@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Tenancy\BelongsToTenant;
+use App\Tenancy\TenantScope;
 use Database\Factories\ProcessCaseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -10,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One run of one process — Rakesh's exit, Priya's onboarding, a hiring request for a
@@ -24,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * and manager the person had at the time, not the ones they have now.
  */
 #[Fillable([
-    'template_id', 'subject_user_id', 'subject_employment_record_id', 'initiated_by',
+    'number', 'template_id', 'subject_user_id', 'subject_employment_record_id', 'initiated_by',
     'opened_at', 'statutory_from', 'statutory_due_at', 'gratuity_due_at',
     'settings_snapshot', 'subject_facts_snapshot',
 ])]
@@ -89,6 +91,55 @@ class ProcessCase extends Model
             'settings_snapshot' => 'array',
             'subject_facts_snapshot' => 'array',
         ];
+    }
+
+    /**
+     * Number each case from one inside its own client company, as it is saved.
+     *
+     * **Counted rather than kept in a counter column**, because a counter is a second copy
+     * of what the rows already say. The client's own rows are the only ones this read can
+     * see, so the highest number here is the highest number they have.
+     *
+     * **Here rather than in the engine, because it has to happen once per case saved.** A
+     * value worked out where a case is built instead is worked out once for a whole batch —
+     * a test creating five hundred cases handed all five hundred the same number, which the
+     * unique index refused.
+     *
+     * **The lock is what makes two people raising a request in the same second safe.** It
+     * is held on the client's own id until the surrounding transaction ends, so the second
+     * one waits rather than reading the same highest number and colliding — and a refused
+     * insert in Postgres abandons the whole transaction, which would lose the case rather
+     * than merely renumber it. The engine opens every case inside a transaction, which is
+     * what gives the lock something to be held for.
+     *
+     * **Both the lock and the count read the case's own client, not the one in scope.**
+     * The audited path that lets a migration reach every client at once switches the
+     * narrowing off, so a case opened inside it would have been given the highest number
+     * on the platform — the very number this exists to stop a client seeing. Nothing opens
+     * a case that way today; asking the row which client it belongs to costs nothing and
+     * cannot come apart from it. The company is stamped on by the trait above, whose own
+     * hook runs before this one.
+     *
+     * ponytail: nothing else in the product takes this lock, so nothing else ever waits on
+     * it. If a client ever opens cases fast enough for the wait to matter, the answer is a
+     * counter row per client rather than a wider lock.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $case): void {
+            if ($case->number !== null) {
+                return;
+            }
+
+            $client = (int) $case->tenant_id;
+
+            DB::statement('select pg_advisory_xact_lock(?)', [$client]);
+
+            $case->number = (int) static::query()
+                ->withoutGlobalScope(TenantScope::class)
+                ->where('tenant_id', $client)
+                ->max('number') + 1;
+        });
     }
 
     /**

@@ -92,6 +92,21 @@ final class Permission
     public const ManageCover = 'manage_cover';
 
     /**
+     * Settling who takes on the work of somebody who has left.
+     *
+     * Kept apart from {@see ManageCover} because the two are not degrees of the same
+     * thing: a cover expires and moves a queue, while a handover never ends and moves the
+     * roles somebody held, the approvals they had opened and the people who reported to
+     * them, all in one go.
+     *
+     * Asked over the whole client company, the same as cover and for a sharper reason: the
+     * grants being moved may cover the whole company themselves, so somebody responsible
+     * for one branch would otherwise inherit the finance head's company-wide role by
+     * settling her exit.
+     */
+    public const SettleHandover = 'settle_handover';
+
+    /**
      * The same actions, in the words a client reads on the roles screen, grouped by the
      * thing each one is about.
      *
@@ -191,6 +206,10 @@ final class Permission
                     self::ManageCover => [
                         'label' => 'Set who covers somebody while they are away',
                         'description' => 'Naming a stand-in hands one person\'s approvals to another for a fortnight, so this one only counts when it covers your whole company — a grant over a single branch does not give it. Anything the person away has already opened stays with them.',
+                    ],
+                    self::SettleHandover => [
+                        'label' => "Settle who takes over a leaver's work",
+                        'description' => 'Done from the leaver\'s own exit. It moves the roles they held, the approvals they had already opened and the people who reported to them onto one other person, and it cannot be undone — so like cover, it only counts when it covers your whole company.',
                     ],
                     self::ManageSettings => [
                         'label' => 'Change the company settings',

@@ -1,71 +1,43 @@
 <?php
 
-namespace App\Filament\Pages;
+namespace App\Process;
 
-use App\Authorization\Permission;
-use App\Authorization\PermissionResolver;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
-use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Succession;
 use App\Models\User;
-use App\Process\AvailableStep;
-use App\Process\AvailableSteps;
-use App\Process\PublishCheck;
-use App\Process\SubjectPanel;
-use BackedEnum;
-use Filament\Pages\Page;
-use Illuminate\Support\Collection;
-use UnitEnum;
 
 /**
- * Every case this client has run, and what actually happened at each of its steps.
+ * What actually happened on a case, in the words somebody reading it a year later needs.
  *
- * The queue screen answers "what is waiting on me", and that is the only question the
- * product could answer until now. It cannot show the failure the publishing check exists
- * to prevent, because that failure is an absence: a step that never opened is missing
- * from a list that only ever holds steps that did. So an exit could reach the end with an
- * approval never given and every screen in the product would look exactly as it does when
+ * The queue screen answers "what is waiting on me", and that was the only question the
+ * product could answer until this existed. It cannot show the failure the publishing
+ * check exists to prevent, because that failure is an absence: a step that never opened
+ * is missing from a list that only ever holds steps that did. So an exit could reach the
+ * end with an approval never given and every screen would look exactly as it does when
  * the approval was given properly.
  *
- * This page is where that is visible. A step nobody ever touched has no row anywhere, so
- * a finished case with a gap in it reads as a gap — the approval that never happened is
- * named, in the position it should have been in, on the case that closed without it.
+ * This is where that is visible. The steps are read from the frozen version the case
+ * opened on rather than from what was done, so a step nobody ever touched still has a
+ * line — named, in the position it should have been in, on the case that closed without
+ * it.
  *
  * **The red mark has to mean something, so it is spent carefully.** A rejected exit, a
  * withdrawn one and a step that only applies to some exits all leave steps with no row
  * behind them, and not one of them is a failure. Marking those red would spend the mark
  * on ordinary Tuesdays and leave nothing to say with when the real thing happens.
  *
- * **It is also where somebody reads their own request back.** A person who raises one and
- * holds nothing else sees the cases they started and no others, on this same page, because
- * everything they need — every step, who answered it, when, and why — is already drawn
- * here and a second screen would be the same page with one filter changed.
- *
- * Read-only. Deciding anything is the queue screen's job, and module 12's editor is where
- * a process is changed.
+ * Read-only, and asked by both halves of the Cases screen — the list, which needs a
+ * heading and a state per row, and the case's own page, which needs the whole story. It
+ * sits here beside the engine rather than on either of them because a screen working any
+ * of this out for itself is a screen that comes to disagree with the queue about the same
+ * case.
  */
-class CaseHistory extends Page
+class CaseHistory
 {
-    protected string $view = 'filament.pages.case-history';
-
-    protected static string|UnitEnum|null $navigationGroup = 'Your work';
-
-    protected static ?string $navigationLabel = 'Cases';
-
-    protected static ?string $title = 'Cases';
-
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
-
-    /**
-     * Third in its group, behind the queue and raising something. Not left unset: an
-     * unset sort is read as the lowest there is, so this screen quietly became the first
-     * thing in the menu and the page everybody landed on after signing in.
-     */
-    protected static ?int $navigationSort = 1;
-
     /**
      * How each outcome reads on the case, in the words of what was actually done rather
      * than the word stored against it. The two hold resolutions are here because a case
@@ -98,116 +70,23 @@ class CaseHistory extends Page
     private array $versionIsFlawed = [];
 
     /**
-     * Whoever holds the action of seeing people anywhere in the company, and anybody who
-     * has started a case of their own. The rows are each checked again in turn — the
-     * question this one answers is only whether there is any point opening the page.
-     *
-     * Anjali holds nothing and raises hiring requests, so without the second half of this
-     * she can have a request turned down with a reason written on it and no screen in the
-     * product that says so.
-     */
-    public static function canAccess(): bool
-    {
-        $person = auth()->user();
-
-        if (! $person instanceof User) {
-            return false;
-        }
-
-        return app(PermissionResolver::class)->allows($person, Permission::ViewPerson)
-            || ProcessCase::query()->where('initiated_by', $person->getKey())->exists();
-    }
-
-    /**
-     * The cases this person may see, newest first.
-     *
-     * A case is about a person, so seeing one is the same action as seeing them, checked
-     * against the department they were in when the case opened — which is the department
-     * the case pinned, not the one they are in now. Rakesh clearing HR for Shimla does not
-     * get to read a Pune exit, and the same rule the rest of the product uses is what says
-     * so rather than a new rule invented here.
-     *
-     * The pinned row cannot go missing underneath it: a job row a case reads through
-     * refuses to be withdrawn, and correcting somebody's history writes a new row instead.
-     * So a case with no department at all is one that never had one — about a candidate or
-     * about a vacancy — and that falls back to holding the action anywhere, which is the
-     * same answer a person with no job row already gets on their own record.
-     *
-     * **And a case somebody started is theirs to read, whatever else they may do here.**
-     * Workday is the shape: a worker's own list holds every process they submitted or took
-     * part in, and opening one shows the same history an approver reads. Jira Service
-     * Management and ServiceNow build a second screen for this instead, because their
-     * approver's view carries private notes and service clocks a customer may not see —
-     * neither of which exists on this page, and Anjali works for the same company.
-     *
-     * @return Collection<int, ProcessCase>
-     */
-    public function cases(): Collection
-    {
-        $resolver = app(PermissionResolver::class);
-        $person = auth()->user();
-
-        if (! $person instanceof User) {
-            return collect();
-        }
-
-        // The client's own departments, in one read, because the check wants the unit
-        // itself rather than its id. A company has a handful of them.
-        $units = OrgUnit::query()->get()->keyBy('id');
-
-        return ProcessCase::query()
-            ->with(['subject', 'template.steps', 'liveSteps.assignee', 'subjectEmploymentRecord', 'events.actor'])
-            ->orderByDesc('opened_at')
-            ->get()
-            ->filter(fn (ProcessCase $case): bool => self::theyStartedIt($case, $person)
-                || $resolver->allows(
-                    $person,
-                    Permission::ViewPerson,
-                    $units[$case->subjectEmploymentRecord?->org_unit_id] ?? null,
-                ))
-            ->values();
-    }
-
-    /**
-     * Whether this is a case the person reading started themselves.
-     *
-     * Read off the case rather than asked of the permission rules, because it is not a
-     * permission: nobody grants it, nobody can take it away, and it is true of the person
-     * whether or not their role lets them see anybody in the company.
-     */
-    private static function theyStartedIt(ProcessCase $case, User $person): bool
-    {
-        return $case->initiated_by !== null
-            && (int) $case->initiated_by === (int) $person->getKey();
-    }
-
-    /**
      * The steps that are somebody's turn right now, as case number to step numbers.
-     *
-     * Asked of the one class that answers it for the queue and the reminders as well,
-     * rather than worked out a second time here. A step is open once everything in front
-     * of it has closed or was skipped for not applying, and a screen that decided that
-     * for itself is a screen that comes to disagree with the queue about the same case.
      *
      * @var array<int, list<int>>
      */
     private array $openNow = [];
 
-    /** @return list<int> */
-    private function openRightNow(ProcessCase $case): array
-    {
-        return $this->openNow[(int) $case->getKey()] ??= (new AvailableSteps)
-            ->for($case)
-            ->map(fn (AvailableStep $waiting): int => (int) $waiting->step->sequence)
-            ->all();
-    }
+    /**
+     * The handover settled inside each case already read, because the case's own page asks
+     * for it five times in one draw: once to decide whether the section is there at all,
+     * and once for each figure in it.
+     *
+     * @var array<int, array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int}}|null>
+     */
+    private array $handovers = [];
 
     /**
      * Every step of the version this case opened on, and what happened at it.
-     *
-     * The steps come from the frozen version rather than from what was done, which is the
-     * whole point: a step nobody ever touched has no row anywhere, and listing only the
-     * rows would hide exactly the failure this page exists to show.
      *
      * A step can come round more than once — sent back and answered again, or held and
      * then cleared — and the row the engine keeps is one per step, so the line above can
@@ -216,7 +95,7 @@ class CaseHistory extends Page
      *
      * @return list<array{sequence: int, name: string, said: string, tone: string, earlier: list<string>}>
      */
-    public function whatHappenedOn(ProcessCase $case): array
+    public function stepByStep(ProcessCase $case): array
     {
         $done = $case->liveSteps->keyBy('sequence');
         $running = $case->state === ProcessCase::Open;
@@ -275,6 +154,123 @@ class CaseHistory extends Page
     }
 
     /**
+     * How many of this case's steps nobody was ever asked for.
+     *
+     * The one mark the list carries, because it is the whole reason the screen exists and
+     * a client should not have to open two hundred cases to find the one that finished
+     * without an approval.
+     *
+     * A case still running has none by definition — a step nobody has reached yet has not
+     * been missed — and answering that before anything else is what keeps this affordable
+     * on a page of rows: only a case that has ended reads its own steps at all, and it
+     * reads them from what the list has already loaded.
+     */
+    public function stepsNobodyWasAskedFor(ProcessCase $case): int
+    {
+        if ($case->state === ProcessCase::Open) {
+            return 0;
+        }
+
+        return count(array_filter(
+            $this->stepByStep($case),
+            fn (array $step): bool => $step['tone'] === 'missed',
+        ));
+    }
+
+    /** What the case itself is, in one word. */
+    public function stateOf(ProcessCase $case): string
+    {
+        return match ($case->state) {
+            ProcessCase::Closed => 'Finished',
+            ProcessCase::Cancelled => 'Cancelled',
+            default => 'Running',
+        };
+    }
+
+    /**
+     * Whose case it is, or — where it is about nobody — what it asked for.
+     *
+     * A hiring request is about a vacancy, so there is no name to head it with and every
+     * one of them read "Hiring request". On the screen of somebody who sees the whole
+     * company that was eight identical headings with nothing to tell them apart.
+     *
+     * What it says instead is the first two things the client's own form asks, in the
+     * client's own order, because whoever wrote the form put the question that identifies
+     * a request at the top of it. Nothing here names a process or a question, which is
+     * what keeps it true of a budget request or anything else a client builds about
+     * nobody.
+     *
+     * The case's number is not in here any more: the list puts it in its own column and
+     * the case's own page puts it in the title, so repeating it inside the heading printed
+     * it twice on the same line.
+     */
+    public function whatItIsAbout(ProcessCase $case): string
+    {
+        $subject = $case->subject;
+
+        if ($subject instanceof User) {
+            return $subject->name."'s ".$case->template->name;
+        }
+
+        $asked = collect((new SubjectPanel)->of($case)['facts'])
+            ->filter(fn (string $answer): bool => mb_strlen($answer) <= self::HeadingRoom)
+            ->take(2);
+
+        return $asked->isEmpty() ? $case->template->name : $asked->implode(' · ');
+    }
+
+    /**
+     * The handover settled inside this case, if one was — what moved, to whom, and when.
+     *
+     * Only ever on an exit, because a handover is settled inside the case about the person
+     * leaving. Read off the case's own trail rather than from the handover record, so the
+     * page says what was done on the day rather than what is true now.
+     *
+     * @return array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int}}|null
+     */
+    public function handoverSettled(ProcessCase $case): ?array
+    {
+        $key = (int) $case->getKey();
+
+        if (array_key_exists($key, $this->handovers)) {
+            return $this->handovers[$key];
+        }
+
+        $settled = $case->events->last(
+            fn (CaseEvent $event): bool => $event->type === Succession::HandoverSettledEvent
+        );
+
+        if ($settled === null) {
+            return $this->handovers[$key] = null;
+        }
+
+        $said = (array) $settled->payload;
+
+        return $this->handovers[$key] = [
+            'to' => (string) (((array) ($said['to'] ?? []))['name'] ?? 'somebody'),
+            'on' => (string) ($said['effective_at'] ?? ''),
+            'moved' => [
+                'approvals' => (int) (((array) ($said['moved'] ?? []))['approvals'] ?? 0),
+                'roles' => (int) (((array) ($said['moved'] ?? []))['roles'] ?? 0),
+                'reporting_lines' => (int) (((array) ($said['moved'] ?? []))['reporting_lines'] ?? 0),
+            ],
+        ];
+    }
+
+    /** @return list<int> */
+    private function openRightNow(ProcessCase $case): array
+    {
+        if ($case->state !== ProcessCase::Open) {
+            return [];
+        }
+
+        return $this->openNow[(int) $case->getKey()] ??= (new AvailableSteps)
+            ->for($case)
+            ->map(fn (AvailableStep $waiting): int => (int) $waiting->step->sequence)
+            ->all();
+    }
+
+    /**
      * Why a step has no row at all, which is the only place on this page a failure can
      * be read — and the only place it can be cried wrongly.
      *
@@ -284,6 +280,7 @@ class CaseHistory extends Page
      * and that last one is the failure, but only sometimes, because a step that opens on
      * some exits and not others is very often exactly what the client meant.
      *
+     * @param  list<int>  $open
      * @return array{said: string, tone: string}
      */
     private function whyThereIsNoRow(
@@ -342,10 +339,6 @@ class CaseHistory extends Page
      * whether that condition could ever have been met at all, and the check that runs
      * when a process goes live is the one thing that knows — so it is asked, rather than
      * a second copy of its rules being written here to drift away from it.
-     *
-     * A live version that fails it is a version somebody published before the check
-     * existed, or around it, which is the honest history of every client who was running
-     * before this landed.
      */
     private function versionIsFlawed(ProcessTemplate $version): bool
     {
@@ -361,7 +354,13 @@ class CaseHistory extends Page
             ?? 'somebody';
 
         if ($row->acted_at === null) {
-            return "Picked up by {$who}, not yet answered.";
+            // A step nobody here answers is held by an address rather than by an account:
+            // the leaver confirming their own handover has no login and answers through a
+            // link. Saying it was "picked up" put the case on their desk, when in truth
+            // nothing has happened since the link was sent.
+            return $row->assignee_id === null
+                ? "Sent to {$who} to answer through a link. Not answered yet."
+                : "Picked up by {$who}, not yet answered.";
         }
 
         $said = self::Said[$row->outcome] ?? $row->outcome;
@@ -370,8 +369,11 @@ class CaseHistory extends Page
             ->where('type', 'step_acted')
             ->last(fn (CaseEvent $event): bool => $this->isAbout($event, $row->sequence));
 
-        return "{$said} by {$who} on ".$row->acted_at->format('j F Y').'.'
-            .($acted === null ? '' : $this->andWhy($case, (array) $acted->payload));
+        $trail = $acted === null ? [] : (array) $acted->payload;
+
+        return "{$said} by {$who} on ".$row->acted_at->format('j F Y')
+            .$this->onWhoseBehalf($trail).'.'
+            .($acted === null ? '' : $this->andWhy($case, $trail));
     }
 
     /**
@@ -384,22 +386,29 @@ class CaseHistory extends Page
      * send-back went, so nothing new is stored and nothing extra is read — the trail is
      * already loaded for this page.
      *
-     * Jira Service Management is the shape: a step that comes round again is a new round,
-     * the panel says where it is now, and the earlier rounds stay readable underneath.
-     * Salesforce draws the trail flat instead and sells a component to make it legible
-     * again, which is what that costs.
+     * A step handed to somebody else because its holder left the company is one of these
+     * lines too. Without it the row would simply start reading the successor's name, and
+     * the difference between a handover and a forged history is that the change of hands
+     * is said out loud.
      *
      * @return list<string>
      */
     private function earlierPassesAt(ProcessCase $case, ProcessStep $step, bool $theLineAboveTookTheLast): array
     {
         $passes = $case->events
-            ->whereIn('type', ['step_acted', 'step_reopened'])
+            ->whereIn('type', ['step_acted', 'step_reopened', Succession::StepTransferredEvent])
             ->filter(fn (CaseEvent $event): bool => $this->isAbout($event, $step->sequence))
             ->values();
 
         if ($theLineAboveTookTheLast) {
-            $passes = $passes->slice(0, -1);
+            // Only an answer is what the line above described. A transfer sitting last in
+            // the trail is not, so dropping it would lose the one line that says the step
+            // changed hands.
+            $last = $passes->last();
+
+            if ($last instanceof CaseEvent && $last->type === 'step_acted') {
+                $passes = $passes->slice(0, -1);
+            }
         }
 
         return $passes
@@ -424,6 +433,15 @@ class CaseHistory extends Page
     {
         $said = (array) $event->payload;
 
+        if ($event->type === Succession::StepTransferredEvent) {
+            $from = (string) (((array) ($said['from'] ?? []))['name'] ?? 'somebody');
+            $to = (string) (((array) ($said['to'] ?? []))['name'] ?? 'somebody');
+            $because = trim((string) ($said['because'] ?? ''));
+
+            return "Moved from {$from} to {$to} on ".$event->created_at->format('j F Y').'.'
+                .($because === '' ? '' : " Why: {$because}.");
+        }
+
         $who = $event->actor?->name
             ?? ((array) ($said['answered_by'] ?? []))['name']
             ?? 'somebody';
@@ -432,7 +450,26 @@ class CaseHistory extends Page
             ? 'Sent back to here'
             : (self::Said[$said['outcome'] ?? ''] ?? 'Answered');
 
-        return "{$what} by {$who} on ".$event->created_at->format('j F Y').'.'.$this->andWhy($case, $said);
+        return "{$what} by {$who} on ".$event->created_at->format('j F Y')
+            .$this->onWhoseBehalf($said).'.'.$this->andWhy($case, $said);
+    }
+
+    /**
+     * Whom an answer was given on behalf of, where it was given by somebody covering for
+     * a colleague who was away.
+     *
+     * The engine has recorded this against every answer since cover existed and no screen
+     * has ever read it, so an approval Priya gave on Rakesh's behalf has read on this page
+     * as an approval Priya gave — which is the record a tribunal would be handed. The
+     * queue card says it before she answers; this is the same fact read back a year later.
+     *
+     * @param  array<string, mixed>  $said  One line of the trail, as the engine wrote it.
+     */
+    private function onWhoseBehalf(array $said): string
+    {
+        $away = (string) (((array) ($said['covering_for'] ?? []))['name'] ?? '');
+
+        return $away === '' ? '' : ", on {$away}'s behalf while covering for them";
     }
 
     /**
@@ -455,49 +492,5 @@ class CaseHistory extends Page
 
         return ($step === null ? '' : " Back to {$step}.")
             .(trim((string) ($said['reason'] ?? '')) === '' ? '' : ' Why: '.$said['reason']);
-    }
-
-    /** What the case itself is, in one word. */
-    public function stateOf(ProcessCase $case): string
-    {
-        return match ($case->state) {
-            ProcessCase::Closed => 'Finished',
-            ProcessCase::Cancelled => 'Cancelled',
-            default => 'Running',
-        };
-    }
-
-    /**
-     * Whose case it is, or — where it is about nobody — its number and what it asked for.
-     *
-     * A hiring request is about a vacancy, so there is no name to head it with and every
-     * one of them read "Hiring request". On the screen of somebody who sees the whole
-     * company that was eight identical headings with nothing to tell them apart.
-     *
-     * What it says instead is the first two things the client's own form asks, in the
-     * client's own order, because whoever wrote the form put the question that identifies
-     * a request at the top of it. Nothing here names a process or a question, which is
-     * what keeps it true of a budget request or anything else a client builds about
-     * nobody.
-     *
-     * **The number leads, because two requests really can be the same request.** Same
-     * department, same designation, raised twice — no description separates those, and
-     * ServiceNow and Jira Service Management both lead their own lists with a reference
-     * for exactly that reason. The process's own name is still on the card, on the line
-     * underneath.
-     */
-    public function whoseCase(ProcessCase $case): string
-    {
-        $subject = $case->subject;
-
-        if ($subject instanceof User) {
-            return $subject->name."'s ".$case->template->name;
-        }
-
-        $asked = collect((new SubjectPanel)->of($case)['facts'])
-            ->filter(fn (string $answer): bool => mb_strlen($answer) <= self::HeadingRoom)
-            ->take(2);
-
-        return '#'.$case->getKey().($asked->isEmpty() ? ' '.$case->template->name : ' · '.$asked->implode(' · '));
     }
 }

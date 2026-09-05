@@ -25,6 +25,9 @@ class ProcessCaseFactory extends Factory
     public function definition(): array
     {
         return [
+            // No number here on purpose: the model counts it as each case is saved, and a
+            // factory value worked out here would be worked out once for a whole batch and
+            // give five hundred cases the same number.
             'template_id' => ProcessTemplate::factory()->published(),
             'subject_user_id' => null,
             'subject_employment_record_id' => null,
