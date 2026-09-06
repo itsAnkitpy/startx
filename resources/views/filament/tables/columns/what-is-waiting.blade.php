@@ -35,9 +35,12 @@
              flush. --}}
         <div style="display: grid; row-gap: 0.5rem; min-width: 0;">
             <div class="flex flex-wrap items-center gap-2">
-                <span class="text-base font-semibold text-gray-950 dark:text-white">
+                {{-- A heading rather than bold text, so somebody reading with a screen
+                     reader moves from one card to the next instead of listening through
+                     every question on every card in order. It looks exactly the same. --}}
+                <h2 class="text-base font-semibold text-gray-950 dark:text-white">
                     {{ $step->name }}
-                </span>
+                </h2>
 
                 @if ($waiting->escalationOwed)
                     <x-filament::badge color="danger">Past its deadline</x-filament::badge>
@@ -56,24 +59,36 @@
                 @endif
             </div>
 
+            {{-- The four warnings below are Filament's own callout rather than a
+                 paragraph in an amber of our own, and the reason is that the amber was the
+                 faintest thing on the card: against the white behind it, it sat at about
+                 three to one where anything carrying text is meant to reach four and a
+                 half. The four sentences somebody most needs to read were the four hardest
+                 to. In a callout they read in the same near-black the rest of the card
+                 does, on a tint that still finds the eye while scrolling, and each is a
+                 heading, so a screen reader lands on them instead of meeting them halfway
+                 down the card. --}}
+
             {{-- What has already been said about this step: why it came back, or why it is
                  on hold. Saying it here rather than only in the case's history is the whole
                  reason somebody is made to type it. --}}
             @if ($whatWasSaid)
-                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
-                    {{ $whatWasSaid }}
-                </p>
+                <x-filament::callout color="warning" icon="heroicon-m-exclamation-triangle">
+                    <x-slot name="heading">{{ $whatWasSaid }}</x-slot>
+                </x-filament::callout>
             @endif
 
             {{-- Escalation adds people and removes nobody, so this card has to say it
                  arrived rather than let it read as a job that has been moved onto this
                  person. --}}
             @if ($escalated)
-                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
-                    This came to you because it is past its deadline. It is still open to
-                    the people it belonged to, and it stays theirs — you have been added,
-                    not handed it.
-                </p>
+                <x-filament::callout color="warning" icon="heroicon-m-exclamation-triangle">
+                    <x-slot name="heading">
+                        This came to you because it is past its deadline. It is still open
+                        to the people it belonged to, and it stays theirs — you have been
+                        added, not handed it.
+                    </x-slot>
+                </x-filament::callout>
             @endif
 
             {{-- Marked for the same reason as the two above: a card that arrived because
@@ -81,12 +96,14 @@
                  this is the one of the three where somebody else's decision is being
                  made. --}}
             @if ($awayPerson)
-                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
-                    This is {{ $awayPerson }}'s to decide. You have it because you are
-                    covering for {{ $awayPerson }} while they are away, and whatever you
-                    answer is recorded in both names. It stops reaching you when the cover
-                    ends.
-                </p>
+                <x-filament::callout color="warning" icon="heroicon-m-exclamation-triangle">
+                    <x-slot name="heading">
+                        This is {{ $awayPerson }}'s to decide. You have it because you are
+                        covering for {{ $awayPerson }} while they are away, and whatever you
+                        answer is recorded in both names. It stops reaching you when the
+                        cover ends.
+                    </x-slot>
+                </x-filament::callout>
             @endif
 
             {{-- The whole reason this is marked: a step that reached this list because the
@@ -94,11 +111,13 @@
                  person's job, and approving the second believing it was the first is the
                  failure the warning exists to prevent. --}}
             @if ($nobodyHolds)
-                <p class="text-sm font-medium text-amber-600 dark:text-amber-400">
-                    Nobody holds the role this step asked for, so it came to you as the
-                    company's stand-in. You can act on it, and appointing somebody to the
-                    role is the real fix.
-                </p>
+                <x-filament::callout color="warning" icon="heroicon-m-exclamation-triangle">
+                    <x-slot name="heading">
+                        Nobody holds the role this step asked for, so it came to you as the
+                        company's stand-in. You can act on it, and appointing somebody to
+                        the role is the real fix.
+                    </x-slot>
+                </x-filament::callout>
             @endif
 
             <p class="text-sm text-gray-500 dark:text-gray-400">

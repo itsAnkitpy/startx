@@ -622,3 +622,35 @@ it('says a filter is hiding things rather than that nothing is waiting', functio
             ->assertSee('Nothing waiting on you matches the filter.');
     });
 });
+
+it('gives each card its step name as a heading', function () {
+    TenantContext::run($this->meridian, function () {
+        // Four cards, and until now the only thing telling one from the next was bold
+        // text. Somebody reading this screen aloud had to listen through every question
+        // on every card in order to reach the fourth. A heading is what a screen reader
+        // jumps between, so this asks for the name to be one rather than to merely look
+        // like one.
+        $html = Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
+            ->assertOk()
+            ->html();
+
+        expect($html)->toMatch('/<h2[^>]*>\s*Line-of-business approval\s*<\/h2>/');
+    });
+});
+
+it('draws a card\'s warning as a warning rather than as another line of the card', function () {
+    TenantContext::run($this->meridian, function () {
+        // The sentence saying an approval is Rakesh's and Priya only has it while she
+        // covers for him is the one sentence on this screen that must not be skimmed
+        // past. It used to be written in an amber that sat at about three to one against
+        // the white card behind it, where anything carrying text is meant to reach four
+        // and a half — so the four sentences somebody most needs were the four hardest to
+        // read. Filament's own callout draws them in the colour the rest of the card uses,
+        // on a tint, with the sentence as its heading.
+        $html = Livewire::actingAs(atMeridianCalled('priya'))->test(MyQueue::class)
+            ->assertOk()
+            ->html();
+
+        expect($html)->toMatch('/fi-callout(?:(?!fi-callout).)*covering for Rakesh Menon/s');
+    });
+});

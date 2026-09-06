@@ -59,7 +59,7 @@ class OfficeForm
                 // disagrees with the country beside it, so the form has to say both in
                 // ordinary words first.
                 TextInput::make('state_code')
-                    ->label('State')
+                    ->label('State code')
                     ->helperText('The state\'s code, which starts with the country — IN-HP for Himachal Pradesh, IN-MH for Maharashtra. Leave it empty for a country with no states.')
                     ->maxLength(6)
                     ->dehydrateStateUsing(fn (?string $state): ?string => self::inCapitals($state))

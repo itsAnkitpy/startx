@@ -30,8 +30,13 @@ class OfficesTable
                     ->searchable()
                     ->sortable(),
 
+                // "State code", not "State". The column beside it saying whether the
+                // office is in use is a state as well, and one table using the same word
+                // for a province and for whether something is switched on is a table
+                // nobody reads twice the same way. This is the code that is typed —
+                // IN-HP — so the label says so.
                 TextColumn::make('state_code')
-                    ->label('State')
+                    ->label('State code')
                     ->placeholder('None')
                     ->searchable()
                     ->sortable(),
