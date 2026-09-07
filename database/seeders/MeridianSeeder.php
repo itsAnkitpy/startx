@@ -15,6 +15,7 @@ use App\Models\ProcessTemplate;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Process\AssigneeResolver;
 use App\Process\CaseEngine;
 use App\Process\StepLink;
@@ -62,6 +63,7 @@ class MeridianSeeder extends Seeder
             $people = $this->people($units, $this->offices());
 
             $this->rolesTheyHold($people, $units);
+            $this->theMessagesTheySend();
 
             // Nobody holds HR head over Pune, so Rohit's clearance has no one to fall to
             // unless the client has named a stand-in. Naming Chandni means the vacant
@@ -76,6 +78,33 @@ class MeridianSeeder extends Seeder
             $this->hiringRequestsWaitingOnRakesh($this->hiringRequestProcess(), $people, $units);
             $this->priyaCoveringRakeshWhileHeIsAway($people);
         });
+    }
+
+    /**
+     * The messages this company sends, with one of them already in their own words.
+     *
+     * Meridian has rewritten the chase-up, which is what makes the wording screen worth
+     * opening on a fresh demo: one row says the words are theirs and the rest say the
+     * words are ours, so the difference is on screen rather than something to be set up
+     * first. Their version is deliberately blunter than ours, which is what a real client
+     * does to a chase-up their own staff have started ignoring.
+     */
+    private function theMessagesTheySend(): void
+    {
+        $templates = TemplateCatalogue::seed();
+
+        $templates[TemplateCatalogue::StepReminderHolder]->update([
+            'subject' => 'Second ask: {{ step.name }} on {{ case.number }}',
+            'body' => <<<'TEXT'
+                {{ person.name }},
+
+                {{ step.name }} on {{ case.number }} is still open{{ step.on_behalf_of }} and is due by {{ step.due_at }}. Meridian is on the hook for a legal deadline behind it.
+
+                Please clear it today: {{ case.link }}
+
+                Meridian Logistics
+                TEXT,
+        ]);
     }
 
     /**

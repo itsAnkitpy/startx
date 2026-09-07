@@ -7,6 +7,7 @@ use App\Filament\Platform\Resources\Tenants\TenantResource;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Tenancy\TenantContext;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -19,8 +20,8 @@ class CreateTenant extends CreateRecord
     /**
      * Setting a client company up is the one thing that genuinely cannot belong to a
      * client's own administrator, because the company does not exist yet and so nobody
-     * inside it can act. Three writes, all or nothing: the company, its starting roles,
-     * and its first administrators.
+     * inside it can act. Four writes, all or nothing: the company, its starting roles,
+     * its first administrators, and the wording of every message it will send.
      *
      * The company row itself is the one table the tenant wall is built around, so it
      * writes on the plain address like any other row. Everything after it is walled and
@@ -43,6 +44,11 @@ class CreateTenant extends CreateRecord
                 // Its first caller outside the test suite. The labels are theirs to
                 // rename from here on, and no permission check reads any of them by name.
                 $administratorRole = StarterRoles::seed()[Role::AdministratorKey];
+
+                // Every message the product sends, with our wording in it, so a step can
+                // never name a message this company has no words for. Theirs to reword
+                // from here on, and a message we add later arrives beside what they wrote.
+                TemplateCatalogue::seed();
 
                 foreach ($administrators as $administrator) {
                     $person = User::create($administrator);

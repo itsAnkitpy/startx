@@ -14,6 +14,7 @@ use App\Models\ProcessTemplate;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Process\CaseEngine;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
@@ -164,6 +165,12 @@ class VertexSeeder extends Seeder
             $people = $this->people($plant, $this->office());
 
             $this->rolesTheyHold($people);
+
+            // Vertex has not touched a word of them, which is the other half of what
+            // makes the wording screen worth opening: Meridian's chase-up is in their own
+            // words and Vertex's is in ours, on two companies that differ by nothing but
+            // rows.
+            TemplateCatalogue::seed();
 
             // No stand-in is named here on purpose. A clearance whose role has no
             // holder stops where it is, and Meridian is where the stand-in path can be

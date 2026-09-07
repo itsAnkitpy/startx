@@ -107,6 +107,20 @@ final class Permission
     public const SettleHandover = 'settle_handover';
 
     /**
+     * Rewording the messages this product sends on the client's behalf.
+     *
+     * Apart from {@see ManageSettings} even though both change what happens on every case
+     * from now on, because this one is the company's own voice: whoever writes to a
+     * departing employee about money claimed against them is writing something a tribunal
+     * may read, and a company may well want that in fewer hands than the salary threshold.
+     *
+     * There is no separate action for reading them. Only somebody who can change the
+     * wording has any reason to open the screen, and the words themselves reach every
+     * person the messages are sent to anyway.
+     */
+    public const ManageNotificationTemplate = 'manage_notification_template';
+
+    /**
      * The same actions, in the words a client reads on the roles screen, grouped by the
      * thing each one is about.
      *
@@ -214,6 +228,10 @@ final class Permission
                     self::ManageSettings => [
                         'label' => 'Change the company settings',
                         'description' => 'The salary above which a hire needs the director, and who picks up a step nobody holds. These change what happens on every case from now on.',
+                    ],
+                    self::ManageNotificationTemplate => [
+                        'label' => 'Reword the messages sent in your name',
+                        'description' => 'The emails your staff and your leavers receive. You change the subject line and the wording; you cannot add a message, remove one, or stop one being sent. Whoever holds this writes what a departing employee is told about money claimed against them, so it is worth keeping in the same hands as the settings above rather than wider.',
                     ],
                 ],
             ],

@@ -4,10 +4,12 @@ use App\Authorization\Permission;
 use App\Authorization\StarterRoles;
 use App\Filament\Platform\Auth\Login as PlatformLogin;
 use App\Filament\Platform\Resources\Tenants\Pages\CreateTenant;
+use App\Models\NotificationTemplate;
 use App\Models\PlatformUser;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Tenancy\TenantContext;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
@@ -113,7 +115,13 @@ it('sets a client company up with its starting roles and its first administrator
 
     TenantContext::run($meridian, function () {
         expect(Role::query()->count())->toBe(count(StarterRoles::definitions()))
-            ->and(User::query()->count())->toBe(2);
+            ->and(User::query()->count())->toBe(2)
+            // And words for every message it will ever send. Without them a step
+            // reaches the moment it should write to somebody and has nothing to send,
+            // which is the silent failure module 06 exists to remove — so the check
+            // belongs on the path that sets a company up rather than only on the
+            // catalogue's own tests.
+            ->and(NotificationTemplate::query()->count())->toBe(count(TemplateCatalogue::definitions()));
 
         $administrator = Role::query()->where('key', Role::AdministratorKey)->sole();
 
