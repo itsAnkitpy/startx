@@ -19,6 +19,7 @@ use App\Process\PublishCheck;
 use App\Process\StepLink;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
 
@@ -183,7 +184,7 @@ it('refuses to publish a step that both waits on a link and escalates to an empl
     });
 });
 
-it('registers no scheduled pass of its own', function () {
+it('registers no scheduled pass of its own beside module 06 own', function () {
     // The one scheduled pass in the whole system belongs to module 06, and two passes
     // walking the same overdue work means either two chase-ups or each assuming the other
     // is doing it. Read from the source rather than from a list that only fills in once
@@ -198,7 +199,8 @@ it('registers no scheduled pass of its own', function () {
 
     Artisan::call('schedule:list');
 
-    expect(Artisan::output())->toContain('No scheduled tasks have been defined');
+    expect(Artisan::output())->toContain('steps:chase')
+        ->and(app(Schedule::class)->events())->toHaveCount(1);
 });
 
 it('sends a link to the leaver personal address and lets them answer once', function () {

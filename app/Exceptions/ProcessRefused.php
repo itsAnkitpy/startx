@@ -587,4 +587,39 @@ class ProcessRefused extends RuntimeException
     {
         return new self("[{$outcome}] is not something the person answering [{$step}] can choose.");
     }
+
+    /**
+     * A chase pressed on a step nobody here can be chased about: it has moved on since the
+     * page loaded, or it is answered through a link by somebody with no account, or the one
+     * person holding it is the one pressing.
+     */
+    public static function nobodyToChase(string $step): self
+    {
+        return new self("There is nobody to chase about {$step} just now.");
+    }
+
+    /**
+     * A second chase about the same step on the same day. One per holder, per step, per
+     * day, counted from the record of what was sent, so the button cannot become a way to
+     * flood somebody whose own choice of when they are told it is already overriding.
+     *
+     * @param  list<string>  $names
+     */
+    public static function alreadyChasedToday(string $step, array $names): self
+    {
+        $who = implode(' and ', $names).(count($names) === 1 ? ' has' : ' have');
+
+        return new self("{$who} already been chased about {$step} today. You can chase again tomorrow.");
+    }
+
+    /**
+     * A chase pressed while the mail server would not take it. Said rather than reported as
+     * sent, and it does not count as the day's chase, so pressing again later works.
+     *
+     * @param  list<string>  $names
+     */
+    public static function chaseDidNotGo(string $step, array $names): self
+    {
+        return new self('The email to '.implode(' and ', $names)." about {$step} did not go out. Try again in a few minutes.");
+    }
 }

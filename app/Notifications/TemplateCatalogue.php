@@ -272,15 +272,17 @@ class TemplateCatalogue
                 'goes_to' => 'Whoever is holding the work today, including anybody covering',
                 'sent_when' => 'A person presses the chase button on the case',
                 'bypasses_digest' => true,
+                // No due date, because a hiring request is about nobody and its steps have
+                // none — the sentence would have read "It is due by ." on Anjali's chase.
                 'tokens' => [
                     'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
-                    'step.name', 'step.due_at', 'step.on_behalf_of', 'chased_by.name',
+                    'step.name', 'step.on_behalf_of', 'chased_by.name',
                 ],
                 'subject' => '{{ chased_by.name }} is waiting on {{ step.name }} — {{ case.number }}',
                 'body' => <<<'TEXT'
                     {{ person.name }},
 
-                    {{ chased_by.name }} has asked you to look at {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}{{ step.on_behalf_of }}. It is due by {{ step.due_at }}.
+                    {{ chased_by.name }} has asked you to look at {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}{{ step.on_behalf_of }}.
 
                     Open it here: {{ case.link }}
 

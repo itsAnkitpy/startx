@@ -31,7 +31,10 @@ use Illuminate\Support\Facades\DB;
 */
 
 beforeEach(function () {
-    $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
+    // On UTC's clock, so every time written below is the company's own wall-clock time. A
+    // step's clock counts on the company's clock, and that rule has its own test with a
+    // company in India, in module 06's chasing tests.
+    $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian', 'timezone' => 'UTC']);
 });
 
 /**
@@ -422,9 +425,10 @@ it('finds every overdue step across many cases without asking the database per c
         expect($available)->toHaveCount(40)
             ->and($available->every(fn (AvailableStep $step) => $step->escalationOwed))->toBeTrue();
 
-        // Six for the reading itself and not one more for the chasing, because nobody
-        // holds any of these steps so no manager has to be looked up.
-        expect($queries)->toBe(6);
+        // Seven for the reading itself — one of them the company, for its clock — and not
+        // one more for the chasing, because nobody holds any of these steps so no manager
+        // has to be looked up.
+        expect($queries)->toBe(7);
     });
 });
 

@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @see TemplateCatalogue for what each message is called and what sends it
  */
 #[Fillable([
-    'case_id', 'step_sequence', 'recipient_user_id', 'recipient_address',
+    'case_id', 'step_sequence', 'recipient_user_id', 'recipient_address', 'triggered_by',
     'template_key', 'channel', 'subject', 'body', 'status',
 ])]
 class NotificationDelivery extends Model
@@ -60,6 +60,12 @@ class NotificationDelivery extends Model
         return $this->belongsTo(User::class, 'recipient_user_id');
     }
 
+    /** Whoever pressed the chase button. Null on everything the product sent by itself. */
+    public function triggeredBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'triggered_by');
+    }
+
     /**
      * What this message is called, read from the catalogue rather than stored beside the
      * wording — the same rule the wording row follows, for the same reason.
@@ -79,6 +85,12 @@ class NotificationDelivery extends Model
      */
     public function whyItWentOut(): string
     {
+        // A chase somebody pressed names them, which is what keeps it a person chasing a
+        // person rather than an anonymous system mail.
+        if ($this->triggeredBy instanceof User) {
+            return $this->triggeredBy->name.' pressed the chase button';
+        }
+
         return TemplateCatalogue::anyMessage($this->template_key)['sent_when'] ?? '';
     }
 

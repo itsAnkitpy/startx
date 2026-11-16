@@ -44,6 +44,7 @@ final class Sender
      *
      * @param  User|array{name: string, email: string}  $to  somebody here, or somebody with no account
      * @param  array<string, string|int|float|null>  $values  facts this message needs beyond the case's own
+     * @param  User|null  $chasedBy  whoever pressed the chase button, where a person sent it rather than the product
      */
     public function send(
         ProcessCase $case,
@@ -51,6 +52,7 @@ final class Sender
         User|array $to,
         array $values = [],
         ?int $stepSequence = null,
+        ?User $chasedBy = null,
     ): ?NotificationDelivery {
         $template = NotificationTemplate::query()->where('key', $key)->first();
 
@@ -77,6 +79,7 @@ final class Sender
             Wording::filledIn($template->subject, $values),
             Wording::filledIn($template->body, $values),
             $stepSequence,
+            $chasedBy,
         );
     }
 
@@ -117,6 +120,7 @@ final class Sender
         string $subject,
         string $body,
         ?int $stepSequence,
+        ?User $chasedBy = null,
     ): ?NotificationDelivery {
         // Cut to what the record holds. A client's subject line may be the full 255 on its
         // own, and the facts put into it can only make it longer — a refused record would be
@@ -141,6 +145,7 @@ final class Sender
             'step_sequence' => $stepSequence,
             'recipient_user_id' => $person['user']?->getKey(),
             'recipient_address' => $person['email'],
+            'triggered_by' => $chasedBy?->getKey(),
             'template_key' => $key,
             'channel' => NotificationDelivery::Email,
             'subject' => $subject,

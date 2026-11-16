@@ -1124,11 +1124,12 @@ it('answers whose turn it is across five hundred open cases in a fixed number of
         // 330 cases waiting on the manager, 170 waiting on two clearances each.
         expect($available)->toHaveCount(330 + (170 * 2));
 
-        // Six, and six however many cases there are: the frozen versions, their steps,
-        // the live rows, and the three that fetch the one calendar the clocks count
-        // against — the job rows the cases are pinned to, their offices, and those
-        // offices' holidays. Not one per case, which is the whole promise.
-        expect($queries)->toBe(6);
+        // Seven, and seven however many cases there are: the company, for the clock its
+        // calendar is read on, the frozen versions, their steps, the live rows, and the
+        // three that fetch the one calendar the clocks count against — the job rows the
+        // cases are pinned to, their offices, and those offices' holidays. Not one per
+        // case, which is the whole promise.
+        expect($queries)->toBe(7);
 
         // The wall clock is the one that must not be traded away — a fixed query count
         // with the walking done in PHP over five hundred cases is exactly how Airflow's

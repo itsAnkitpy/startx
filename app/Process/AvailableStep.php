@@ -30,6 +30,8 @@ use Carbon\CarbonImmutable;
  * - `nudgesOwed` — how many staged reminders have fallen due by now: one past half the
  *   target, two past three-quarters. It is what is owed in total rather than what is
  *   new, because what has already been sent is the notification log's answer to give.
+ * - `lastNudgeDueAt` — when the most recent of those fell due. A reminder sent since then
+ *   answers every stage before it, which is how several missed chases collapse into one.
  * - `escalationOwed` — whether the target has run out, which is the moment the chase
  *   goes above whoever is holding it. At the deadline rather than after it, because
  *   against a two-working-day statutory clock a chase that lands after the breach is
@@ -59,5 +61,6 @@ final readonly class AvailableStep
         public int $nudgesOwed = 0,
         public bool $escalationOwed = false,
         public ?User $escalateTo = null,
+        public ?CarbonImmutable $lastNudgeDueAt = null,
     ) {}
 }

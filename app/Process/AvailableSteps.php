@@ -116,6 +116,7 @@ final class AvailableSteps
         // relation rather than querying, so an office without them costs a query for
         // every date asked about.
         $cases->loadMissing([
+            'tenant',
             'template.steps',
             'liveSteps',
             'subjectEmploymentRecord.office.holidays',
@@ -242,18 +243,25 @@ final class AvailableSteps
             return $available;
         }
 
-        $since = $available->availableSince;
+        // Counted on the client's own clock. The calendar works in whole days, and which
+        // day a moment falls on depends on the clock it is read against: on UTC's, an
+        // Indian office's Saturday would start at half past five in the morning and its
+        // Monday would not start until then either.
+        $since = $available->availableSince->setTimezone($available->case->tenant->timezone);
         $dueAt = $calendar->addWorkingHours($since, $hours);
         $now = CarbonImmutable::now();
+
+        [$nudgesOwed, $lastNudgeDueAt] = $this->nudgesOwedBy($available->step, $calendar, $since, $hours, $now, $dueAt);
 
         return new AvailableStep(
             case: $available->case,
             step: $available->step,
-            availableSince: $since,
+            availableSince: $available->availableSince,
             attempt: $available->attempt,
             dueAt: $dueAt,
-            nudgesOwed: $this->nudgesOwedBy($available->step, $calendar, $since, $hours, $now, $dueAt),
+            nudgesOwed: $nudgesOwed,
             escalationOwed: $now->greaterThanOrEqualTo($dueAt),
+            lastNudgeDueAt: $lastNudgeDueAt,
         );
     }
 
@@ -276,7 +284,10 @@ final class AvailableSteps
      *
      * This is what is owed in total, not what is new. What has already gone out is the
      * notification log's answer to give, and it is the only thing that stops a reminder
-     * repeating.
+     * repeating. Beside it comes the moment the most recent stage fell due, so that log
+     * can be asked whether anything has gone since.
+     *
+     * @return array{int, CarbonImmutable|null}
      */
     private function nudgesOwedBy(
         ProcessStep $step,
@@ -285,21 +296,29 @@ final class AvailableSteps
         int $hours,
         CarbonImmutable $now,
         CarbonImmutable $dueAt,
-    ): int {
-        $fractions = collect($step->reminder_rule['nudge_at'] ?? self::NudgeAt);
+    ): array {
+        $fractions = collect($step->reminder_rule['nudge_at'] ?? self::NudgeAt)
+            ->map(fn (mixed $fraction) => (float) $fraction)
+            ->sort()
+            ->values();
+
+        if ($fractions->isEmpty()) {
+            return [0, null];
+        }
 
         // Past the target, every stage before it has fallen due — publishing refuses a
         // fraction that is not short of the whole target. Worth its own line because the
         // scheduled pass that chases people reads mostly overdue steps.
         if ($now->greaterThanOrEqualTo($dueAt)) {
-            return $fractions->count();
+            return [$fractions->count(), $calendar->addWorkingHours($since, $hours * $fractions->last())];
         }
 
-        return $fractions
-            ->filter(fn (mixed $fraction) => $now->greaterThanOrEqualTo(
-                $calendar->addWorkingHours($since, $hours * (float) $fraction)
-            ))
-            ->count();
+        $fallenDue = $fractions
+            ->map(fn (float $fraction) => $calendar->addWorkingHours($since, $hours * $fraction))
+            ->filter(fn (CarbonImmutable $at) => $now->greaterThanOrEqualTo($at))
+            ->values();
+
+        return [$fallenDue->count(), $fallenDue->last()];
     }
 
     /**
@@ -349,6 +368,7 @@ final class AvailableSteps
                 nudgesOwed: $step->nudgesOwed,
                 escalationOwed: true,
                 escalateTo: $manager,
+                lastNudgeDueAt: $step->lastNudgeDueAt,
             );
         });
     }

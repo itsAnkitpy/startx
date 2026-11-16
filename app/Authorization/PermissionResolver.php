@@ -6,6 +6,8 @@ use App\Models\OrgUnit;
 use App\Models\RoleAssignment;
 use App\Models\User;
 use App\Tenancy\TenantContext;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Query\JoinClause;
 
 /**
@@ -126,6 +128,24 @@ class PermissionResolver
     }
 
     /**
+     * Everybody whose account is live and who holds the action somewhere — the people
+     * {@see allows()} says yes to when asked with no unit.
+     *
+     * The same question asked the other way round, for a message that goes to everybody
+     * who can do something rather than to one person who might.
+     *
+     * @return Collection<int, User>
+     */
+    public function whoMayAnywhere(string $permission): Collection
+    {
+        return User::query()
+            ->where('active', true)
+            ->whereIn('id', $this->assignmentsCarrying($permission)->select('role_assignments.user_id'))
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
      * Forget everything remembered so far. Needed only where a grant is changed and the
      * same request then asks again — a test, or a screen that grants a role and
      * immediately re-renders.
@@ -190,13 +210,8 @@ class PermissionResolver
     {
         $key = (TenantContext::id() ?? '-').'|'.$user->getKey().'|'.$permission;
 
-        return $this->grants[$key] ??= RoleAssignment::query()
-            ->join('role_permissions', function (JoinClause $join): void {
-                $join->on('role_permissions.role_id', '=', 'role_assignments.role_id')
-                    ->on('role_permissions.tenant_id', '=', 'role_assignments.tenant_id');
-            })
+        return $this->grants[$key] ??= $this->assignmentsCarrying($permission)
             ->where('role_assignments.user_id', $user->getKey())
-            ->where('role_permissions.permission', $permission)
             ->distinct()
             ->toBase()
             ->get(['role_assignments.org_unit_id', 'role_assignments.includes_descendants'])
@@ -205,6 +220,22 @@ class PermissionResolver
                 'includes_descendants' => (bool) $row->includes_descendants,
             ])
             ->all();
+    }
+
+    /**
+     * Every role assignment whose role carries this action. The one place the two tables
+     * are joined, so "may this person" and "who may" cannot come to disagree.
+     *
+     * @return Builder<RoleAssignment>
+     */
+    private function assignmentsCarrying(string $permission): Builder
+    {
+        return RoleAssignment::query()
+            ->join('role_permissions', function (JoinClause $join): void {
+                $join->on('role_permissions.role_id', '=', 'role_assignments.role_id')
+                    ->on('role_permissions.tenant_id', '=', 'role_assignments.tenant_id');
+            })
+            ->where('role_permissions.permission', $permission);
     }
 
     /**

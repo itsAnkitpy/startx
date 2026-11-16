@@ -7,6 +7,9 @@ use App\Filament\Resources\Cases\CaseResource;
 use App\Models\ProcessCase;
 use App\Models\Succession;
 use App\Models\User;
+use App\Notifications\Chasing;
+use App\Process\AvailableStep;
+use App\Process\AvailableSteps;
 use App\Process\CaseHistory;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -34,8 +37,107 @@ class ViewCase extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            $this->chase(),
             $this->handOverTheirWork(),
         ];
+    }
+
+    /**
+     * Chase whoever is holding a step up, by hand, with your name on it.
+     *
+     * Here rather than on a deadlines screen, because the case page is where somebody goes
+     * to look at a stuck case. Anybody who can open the case may press it — whoever raised
+     * it, and whoever holds a role over the person it is about — and nobody else can open
+     * it, so the whole company cannot use it to pester one department.
+     *
+     * It goes at once, whatever the day, to whoever holds the step today, and only once a
+     * day each. The second press is refused with a sentence rather than the button
+     * disappearing, so it says why.
+     */
+    private function chase(): Action
+    {
+        return Action::make('chase')
+            ->label('Chase')
+            ->icon('heroicon-o-bell-alert')
+            ->visible(fn (): bool => $this->whatCanBeChased() !== [])
+            ->modalHeading('Chase whoever is holding this up')
+            ->modalDescription('They are emailed straight away, with your name on it, and it shows below under what we sent. Each person can be chased about each step once a day.')
+            ->modalSubmitActionLabel('Chase them')
+            ->schema([
+                Select::make('sequence')
+                    ->label('Which step')
+                    ->options(fn (): array => $this->whatCanBeChased())
+                    ->default(fn (): ?int => count($this->whatCanBeChased()) === 1 ? array_key_first($this->whatCanBeChased()) : null)
+                    ->native(false)
+                    ->required()
+                    ->validationMessages([
+                        'required' => 'Choose which step to chase.',
+                    ]),
+            ])
+            ->action(function (array $data, Action $action): void {
+                /** @var ProcessCase $case */
+                $case = $this->getRecord();
+
+                // The list below reads what was sent off the copy of the case this page is
+                // holding, which was loaded before the chase existed — and a chase that did
+                // not go out shows there too.
+                $case->unsetRelation('messagesSent');
+
+                try {
+                    $chased = (new Chasing)->byHand($case, (int) $data['sequence'], auth()->user());
+                } catch (ProcessRefused $refused) {
+                    Notification::make()
+                        ->danger()
+                        ->title('Nobody was chased')
+                        ->body($refused->getMessage())
+                        ->send();
+
+                    $action->halt();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->success()
+                    ->title('Chased '.$chased->pluck('name')->join(', ', ' and '))
+                    ->body('They have been emailed just now.')
+                    ->send();
+            });
+    }
+
+    /**
+     * Each step waiting on somebody this person could chase, named with who holds it.
+     *
+     * **Private, for the same reason as the sentence below:** a public method on a page is
+     * one the browser may call by name.
+     *
+     * @return array<int, string>
+     */
+    private function whatCanBeChased(): array
+    {
+        /** @var ProcessCase $case */
+        $case = $this->getRecord();
+        $person = auth()->user();
+
+        if (! $person instanceof User) {
+            return [];
+        }
+
+        // Asked by the button's visibility, its list and its default in one request; worked
+        // out once.
+        return once(function () use ($case, $person): array {
+            $chasing = new Chasing;
+
+            return (new AvailableSteps)->for($case)
+                ->mapWithKeys(function (AvailableStep $step) use ($chasing, $person): array {
+                    $holders = $chasing->whoCanBeChasedBy($step, $person);
+
+                    return $holders->isEmpty()
+                        ? []
+                        : [(int) $step->step->sequence => $step->step->name.' — '.$holders->pluck('name')->join(', ', ' and ')];
+                })
+                ->all();
+        });
     }
 
     /**

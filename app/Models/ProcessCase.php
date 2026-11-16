@@ -264,6 +264,6 @@ class ProcessCase extends Model
      */
     public function messagesSent(): HasMany
     {
-        return $this->hasMany(NotificationDelivery::class, 'case_id')->with('recipient')->latest('id');
+        return $this->hasMany(NotificationDelivery::class, 'case_id')->with('recipient', 'triggeredBy')->latest('id');
     }
 }
