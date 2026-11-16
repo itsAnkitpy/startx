@@ -6,6 +6,7 @@ use App\Models\FormField;
 use App\Models\ProcessCase;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
+use Filament\Support\Facades\FilamentTimezone;
 
 /**
  * The fixed panel above every step's form: what the person acting has to know before
@@ -97,7 +98,7 @@ final class SubjectPanel
             // The whole claim of the panel, said on the panel. Without it a designation
             // read a year after the exit closed looks like today's.
             'asOf' => 'As they were when this case opened on '
-                .$case->opened_at->format('j F Y').', not as they are today.',
+                .$case->opened_at->timezone(FilamentTimezone::get())->format('j F Y').', not as they are today.',
         ];
     }
 

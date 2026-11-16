@@ -185,6 +185,37 @@ it('refuses the same address twice, before the company row is written', function
     expect(Tenant::query()->count())->toBe(0);
 });
 
+it('sets a company up in its own time zone, and in India unless told otherwise', function () {
+    Filament::setCurrentPanel('platform');
+    $ankit = platformUser();
+
+    // Nothing on any screen could set this before, so a client outside India read every
+    // time on India's clock.
+    Livewire::actingAs($ankit, 'platform')
+        ->test(CreateTenant::class)
+        ->fillForm([...newCompanyForm(), 'timezone' => 'America/New_York'])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(Tenant::query()->sole()->timezone)->toBe('America/New_York');
+
+    Livewire::actingAs($ankit, 'platform')
+        ->test(CreateTenant::class)
+        ->assertSchemaStateSet(['timezone' => 'Asia/Kolkata']);
+});
+
+it('refuses a time zone that does not exist', function () {
+    Filament::setCurrentPanel('platform');
+
+    Livewire::actingAs(platformUser(), 'platform')
+        ->test(CreateTenant::class)
+        ->fillForm([...newCompanyForm(), 'timezone' => 'Asia/Atlantis'])
+        ->call('create')
+        ->assertHasFormErrors(['timezone']);
+
+    expect(Tenant::query()->count())->toBe(0);
+});
+
 it('refuses an address that is not the shape of one', function () {
     Filament::setCurrentPanel('platform');
     $ankit = platformUser();

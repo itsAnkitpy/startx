@@ -12,6 +12,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
+use Filament\Support\Facades\FilamentTimezone;
 
 class WhatHappenedOnIt
 {
@@ -57,9 +58,11 @@ class WhatHappenedOnIt
                                 default => 'info',
                             }),
 
+                        // A moment shown as a day, which Filament reads on UTC's calendar
+                        // unless told otherwise.
                         TextEntry::make('opened_at')
                             ->label('Started')
-                            ->date(),
+                            ->date(timezone: FilamentTimezone::get()),
 
                         TextEntry::make('initiatedBy.first_name')
                             ->label('Raised by')

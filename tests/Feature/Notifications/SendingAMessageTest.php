@@ -279,6 +279,22 @@ it('dates a finished case on the client own calendar rather than the server one'
     });
 });
 
+it('dates a finished case on the recipient own calendar where they have one of their own', function () {
+    TenantContext::run($this->meridian, function () {
+        // 2 December in India, where Meridian is, and still 1 December in New York.
+        $this->travelTo('2026-12-01 20:00:00');
+
+        $rohit = whoIsOnMeridiansStaff('rohit');
+        $rohit->update(['timezone' => 'America/New_York']);
+
+        $case = (new CaseEngine)->open(anExitThatFinishesAsItOpens(), $rohit, whoIsOnMeridiansStaff('chandni'));
+
+        expect(NotificationDelivery::query()->where('case_id', $case->getKey())
+            ->where('template_key', TemplateCatalogue::CaseClosedSubject)->sole()->body)
+            ->toContain('completed on 1 December 2026');
+    });
+});
+
 it('tells nobody anything when a case is turned down rather than finished', function () {
     TenantContext::run($this->meridian, function () {
         $rakeshs = rakeshsSeededExit();

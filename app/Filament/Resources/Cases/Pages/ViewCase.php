@@ -8,12 +8,12 @@ use App\Models\ProcessCase;
 use App\Models\Succession;
 use App\Models\User;
 use App\Process\CaseHistory;
-use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Support\Facades\FilamentTimezone;
 
 /**
  * One case, with the whole story of it underneath — and, on the exit of somebody who has
@@ -78,7 +78,9 @@ class ViewCase extends ViewRecord
 
                 DatePicker::make('effective_at')
                     ->label('From which day')
-                    ->default(CarbonImmutable::now()->toDateString())
+                    // Today on the reader's calendar, not UTC's: at half past one in the
+                    // morning in India, UTC's today is still yesterday.
+                    ->default(fn (): string => today(FilamentTimezone::get())->toDateString())
                     ->required()
                     ->helperText('Usually the day after their last working day. Everybody who reported to them gets a new dated row starting on this date, and their old one keeps its end date.')
                     ->validationMessages([

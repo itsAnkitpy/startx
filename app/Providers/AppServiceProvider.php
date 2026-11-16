@@ -9,6 +9,7 @@ use App\Process\AssigneeResolver;
 use App\Process\StepForm;
 use App\Settings\SettingDeclaration;
 use App\Settings\Settings;
+use Filament\Support\Facades\FilamentTimezone;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Builder;
@@ -71,6 +72,18 @@ class AppServiceProvider extends ServiceProvider
                 ? $provider->withQuery(fn (Builder $query) => $query->where('active', true))
                 : $provider;
         });
+
+        // Every moment on a client's screens in the reader's own time zone, else their
+        // company's. Stored times stay UTC; this only changes how they are shown.
+        //
+        // A closure, so it is read when a time is shown rather than when the app boots —
+        // by then the person is signed in, on a first page load and on Livewire's own
+        // update requests alike, with no middleware to order. Our own area signs in a
+        // different kind of account and gets UTC, as does anything with nobody signed in.
+        // Filament never applies it to a date with no time of day, so those cannot shift.
+        FilamentTimezone::set(fn (): ?string => ($person = Auth::user()) instanceof User
+            ? $person->timezone ?? $person->tenant->timezone
+            : null);
     }
 
     /**

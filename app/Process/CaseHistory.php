@@ -9,6 +9,7 @@ use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Succession;
 use App\Models\User;
+use Filament\Support\Facades\FilamentTimezone;
 
 /**
  * What actually happened on a case, in the words somebody reading it a year later needs.
@@ -371,7 +372,7 @@ class CaseHistory
 
         $trail = $acted === null ? [] : (array) $acted->payload;
 
-        return "{$said} by {$who} on ".$row->acted_at->format('j F Y')
+        return "{$said} by {$who} on ".$row->acted_at->timezone(FilamentTimezone::get())->format('j F Y')
             .$this->onWhoseBehalf($trail).'.'
             .($acted === null ? '' : $this->andWhy($case, $trail));
     }
@@ -438,7 +439,7 @@ class CaseHistory
             $to = (string) (((array) ($said['to'] ?? []))['name'] ?? 'somebody');
             $because = trim((string) ($said['because'] ?? ''));
 
-            return "Moved from {$from} to {$to} on ".$event->created_at->format('j F Y').'.'
+            return "Moved from {$from} to {$to} on ".$event->created_at->timezone(FilamentTimezone::get())->format('j F Y').'.'
                 .($because === '' ? '' : " Why: {$because}.");
         }
 
@@ -450,7 +451,7 @@ class CaseHistory
             ? 'Sent back to here'
             : (self::Said[$said['outcome'] ?? ''] ?? 'Answered');
 
-        return "{$what} by {$who} on ".$event->created_at->format('j F Y')
+        return "{$what} by {$who} on ".$event->created_at->timezone(FilamentTimezone::get())->format('j F Y')
             .$this->onWhoseBehalf($said).'.'.$this->andWhy($case, $said);
     }
 

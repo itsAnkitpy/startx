@@ -2,7 +2,9 @@
 
 namespace App\Filament\Platform\Resources\Tenants\Schemas;
 
+use DateTimeZone;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
@@ -47,6 +49,18 @@ class TenantForm
                             ->label('Registered name')
                             ->helperText('The name on their paperwork, if it differs. Used on letters.')
                             ->maxLength(255),
+
+                        // Only real zones are on the list, and a select refuses anything not
+                        // on its list, so nothing else can be saved.
+                        Select::make('timezone')
+                            ->label('Time zone')
+                            ->helperText('Every time their people see, on screen and in email, is shown in this zone.')
+                            ->options(collect(DateTimeZone::listIdentifiers())
+                                ->mapWithKeys(fn (string $zone): array => [$zone => str_replace('_', ' ', $zone)])
+                                ->all())
+                            ->searchable()
+                            ->required()
+                            ->default('Asia/Kolkata'),
 
                         // Switched off is what the "signing in is not available" page reads.
                         // Not offered while creating, because a company nobody can sign in to

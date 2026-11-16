@@ -6,6 +6,7 @@ use App\Filament\Resources\Cases\CaseResource;
 use App\Models\ProcessCase;
 use App\Process\CaseHistory;
 use Filament\Actions\ViewAction;
+use Filament\Support\Facades\FilamentTimezone;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -101,7 +102,8 @@ class CasesTable
 
                 TextColumn::make('opened_at')
                     ->label('Started')
-                    ->date()
+                    // A moment shown as a day, on the reader's calendar rather than UTC's.
+                    ->date(timezone: FilamentTimezone::get())
                     ->sortable(),
 
                 TextColumn::make('initiatedBy.first_name')

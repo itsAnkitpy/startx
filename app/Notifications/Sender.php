@@ -68,7 +68,7 @@ final class Sender
         }
 
         $person = $this->whoAndWhere($case, $to);
-        $values = [...$this->factsAbout($case, $person['name']), ...$values];
+        $values = [...$this->factsAbout($case, $person['name'], $person['user']?->timezone), ...$values];
 
         return $this->deliver(
             $case,
@@ -207,7 +207,7 @@ final class Sender
      *
      * @return array<string, string>
      */
-    private function factsAbout(ProcessCase $case, string $recipient): array
+    private function factsAbout(ProcessCase $case, string $recipient, ?string $recipientsTimezone): array
     {
         return [
             'person.name' => $recipient,
@@ -216,9 +216,10 @@ final class Sender
             'case.number' => '#'.$case->number,
             'case.what_it_is_about' => (new CaseHistory)->whatItIsAbout($case),
             'case.link' => $case->tenant->addressFor('/admin/cases/'.$case->getKey()),
-            // On the client's own calendar. Stored in UTC, a case finished at half past
-            // midnight in India would otherwise read as finished the day before.
-            'case.closed_on' => $case->closed_at?->timezone($case->tenant->timezone)->format('j F Y') ?? '',
+            // On the recipient's own calendar, else the client's. Stored in UTC, a case
+            // finished at half past midnight in India would otherwise read as finished the
+            // day before.
+            'case.closed_on' => $case->closed_at?->timezone($recipientsTimezone ?? $case->tenant->timezone)->format('j F Y') ?? '',
         ];
     }
 }

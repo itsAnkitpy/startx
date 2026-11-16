@@ -231,6 +231,11 @@ it('draws every panel on the queue without a query per card', function () {
         $meera = atVertexCalled('meera');
         $this->actingAs($meera);
 
+        // A panel dates the case on the reader's clock, which reads their company once a
+        // page however many cards there are. Read here, so what is counted below is the
+        // cost of each card.
+        $meera->load('tenant');
+
         // The list on its own, then the same list with all four panels read off it. The
         // panel's facts are loaded for the whole list at once, so a card costs the same
         // whether the panel is drawn or not — four cards must not become twelve reads.

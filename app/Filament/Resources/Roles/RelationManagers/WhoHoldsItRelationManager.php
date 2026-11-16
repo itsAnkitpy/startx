@@ -18,6 +18,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Facades\FilamentTimezone;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -118,7 +119,8 @@ class WhoHoldsItRelationManager extends RelationManager
 
                 TextColumn::make('created_at')
                     ->label('Granted')
-                    ->date()
+                    // A moment shown as a day, on the reader's calendar rather than UTC's.
+                    ->date(timezone: FilamentTimezone::get())
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
