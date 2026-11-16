@@ -41,10 +41,28 @@ class TemplateCatalogue
 
     public const CaseClosedSubject = 'case_closed_subject';
 
-    /** Sent to whoever raised the case, who today has to go and look for both of these. */
+    /** Sent to whoever raised the case, who today has to go and look for all three. */
     public const CaseMovedInitiator = 'case_moved_initiator';
 
     public const CaseRejectedInitiator = 'case_rejected_initiator';
+
+    /**
+     * Added 7 September 2026, because the two the plan named are both about a step being
+     * answered and neither reads correctly about a case that has simply finished. Whoever
+     * raised a case is deliberately not written to when it opens: they clicked the button
+     * a second earlier and are looking at the screen, and the volume complaint in this
+     * module's own research is precisely about mail on every state change of one request.
+     */
+    public const CaseClosedInitiator = 'case_closed_initiator';
+
+    /**
+     * The link somebody with no account answers a step through. Its words are ours rather
+     * than the client's, so it has no row and no wording here — only the two facts a
+     * screen listing what was sent needs in order to label it. The wording moves into the
+     * catalogue when the wording screen can insist a client keeps the link itself in a
+     * sentence they have rewritten.
+     */
+    public const LinkToAnswerAStep = 'link_to_answer_a_step';
 
     /** Sent to whoever a step is waiting on, and to whoever is above them when it is late. */
     public const StepAvailableHolder = 'step_available_holder';
@@ -181,6 +199,28 @@ class TemplateCatalogue
                     {{ step.answered_by }} has turned down {{ case.number }}, {{ case.what_it_is_about }}, at {{ step.name }}.
 
                     The reason given was: {{ step.reason }}
+
+                    You can read the whole story of it here: {{ case.link }}
+
+                    TEXT,
+            ],
+
+            self::CaseClosedInitiator => [
+                'name' => 'A request you raised is finished',
+                'goes_to' => 'Whoever raised the case',
+                'sent_when' => 'The case is completed',
+                'bypasses_digest' => false,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
+                    'case.closed_on',
+                ],
+                'subject' => '{{ case.number }} is finished',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ case.number }}, {{ case.what_it_is_about }}, was finished on {{ case.closed_on }}. Every step of it has been answered and there is nothing left waiting on anybody.
+
+                    You raised it, so you are being told rather than left to go and look.
 
                     You can read the whole story of it here: {{ case.link }}
 
@@ -332,13 +372,55 @@ class TemplateCatalogue
     }
 
     /**
+     * The messages this product sends whose words are not the client's to change.
+     *
+     * They carry no wording and no tokens, because the wording lives where the message is
+     * built. What they carry is the two facts a screen listing what was sent needs in
+     * order to label a row: what the message is called, and what made it go out.
+     *
+     * @return array<string, array{name: string, goes_to: string, sent_when: string, bypasses_digest: bool, tokens: list<string>}>
+     */
+    public static function ourOwnMessages(): array
+    {
+        return [
+            self::LinkToAnswerAStep => [
+                'name' => 'A link to answer one step',
+                'goes_to' => 'Somebody with no account here',
+                'sent_when' => 'A step is waiting on somebody who cannot sign in',
+                'bypasses_digest' => true,
+                'tokens' => [],
+            ],
+        ];
+    }
+
+    /**
      * The words a client sends for one message, whether or not they have changed them.
+     *
+     * Only the client's own catalogue, deliberately: this is what decides whether a row of
+     * wording may exist at all, and a message whose words are ours must never grow one.
      *
      * @return array{name: string, goes_to: string, sent_when: string, bypasses_digest: bool, tokens: list<string>, subject: string, body: string}|null
      */
     public static function definitionOf(?string $key): ?array
     {
         return $key === null ? null : (self::definitions()[$key] ?? null);
+    }
+
+    /**
+     * What a message is called and what sends it, whichever of the two lists it is in.
+     *
+     * What a record of a message going out reads, because that record covers every message
+     * this product sends and not only the ones a client may reword.
+     *
+     * @return array{name: string, goes_to: string, sent_when: string, bypasses_digest: bool, tokens: list<string>}|null
+     */
+    public static function anyMessage(?string $key): ?array
+    {
+        if ($key === null) {
+            return null;
+        }
+
+        return self::definitions()[$key] ?? self::ourOwnMessages()[$key] ?? null;
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Filament\Pages\MyQueue;
 use App\Filament\Pages\RaiseARequest;
 use App\Filament\Resources\Cases\Pages\ListCases;
 use App\Filament\Resources\Cases\Pages\ViewCase;
+use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
 use App\Models\ProcessTemplate;
 use App\Models\Role;
@@ -488,5 +489,56 @@ it('keeps the handover off a case about nobody, and off somebody who covers one 
         Livewire::actingAs($rakesh)->test(ViewCase::class, ['record' => theSeededExitOf('anjali')->getKey()])
             ->assertOk()
             ->assertActionHidden('handOverTheirWork');
+    });
+});
+
+/*
+| What we sent about this case
+*/
+
+it('lists on a case every message sent about it, and what became of each one', function () {
+    TenantContext::run($this->meridian, function () {
+        $chandni = whoUsesTheCasesScreen('chandni');
+        $rakeshs = theSeededExitOf('rakesh');
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rakeshs->getKey()])
+            ->assertOk()
+            ->assertSee('What we sent about this case')
+            // What the step's own list asks for: who it went to, why, and whether it went.
+            ->assertSee('A link to answer one step')
+            ->assertSee('A step is waiting on somebody who cannot sign in')
+            ->assertSee('Sent')
+            // And the one claim this screen is careful about. Our mail server taking a
+            // message is not proof anybody read it, and every provider that documents its
+            // own events keeps the two apart.
+            ->assertSee('it is not proof that anybody read it', escape: false)
+            ->assertDontSee('Delivered');
+    });
+});
+
+it('names the leaver on the link they were sent, rather than calling them somebody with no account', function () {
+    TenantContext::run($this->meridian, function () {
+        // Rakesh answers his own handover through a link and signs in every day for
+        // everything else, so the link reads like every other message to him.
+        Livewire::actingAs(whoUsesTheCasesScreen('chandni'))
+            ->test(ViewCase::class, ['record' => theSeededExitOf('rakesh')->getKey()])
+            ->assertOk()
+            ->assertSee('Rakesh Menon · rakesh@personal.example')
+            ->assertDontSee('(no account here)');
+    });
+});
+
+it('says plainly on a case that nothing has been sent about it', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjalis = theSeededExitOf('anjali');
+
+        NotificationDelivery::query()->where('case_id', $anjalis->getKey())->delete();
+
+        // A heading over blank space reads as a screen that failed to load. Reachable on
+        // any case the demo seeded before this list existed.
+        Livewire::actingAs(whoUsesTheCasesScreen('chandni'))
+            ->test(ViewCase::class, ['record' => $anjalis->getKey()])
+            ->assertOk()
+            ->assertSee('Nothing has been sent about this case.');
     });
 });

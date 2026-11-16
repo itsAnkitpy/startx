@@ -7,10 +7,11 @@ use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\ProcessCase;
 use App\Models\User;
+use App\Notifications\Sender;
+use App\Notifications\TemplateCatalogue;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 /**
@@ -139,14 +140,28 @@ final class StepLink
                 ],
             ]);
 
-            Mail::raw(
+            // Through the one thing that sends a message and writes down that it did, so
+            // this shows on the case's own list of what was sent beside every other
+            // message — with no account behind it, which is what the leaver reading it has
+            // and what that list has to be able to show. The words stay here rather than
+            // in the catalogue a client rewords: this is the only message whose body has
+            // to carry a working link, and the wording screen cannot yet insist a client
+            // keeps a token in a sentence they have rewritten.
+            //
+            // Addressed to the person rather than to the bare address, so the list names
+            // them: the leaver answering through a link still has a record here, and is
+            // often somebody who signs in every day for everything else.
+            (new Sender)->sendOurOwnWords(
+                $case,
+                TemplateCatalogue::LinkToAnswerAStep,
+                $case->subject,
+                $case->tenant->name.' — '.$step->name,
                 $person['name'].",\n\n"
                     .$case->tenant->name.' needs you to answer one step: '.$step->name.".\n\n"
                     .$address."\n\n"
                     .'The link works for the next '.self::LastsHours.' hours and can be opened '
                     .self::Opens." times. If it stops working, it will offer you a new one.\n",
-                fn ($message) => $message->to($person['email'])
-                    ->subject($case->tenant->name.' — '.$step->name)
+                $sequence,
             );
 
             return $address;
@@ -266,18 +281,9 @@ final class StepLink
         return ['name' => $person->name, 'email' => $address];
     }
 
-    /**
-     * The client company's own address with the token on it.
-     *
-     * Built from the company's subdomain rather than from `route()`, because the link is
-     * usually made where there is no request to read a host from — a scheduled pass, a
-     * command, a seeder — and `route()` would answer with the platform's own domain, which
-     * has no client company in scope and would refuse the token.
-     */
+    /** The client company's own address with the token on it. */
     private function addressFor(ProcessCase $case, string $token): string
     {
-        $scheme = str_starts_with((string) config('app.url'), 'https://') ? 'https' : 'http';
-
-        return $scheme.'://'.$case->tenant->slug.'.'.config('tenancy.central_domain').'/step/'.$token;
+        return $case->tenant->addressFor('/step/'.$token);
     }
 }

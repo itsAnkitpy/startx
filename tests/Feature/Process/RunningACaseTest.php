@@ -164,6 +164,8 @@ it('measures a waiting step from when the step blocking it closed, with no row t
     TenantContext::run($this->meridian, function () {
         $exit = meridiansExit();
         $hr = User::factory()->holdingTheRole('exit_team')->create();
+
+        $this->travelTo('2026-09-07 09:00:00');
         $case = engine()->open($exit, rakesh(), $hr);
 
         $this->travelTo('2026-09-07 11:00:00');

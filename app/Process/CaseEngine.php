@@ -12,11 +12,14 @@ use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\User;
+use App\Notifications\Sender;
+use App\Notifications\TemplateCatalogue;
 use App\Settings\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * Running a case: opening one, acting on its steps, sending it back, and ending it.
@@ -46,6 +49,9 @@ final class CaseEngine
      */
     private const WorkingDaysToSettle = 2;
 
+    /** Why a case closed, where it closed because every step of it was answered. */
+    private const Completed = 'completed';
+
     /**
      * Section 7(3) of the Payment of Gratuity Act, 1972: gratuity is payable "within
      * thirty days from the date it becomes payable". Thirty ordinary days, not thirty
@@ -68,10 +74,77 @@ final class CaseEngine
 
     private AssigneeResolver $assignees;
 
+    private Sender $messages;
+
+    /**
+     * People this case's own write has earned a message, held until the write is safely
+     * committed. Drained by {@see self::writeThenTell()} and never from inside it.
+     *
+     * @var list<callable(): mixed>
+     */
+    private array $waitingToBeTold = [];
+
     public function __construct()
     {
         $this->reader = new AvailableSteps;
         $this->assignees = new AssigneeResolver;
+        $this->messages = new Sender;
+    }
+
+    /**
+     * One write, and then the messages it earned.
+     *
+     * **Nothing is sent from inside the transaction, and that is the whole reason this
+     * exists.** This engine takes row locks while it writes, and a send is a conversation
+     * with a mail server — holding one open across the other is how a busy afternoon turns
+     * into a queue of blocked clearances. The second reason is plainer: a commit that fails
+     * after the mail has gone would have told somebody about a case that does not exist.
+     *
+     * Every write that can end a case goes through here rather than calling
+     * `DB::transaction` itself, so a path added by a later step cannot quietly send nothing
+     * by forgetting to drain the list — which is exactly the silent failure this module was
+     * written to remove.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $work
+     * @return T
+     */
+    private function writeThenTell(callable $work): mixed
+    {
+        try {
+            $written = DB::transaction($work);
+        } catch (Throwable $failed) {
+            // A write that came apart earned nobody anything, and the list has to be
+            // emptied rather than left: whoever holds this engine may write again with it,
+            // and the next write would carry out a message about a case that was never
+            // created. Not reachable from any screen, each of which makes its own engine —
+            // but the demo data is built with one engine and so is anything written from
+            // the command line.
+            $this->waitingToBeTold = [];
+
+            throw $failed;
+        }
+
+        foreach (array_splice($this->waitingToBeTold, 0) as $send) {
+            $send();
+        }
+
+        return $written;
+    }
+
+    /**
+     * Note that somebody is owed a message about this case, to go out once the write has
+     * committed. Somebody who is not there — a case nobody raised, a case about nobody —
+     * is nobody to write to and is passed over in silence.
+     */
+    private function tell(ProcessCase $case, string $key, ?User $person): void
+    {
+        if (! $person instanceof User) {
+            return;
+        }
+
+        $this->waitingToBeTold[] = fn (): mixed => $this->messages->send($case, $key, $person);
     }
 
     /**
@@ -128,7 +201,7 @@ final class CaseEngine
             );
         }
 
-        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
+        return $this->writeThenTell(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
             $case = ProcessCase::create([
                 'template_id' => $template->getKey(),
                 'subject_user_id' => $subject?->getKey(),
@@ -158,6 +231,12 @@ final class CaseEngine
             }
 
             $this->record($case, 'case_opened', $by, $opened);
+
+            // Rakesh is told his exit has started, so he knows the clock on his money has
+            // begun. Whoever raised it is deliberately not written to here: Chandni pressed
+            // the button a second ago and is looking at the screen, and this module's own
+            // research is a complaint about exactly that mail.
+            $this->tell($case, TemplateCatalogue::CaseOpenedSubject, $case->subject);
 
             // A process whose every step this case skips has nothing for anybody to do,
             // and left open it would sit in the queue for ever, breach its statutory
@@ -224,7 +303,7 @@ final class CaseEngine
             throw ProcessRefused::notSomethingAnyoneChooses($outcome);
         }
 
-        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $payload, $reason, $sendBackTo): CaseStep {
+        return $this->writeThenTell(function () use ($case, $sequence, $outcome, $by, $payload, $reason, $sendBackTo): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
             $step = $available->step;
 
@@ -332,7 +411,7 @@ final class CaseEngine
 
         $link = $links->find($token) ?? throw ProcessRefused::thatLinkNoLongerOpens();
 
-        return DB::transaction(function () use ($link, $links, $outcome, $payload): CaseStep {
+        return $this->writeThenTell(function () use ($link, $links, $outcome, $payload): CaseStep {
             $available = $this->availableStepOrRefuse($link->case, (int) $link->sequence);
             $step = $available->step;
 
@@ -424,7 +503,7 @@ final class CaseEngine
             throw ProcessRefused::needsAReason("Recording [{$outcome}] on a held step");
         }
 
-        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $reason): CaseStep {
+        return $this->writeThenTell(function () use ($case, $sequence, $outcome, $by, $reason): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
             $attempt = $available->attempt;
 
@@ -908,7 +987,7 @@ final class CaseEngine
             return;
         }
 
-        $this->close($case, $by, 'completed');
+        $this->close($case, $by, self::Completed);
     }
 
     private function close(ProcessCase $case, ?User $by, string $because, ?string $atStep = null): void
@@ -920,6 +999,19 @@ final class CaseEngine
             'because' => $because,
             'step' => $atStep,
         ]));
+
+        // Only a case that actually finished. A case turned down reads nothing like one
+        // that completed, and the message for it needs the step and the reason given —
+        // both of which arrive with the step that tells whoever raised a case about every
+        // turn it takes. A cancelled case is the same and belongs there too.
+        if ($because === self::Completed) {
+            $this->tell($case, TemplateCatalogue::CaseClosedSubject, $case->subject);
+
+            // Somebody who raised their own case already has the message written to them.
+            if (! $case->initiatedBy?->is($case->subject)) {
+                $this->tell($case, TemplateCatalogue::CaseClosedInitiator, $case->initiatedBy);
+            }
+        }
     }
 
     /**

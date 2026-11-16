@@ -2,9 +2,12 @@
 
 namespace App\Filament\Resources\Cases\Schemas;
 
+use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
+use App\Models\User;
 use App\Process\CaseHistory;
 use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -141,6 +144,77 @@ class WhatHappenedOnIt
                                     ->listWithLineBreaks()
                                     ->bulleted()
                                     ->visible(fn (?array $state): bool => filled($state)),
+                            ]),
+                    ]),
+
+                Section::make('What we sent about this case')
+                    ->columnSpanFull()
+                    ->description('Every message this product has sent about this case, newest first. "Sent" means our mail server accepted the message — it is not proof that anybody read it.')
+                    ->schema([
+                        // A case that has had nothing sent about it is a real answer and
+                        // reads as one. Without this the heading sits above blank space,
+                        // which looks like a screen that failed to load.
+                        TextEntry::make('nothing_sent')
+                            ->hiddenLabel()
+                            ->color('gray')
+                            ->state('Nothing has been sent about this case.')
+                            ->visible(fn (ProcessCase $record): bool => $record->messagesSent->isEmpty()),
+
+                        RepeatableEntry::make('messagesSent')
+                            ->hiddenLabel()
+                            ->visible(fn (ProcessCase $record): bool => $record->messagesSent->isNotEmpty())
+                            ->table([
+                                TableColumn::make('Message'),
+                                TableColumn::make('Sent to'),
+                                TableColumn::make('Why it went out'),
+                                TableColumn::make('When'),
+                                TableColumn::make('Sent'),
+                                TableColumn::make('What went wrong'),
+                            ])
+                            ->schema([
+                                TextEntry::make('template_key')
+                                    ->hiddenLabel()
+                                    ->weight(FontWeight::Medium)
+                                    ->state(fn (NotificationDelivery $record): string => $record->name()),
+
+                                // The address is always here and the name only sometimes,
+                                // which is the record doing its job: a message to somebody
+                                // with no account — a leaver answering through a link — has
+                                // an address to show and nobody to link it to, and the
+                                // address is what a tribunal reads either way.
+                                TextEntry::make('recipient_address')
+                                    ->hiddenLabel()
+                                    ->state(fn (NotificationDelivery $record): string => $record->recipient instanceof User
+                                        ? $record->recipient->name.' · '.$record->recipient_address
+                                        : $record->recipient_address.' (no account here)'),
+
+                                TextEntry::make('why')
+                                    ->hiddenLabel()
+                                    ->color('gray')
+                                    ->state(fn (NotificationDelivery $record): string => $record->whyItWentOut()),
+
+                                TextEntry::make('created_at')
+                                    ->hiddenLabel()
+                                    ->dateTime(),
+
+                                TextEntry::make('status')
+                                    ->hiddenLabel()
+                                    ->badge()
+                                    ->state(fn (NotificationDelivery $record): string => $record->howItWent())
+                                    ->color(fn (NotificationDelivery $record): string => match ($record->status) {
+                                        NotificationDelivery::Sent => 'success',
+                                        NotificationDelivery::Failed => 'danger',
+                                        default => 'gray',
+                                    }),
+
+                                // Empty on almost every row, and its own column anyway: the
+                                // one time it is filled, whoever raised the case has to be
+                                // able to read why beside the message it happened to rather
+                                // than open something to find out.
+                                TextEntry::make('failure_reason')
+                                    ->hiddenLabel()
+                                    ->color('danger')
+                                    ->placeholder(''),
                             ]),
                     ]),
 

@@ -250,4 +250,20 @@ class ProcessCase extends Model
     {
         return $this->hasMany(CaseEvent::class, 'case_id')->orderBy('id');
     }
+
+    /**
+     * Every message this product has sent about this case, newest first.
+     *
+     * Newest first because of what somebody actually opens this list for: a case that has
+     * been sitting on one department for a day, and the question of whether they were
+     * chased this morning. The oldest message is the one nobody is asking about.
+     *
+     * Ordered here rather than by whoever reads it, for the reason next door — a relation
+     * with no order is not ordered, and a screen that assumed one was already caught doing
+     * it once in this file.
+     */
+    public function messagesSent(): HasMany
+    {
+        return $this->hasMany(NotificationDelivery::class, 'case_id')->with('recipient')->latest('id');
+    }
 }

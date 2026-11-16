@@ -68,19 +68,25 @@ function tokenForStep(ProcessCase $case, int $sequence): string
 }
 
 /**
- * Every message the application actually sent.
+ * Every address a link was actually sent to.
  *
  * Read off the mailer the test environment already uses rather than through `Mail::fake()`,
- * which only collects messages built as their own class. A link is one line of text sent
- * straight out, because letters and their delivery log belong to module 06.
+ * which only collects messages built as their own class.
+ *
+ * **Narrowed to the messages carrying a link**, and it was not always: from module 06
+ * opening a case also writes to the person it is about and closing one writes to whoever
+ * raised it, so counting every message the application sent stopped being a statement about
+ * links. Filtered on the link's own path rather than on its wording, because the wording is
+ * the one thing about a message that can change.
  *
  * @return list<string>
  */
-function addressesWrittenTo(): array
+function addressesSentALink(): array
 {
     return Mail::mailer()->getSymfonyTransport()->messages()
+        ->filter(fn ($sent) => str_contains((string) $sent->getOriginalMessage()->getTextBody(), '/step/'))
         ->map(fn ($sent) => $sent->getEnvelope()->getRecipients()[0]->getAddress())
-        ->all();
+        ->values()->all();
 }
 
 /** That client company's own address, with a path on it. */
@@ -209,7 +215,7 @@ it('sends a link to the leaver personal address and lets them answer once', func
 
     // Two, because seeding the demo company already sent him one — the point is that both
     // went to his own address and neither needed anybody to type it.
-    expect(addressesWrittenTo())->toBe(['rakesh@personal.example', 'rakesh@personal.example']);
+    expect(addressesSentALink())->toBe(['rakesh@personal.example', 'rakesh@personal.example']);
 
     $this->get(atMeridiansAddress('step/'.$sent[0]))
         ->assertOk()
@@ -302,7 +308,7 @@ it('issues a fresh link to the same address without an employee touching the cas
     // Every message so far to the address already on the record — the seeded one, the one
     // this test sent, and the one asked for from a dead link. Nobody typed an address and
     // no employee opened the case to change anything.
-    expect(addressesWrittenTo())->toBe(array_fill(0, 3, 'rakesh@personal.example'));
+    expect(addressesSentALink())->toBe(array_fill(0, 3, 'rakesh@personal.example'));
 
     TenantContext::run($this->meridian, function () {
         $live = CaseStep::query()->where('sequence', 4)->whereNull('superseded_at')->sole();
@@ -337,7 +343,7 @@ it('lets only the newest link ask for another one', function () {
         ->assertSee('A newer link for this step has already been sent');
 
     // Three: the seeded one and the two this test asked for. Nothing further was sent.
-    expect(addressesWrittenTo())->toHaveCount(3);
+    expect(addressesSentALink())->toHaveCount(3);
 
     TenantContext::run($this->meridian, function () {
         // And his live link is still live, which is the whole point of refusing.

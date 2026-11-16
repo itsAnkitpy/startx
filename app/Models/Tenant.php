@@ -31,4 +31,19 @@ class Tenant extends Model
             'onboarded_at' => 'datetime',
         ];
     }
+
+    /**
+     * This company's own web address, with a path on it.
+     *
+     * Built from the subdomain rather than from `route()`, because the addresses that
+     * matter most are made where there is no request to read a host from — a scheduled
+     * pass, a command, a seeder — and `route()` would answer with the platform's own
+     * domain, which has no client company in scope at all.
+     */
+    public function addressFor(string $path = '/'): string
+    {
+        $scheme = str_starts_with((string) config('app.url'), 'https://') ? 'https' : 'http';
+
+        return $scheme.'://'.$this->slug.'.'.config('tenancy.central_domain').'/'.ltrim($path, '/');
+    }
 }
