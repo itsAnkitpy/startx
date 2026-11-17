@@ -12,6 +12,7 @@ use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\User;
+use App\Notifications\Chasing;
 use App\Notifications\Sender;
 use App\Notifications\TemplateCatalogue;
 use App\Settings\Settings;
@@ -19,7 +20,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 /**
  * Running a case: opening one, acting on its steps, sending it back, and ending it.
@@ -76,14 +76,6 @@ final class CaseEngine
 
     private Sender $messages;
 
-    /**
-     * People this case's own write has earned a message, held until the write is safely
-     * committed. Drained by {@see self::writeThenTell()} and never from inside it.
-     *
-     * @var list<callable(): mixed>
-     */
-    private array $waitingToBeTold = [];
-
     public function __construct()
     {
         $this->reader = new AvailableSteps;
@@ -92,59 +84,127 @@ final class CaseEngine
     }
 
     /**
-     * One write, and then the messages it earned.
+     * Note that somebody is owed a message about this case. Somebody who is not there — a
+     * case nobody raised, a case about nobody — is nobody to write to and is passed over in
+     * silence.
      *
-     * **Nothing is sent from inside the transaction, and that is the whole reason this
-     * exists.** This engine takes row locks while it writes, and a send is a conversation
-     * with a mail server — holding one open across the other is how a busy afternoon turns
-     * into a queue of blocked clearances. The second reason is plainer: a commit that fails
+     * **Nothing is sent from inside a write.** This engine takes row locks while it writes,
+     * and a send is a conversation with a mail server — holding one open across the other
+     * is how a busy afternoon turns into a queue of blocked clearances. And a write undone
      * after the mail has gone would have told somebody about a case that does not exist.
+     * Laravel holds the send until the outermost write has committed, which on the raise
+     * screen is the one saving the request and its first answer together rather than the
+     * engine's own inside it, and drops it if any of that write is undone.
      *
-     * Every write that can end a case goes through here rather than calling
-     * `DB::transaction` itself, so a path added by a later step cannot quietly send nothing
-     * by forgetting to drain the list — which is exactly the silent failure this module was
-     * written to remove.
-     *
-     * @template T
-     *
-     * @param  callable(): T  $work
-     * @return T
+     * @param  array<string, string>  $values
      */
-    private function writeThenTell(callable $work): mixed
-    {
-        try {
-            $written = DB::transaction($work);
-        } catch (Throwable $failed) {
-            // A write that came apart earned nobody anything, and the list has to be
-            // emptied rather than left: whoever holds this engine may write again with it,
-            // and the next write would carry out a message about a case that was never
-            // created. Not reachable from any screen, each of which makes its own engine —
-            // but the demo data is built with one engine and so is anything written from
-            // the command line.
-            $this->waitingToBeTold = [];
-
-            throw $failed;
-        }
-
-        foreach (array_splice($this->waitingToBeTold, 0) as $send) {
-            $send();
-        }
-
-        return $written;
-    }
-
-    /**
-     * Note that somebody is owed a message about this case, to go out once the write has
-     * committed. Somebody who is not there — a case nobody raised, a case about nobody —
-     * is nobody to write to and is passed over in silence.
-     */
-    private function tell(ProcessCase $case, string $key, ?User $person): void
+    private function tell(ProcessCase $case, string $key, ?User $person, array $values = [], ?int $stepSequence = null): void
     {
         if (! $person instanceof User) {
             return;
         }
 
-        $this->waitingToBeTold[] = fn (): mixed => $this->messages->send($case, $key, $person);
+        DB::afterCommit(fn (): mixed => $this->messages->send($case, $key, $person, $values, $stepSequence));
+    }
+
+    /**
+     * Tell whoever each step that has just become available is waiting on that it is their
+     * turn, once everything has been saved — the moment Camunda fires its own listener.
+     *
+     * Nothing is written to know which steps those are. Every step waiting at once is in one
+     * group, so after a step is answered anything waiting in another group has just arrived:
+     * the next group, or the earlier step a send-back reopened. Two people answering the last
+     * two steps of a group in the same second cannot both miss it or both send it, because
+     * {@see self::holdTheCaseStill()} makes the second wait for the first and see its work.
+     *
+     * Not the person whose press made it available: they are looking at the screen.
+     *
+     * @param  Collection<int, AvailableStep>  $waiting  what is waiting now, after the write
+     */
+    private function tellWhoseTurnItIs(Collection $waiting, ?ProcessStep $answered, ?User $by): void
+    {
+        $arrived = $waiting
+            ->reject(fn (AvailableStep $step) => $answered !== null && $step->step->group_no === $answered->group_no)
+            ->map(fn (AvailableStep $step) => $step->step->sequence)
+            ->values()
+            ->all();
+
+        if ($arrived === []) {
+            return;
+        }
+
+        $case = $waiting->first()->case;
+
+        DB::afterCommit(function () use ($case, $arrived, $by): void {
+            // Read again, because the write around this one may have answered the step
+            // already: Priya raising a request whose first step any administrator holds
+            // has answered it by the time anything is sent, and Chandni must not be told
+            // it is waiting on her.
+            $case->unsetRelation('liveSteps');
+            $chasing = new Chasing;
+
+            $this->reader->for($case)
+                ->filter(fn (AvailableStep $step) => in_array($step->step->sequence, $arrived, true))
+                ->each(fn (AvailableStep $step) => $chasing->itIsYourTurn($step, $by));
+        });
+    }
+
+    /**
+     * Everybody a step being answered has news for: whoever is next, and whoever raised the
+     * case, who would otherwise have to go and look — the old tool's first failure.
+     *
+     * Whoever raised it hears about every step answered, a hold and a send-back included, and
+     * a turning down with its reason. Not about their own answer, not once the case has
+     * finished (the closing message says that), and never when the case is about them: the
+     * person a case is about is told three things and only three.
+     *
+     * @param  string  $answeredBy  the name to give, which for a link is somebody with no account
+     */
+    private function tellWhatTheAnswerMoved(
+        ProcessCase $case,
+        ProcessStep $answered,
+        string $outcome,
+        string $answeredBy,
+        ?User $by,
+        ?string $reason = null,
+        ?ProcessStep $sentBackTo = null,
+    ): void {
+        $waiting = $this->reader->for($case);
+
+        $this->tellWhoseTurnItIs($waiting, $answered, $by);
+
+        $raisedBy = $case->initiatedBy;
+
+        if (! $raisedBy instanceof User || ($by !== null && $raisedBy->is($by)) || $raisedBy->is($case->subject)) {
+            return;
+        }
+
+        if ($outcome === 'rejected') {
+            $this->tell($case, TemplateCatalogue::CaseRejectedInitiator, $raisedBy, [
+                'step.name' => $answered->name,
+                'step.answered_by' => $answeredBy,
+                'step.reason' => trim((string) $reason) !== '' ? trim((string) $reason) : 'none',
+            ], $answered->sequence);
+
+            return;
+        }
+
+        if ($waiting->isEmpty()) {
+            return;
+        }
+
+        $this->tell($case, TemplateCatalogue::CaseMovedInitiator, $raisedBy, [
+            'step.name' => $answered->name,
+            'step.outcome' => match ($outcome) {
+                'held' => 'put on hold',
+                'sent_back' => 'sent back to '.$sentBackTo?->name,
+                'closed_disputed' => 'closed as disputed',
+                'force_closed' => 'closed over the hold',
+                default => $outcome,
+            },
+            'step.answered_by' => $answeredBy,
+            'case.waiting_on' => $waiting->map(fn (AvailableStep $step) => $step->step->name)->join(', ', ' and '),
+        ], $answered->sequence);
     }
 
     /**
@@ -201,7 +261,7 @@ final class CaseEngine
             );
         }
 
-        return $this->writeThenTell(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
+        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
             $case = ProcessCase::create([
                 'template_id' => $template->getKey(),
                 'subject_user_id' => $subject?->getKey(),
@@ -245,6 +305,8 @@ final class CaseEngine
             // the conditions instead. An exit for somebody who manages nobody and holds
             // no equipment is a real one.
             $this->closeIfNothingIsOutstanding($case, $by);
+
+            $this->tellWhoseTurnItIs($this->reader->for($case), null, $by);
 
             return $case;
         });
@@ -303,7 +365,7 @@ final class CaseEngine
             throw ProcessRefused::notSomethingAnyoneChooses($outcome);
         }
 
-        return $this->writeThenTell(function () use ($case, $sequence, $outcome, $by, $payload, $reason, $sendBackTo): CaseStep {
+        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $payload, $reason, $sendBackTo): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
             $step = $available->step;
 
@@ -378,6 +440,8 @@ final class CaseEngine
                 $this->closeIfNothingIsOutstanding($case, $by);
             }
 
+            $this->tellWhatTheAnswerMoved($case, $step, $outcome, $by->name, $by, $reason, $target);
+
             return $attempt;
         });
     }
@@ -411,7 +475,7 @@ final class CaseEngine
 
         $link = $links->find($token) ?? throw ProcessRefused::thatLinkNoLongerOpens();
 
-        return $this->writeThenTell(function () use ($link, $links, $outcome, $payload): CaseStep {
+        return DB::transaction(function () use ($link, $links, $outcome, $payload): CaseStep {
             $available = $this->availableStepOrRefuse($link->case, (int) $link->sequence);
             $step = $available->step;
 
@@ -474,6 +538,8 @@ final class CaseEngine
                 $this->closeIfNothingIsOutstanding($link->case, null);
             }
 
+            $this->tellWhatTheAnswerMoved($link->case, $step, $outcome, (string) ($answered['name'] ?? ''), null);
+
             return $attempt;
         });
     }
@@ -503,7 +569,7 @@ final class CaseEngine
             throw ProcessRefused::needsAReason("Recording [{$outcome}] on a held step");
         }
 
-        return $this->writeThenTell(function () use ($case, $sequence, $outcome, $by, $reason): CaseStep {
+        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $reason): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
             $attempt = $available->attempt;
 
@@ -540,6 +606,8 @@ final class CaseEngine
             ]);
 
             $this->closeIfNothingIsOutstanding($case, $by);
+
+            $this->tellWhatTheAnswerMoved($case, $available->step, $outcome, $by->name, $by, $reason);
 
             return $attempt;
         });
@@ -1001,9 +1069,8 @@ final class CaseEngine
         ]));
 
         // Only a case that actually finished. A case turned down reads nothing like one
-        // that completed, and the message for it needs the step and the reason given —
-        // both of which arrive with the step that tells whoever raised a case about every
-        // turn it takes. A cancelled case is the same and belongs there too.
+        // that completed, and whoever raised it is told that with the step and the reason
+        // given, which only the answer that turned it down knows.
         if ($because === self::Completed) {
             $this->tell($case, TemplateCatalogue::CaseClosedSubject, $case->subject);
 

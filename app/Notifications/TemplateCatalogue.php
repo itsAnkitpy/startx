@@ -164,17 +164,19 @@ class TemplateCatalogue
             self::CaseMovedInitiator => [
                 'name' => 'Your request has moved on',
                 'goes_to' => 'Whoever raised the case',
-                'sent_when' => 'Every time it moves a step',
+                'sent_when' => 'Every time a step of it is answered',
                 'bypasses_digest' => false,
+                // A step answered is approved, put on hold or sent back, so the sentence
+                // says which: "has finished" read as untrue of the other two.
                 'tokens' => [
                     'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
                     'step.name', 'step.outcome', 'step.answered_by', 'case.waiting_on',
                 ],
-                'subject' => '{{ case.number }} — {{ step.name }} is done',
+                'subject' => '{{ case.number }} — {{ step.name }} was {{ step.outcome }}',
                 'body' => <<<'TEXT'
                     {{ person.name }},
 
-                    {{ step.answered_by }} has finished {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}.
+                    {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}, was {{ step.outcome }} by {{ step.answered_by }}.
 
                     It is now waiting on {{ case.waiting_on }}.
 
@@ -232,15 +234,18 @@ class TemplateCatalogue
                 'goes_to' => 'Whoever the step is waiting on',
                 'sent_when' => 'Everything blocking the step is finished',
                 'bypasses_digest' => false,
+                // `step.due_by` is the whole sentence or nothing: a hiring request is about
+                // nobody, so its steps have no due date and "It is due by ." is what a bare
+                // date would have left. `step.due_at` stays for anybody who wrote their own.
                 'tokens' => [
                     'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
-                    'step.name', 'step.due_at',
+                    'step.name', 'step.due_at', 'step.due_by', 'step.on_behalf_of',
                 ],
                 'subject' => '{{ step.name }} is waiting on you — {{ case.number }}',
                 'body' => <<<'TEXT'
                     {{ person.name }},
 
-                    {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}, is now waiting on you. It is due by {{ step.due_at }}.
+                    {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}, is now waiting on you{{ step.on_behalf_of }}.{{ step.due_by }}
 
                     Open it here: {{ case.link }}
 

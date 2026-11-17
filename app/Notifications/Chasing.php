@@ -13,13 +13,14 @@ use App\Models\User;
 use App\Process\AssigneeResolver;
 use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
+use App\Process\StepLink;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Support\Collection;
 
 /**
- * Chasing a step that is waiting on somebody: by the one scheduled pass, or by a person
- * pressing the chase button on a case.
+ * Telling somebody a step is waiting on them: the moment it becomes theirs, by the one
+ * scheduled pass as it runs late, or by a person pressing the chase button on a case.
  *
  * **Everything here starts from the reader of waiting steps, never from the step rows.**
  * The clearance a department has not opened at all is the one that most needs chasing and
@@ -151,6 +152,49 @@ final class Chasing
         }
 
         return $chased;
+    }
+
+    /**
+     * Tell whoever a step has just become waiting on that it is their turn. The engine calls
+     * this once everything around the write that made the step available has been saved,
+     * and only for a step still waiting then — so nothing has to be looked up to know it
+     * has not been said.
+     *
+     * A step only a link can answer is sent its link instead, which is the same news for
+     * somebody with no account, and it goes nowhere else: nobody here can answer it.
+     *
+     * @param  User|null  $by  whoever's press made it available, who is looking at the screen
+     */
+    public function itIsYourTurn(AvailableStep $step, ?User $by): void
+    {
+        if ($this->resolver->isForSomebodyWithNoAccount($step->step)) {
+            try {
+                (new StepLink)->issue($step->case, $step->step->sequence);
+            } catch (ProcessRefused $nowhereToSendIt) {
+                // The answer that opened the step has already been saved, so it must not
+                // come back to the person who gave it as a refusal. Said in the log; the
+                // link can be sent by hand once the address is filled in.
+                report($nowhereToSendIt);
+            }
+
+            return;
+        }
+
+        $holders = $this->holdersToday($step);
+
+        foreach ($holders as $person) {
+            if ($by !== null && $person->is($by)) {
+                continue;
+            }
+
+            $facts = $this->aboutTheStep($step, $person, $holders);
+
+            // A whole sentence or nothing, because a hiring request is about nobody and its
+            // steps have no due date: "It is due by ." is what Priya would otherwise read.
+            $facts['step.due_by'] = $facts['step.due_at'] === '' ? '' : " It is due by {$facts['step.due_at']}.";
+
+            $this->sender->send($step->case, TemplateCatalogue::StepAvailableHolder, $person, $facts, $step->step->sequence);
+        }
     }
 
     /**

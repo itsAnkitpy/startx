@@ -16,9 +16,8 @@ use Illuminate\Console\Command;
  * one in it. This is how another is asked for from this side; the person holding the dead
  * link asks for their own from the page it sends them to.
  *
- * It is also the exact call module 06's scheduled pass will make when such a step opens.
- * What lives here is nothing but the rule for issuing one — the schedule belongs there and
- * this module registers none.
+ * It is also the exact call the engine makes, through module 06, the moment such a step
+ * opens. What lives here is nothing but the rule for issuing one.
  */
 class SendStepLink extends Command
 {

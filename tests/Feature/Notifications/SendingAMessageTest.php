@@ -295,7 +295,7 @@ it('dates a finished case on the recipient own calendar where they have one of t
     });
 });
 
-it('tells nobody anything when a case is turned down rather than finished', function () {
+it('tells whoever raised a case it was turned down, and sends nothing that reads as finished', function () {
     TenantContext::run($this->meridian, function () {
         $rakeshs = rakeshsSeededExit();
         $token = basename((new StepLink)->issue($rakeshs, 4));
@@ -305,11 +305,12 @@ it('tells nobody anything when a case is turned down rather than finished', func
         (new CaseEngine)->decideThroughALink($token, 'rejected', ['note' => 'Not agreed.']);
 
         // It has ended, and nothing that reads like "your exit is complete" may go out
-        // about it. The message for a case turned down needs the step and the reason
-        // given, and both arrive with the step that tells whoever raised a case about
-        // every turn it takes.
+        // about it. Chandni raised it, so she is told it was turned down, at which step
+        // and by whom; a link has no box for a reason, so there is none to give.
         expect($rakeshs->fresh()->closed_at)->not->toBeNull()
-            ->and(whatActuallyLeft())->toBe([]);
+            ->and(whatActuallyLeft())->toBe(['chandni@meridian.test — #'.$rakeshs->number.' has been turned down'])
+            ->and(whatOneOfThemSaid())->toContain('Rakesh Menon has turned down #'.$rakeshs->number)
+            ->and(whatOneOfThemSaid())->toContain('The reason given was: none');
     });
 });
 

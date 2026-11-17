@@ -18,7 +18,6 @@ use App\Models\User;
 use App\Notifications\TemplateCatalogue;
 use App\Process\AssigneeResolver;
 use App\Process\CaseEngine;
-use App\Process\StepLink;
 use App\Settings\Settings;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
@@ -484,8 +483,8 @@ class MeridianSeeder extends Seeder
      *
      * Driven forward by actually deciding the three steps as the people who hold them,
      * rather than by writing rows — so the state it leaves behind is a state the engine
-     * can produce, and the link is issued exactly the way module 06's scheduled pass will
-     * issue it when a step opens.
+     * can produce, and the link goes out the way it does for any client: the moment the
+     * step opens.
      *
      * It appears in nobody's queue, which is the point of it: a step answered by somebody
      * with no account has no resolved set at all, so the whole company can see the exit is
@@ -506,12 +505,10 @@ class MeridianSeeder extends Seeder
         // sign-off asks nothing at all, so it still passes nothing.
         $engine->decide($rakeshs, 1, 'approved', $people['priya'], ['id_card_returned' => true]);
         $engine->decide($rakeshs, 2, 'approved', $people['chandni'], ['imprest_card_returned' => true]);
+        // His sign-off sends him the link: the step is his turn the moment it opens.
         $engine->decide($rakeshs, 3, 'approved', $people['chandni']);
 
-        $address = (new StepLink)->issue($rakeshs, 4);
-
-        $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link:');
-        $this->command?->line($address);
+        $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link is in Mailpit, at localhost:8025.');
     }
 
     /**
