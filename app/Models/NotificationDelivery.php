@@ -29,7 +29,12 @@ class NotificationDelivery extends Model
 {
     use BelongsToTenant;
 
-    /** Written, sent, and never got there. Enforced by the table as well. */
+    /**
+     * Held for the recipient's daily summary, then written, sent, and never got there.
+     * Enforced by the table as well.
+     */
+    public const Waiting = 'waiting';
+
     public const Sending = 'sending';
 
     public const Sent = 'sent';
@@ -49,6 +54,7 @@ class NotificationDelivery extends Model
         ];
     }
 
+    /** Null on one message only: the daily summary, which is about several cases. */
     public function case(): BelongsTo
     {
         return $this->belongsTo(ProcessCase::class, 'case_id');
@@ -107,8 +113,9 @@ class NotificationDelivery extends Model
     public function howItWent(): string
     {
         return match ($this->status) {
-            self::Sent => 'Sent',
+            self::Sent => $this->digest_batch_id === null ? 'Sent' : 'Sent in their daily summary',
             self::Failed => 'Did not send',
+            self::Waiting => 'Waiting for their daily summary',
             default => 'Still sending',
         };
     }

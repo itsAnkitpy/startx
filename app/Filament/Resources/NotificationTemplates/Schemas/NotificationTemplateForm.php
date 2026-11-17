@@ -3,6 +3,9 @@
 namespace App\Filament\Resources\NotificationTemplates\Schemas;
 
 use App\Models\NotificationTemplate;
+use App\Notifications\TemplateCatalogue;
+use App\Notifications\Wording;
+use Closure;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
@@ -40,7 +43,8 @@ class NotificationTemplateForm
                             ->required()
                             ->validationMessages([
                                 'required' => 'A message needs something in it.',
-                            ]),
+                            ])
+                            ->rules([self::theSummaryKeepsItsList(...)]),
                     ]),
             ]);
     }
@@ -65,6 +69,21 @@ class NotificationTemplateForm
         return 'Anywhere in either box you can write '.self::asAList($tokens)
             .' and the real value is put in when the message goes out. Written any other way, or '
             .'taken from a different message, it is left out instead.';
+    }
+
+    /**
+     * The daily summary's list is the whole of it. Wording without `{{ items }}` would send
+     * everybody on a summary an empty email each day while every message it should have
+     * carried is recorded as sent in it. Any other message without one of its tokens still
+     * says what it is about, which is why only this one is refused.
+     */
+    private static function theSummaryKeepsItsList(NotificationTemplate $record): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+            if ($record->key === TemplateCatalogue::DailyDigest && ! Wording::uses((string) $value, 'items')) {
+                $fail('The daily summary has to keep {{ items }}. That is where the list of what is waiting goes.');
+            }
+        };
     }
 
     /**

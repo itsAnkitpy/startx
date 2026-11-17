@@ -42,6 +42,7 @@ use Illuminate\Notifications\Notifiable;
 #[Fillable([
     'first_name', 'middle_name', 'last_name', 'preferred_name', 'date_of_birth',
     'work_email', 'personal_email', 'personal_phone', 'password', 'timezone', 'locale', 'active',
+    'daily_summary_hour',
 ])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser
@@ -62,6 +63,8 @@ class User extends Authenticatable implements FilamentUser
             'password' => 'hashed',
             'active' => 'boolean',
             'deactivated_at' => 'datetime',
+            // Empty means told at once; an hour on their own clock means one email a day.
+            'daily_summary_hour' => 'integer',
         ];
     }
 

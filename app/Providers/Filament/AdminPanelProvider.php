@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -27,6 +28,9 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->login(Login::class)
+            // A person's own account page, in the panel's own layout: tenancy is off, so
+            // nothing needs the bare one Filament defaults to.
+            ->profile(EditProfile::class, isSimple: false)
             ->brandName('StartX')
             ->favicon(asset('favicon.svg'))
 

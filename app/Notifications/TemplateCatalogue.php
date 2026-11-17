@@ -90,12 +90,15 @@ class TemplateCatalogue
      * the list readable without our help.
      *
      * `bypasses_digest` marks a message that goes out the moment it is due even when the
-     * person would rather have a daily bundle, and the four that carry it are the closed
-     * list this module settled: a chase, a chase somebody pressed by hand, the escalation
-     * above the holder, and the warning that a legal deadline has gone. A chase-up that
-     * waits until six in the evening for somebody's bundle can land after the deadline it
-     * was chasing, which is the whole value of it gone. Read in step 5, where the bundle
-     * is built.
+     * person would rather have a daily summary, and the list is closed. Everything chasing
+     * a deadline: a chase, a chase somebody pressed by hand, the escalation above the
+     * holder, and the warning that a legal deadline has gone — a chase-up that waits until
+     * six in the evening can land after the deadline it was chasing. The three messages to
+     * the person a case is about, which go to a personal address because a work account
+     * ends with the job. And the notice that a message did not arrive, because whoever gets
+     * it has a phone call to make that afternoon. The last two settled with Ankit on
+     * 17 November 2026. What is left for a summary is "your turn" and the news to whoever
+     * raised a case, which is where the volume is.
      *
      * @return array<string, array{name: string, goes_to: string, sent_when: string, bypasses_digest: bool, tokens: list<string>, subject: string, body: string}>
      */
@@ -106,7 +109,7 @@ class TemplateCatalogue
                 'name' => 'Your case has been started',
                 'goes_to' => 'The person the case is about',
                 'sent_when' => 'The moment the case is opened',
-                'bypasses_digest' => false,
+                'bypasses_digest' => true,
                 'tokens' => ['person.name', 'company.name', 'process.name', 'case.number'],
                 'subject' => 'Your {{ process.name }} at {{ company.name }} has been started',
                 'body' => <<<'TEXT'
@@ -124,7 +127,7 @@ class TemplateCatalogue
                 'name' => 'A claim has been raised against you',
                 'goes_to' => 'The person the case is about',
                 'sent_when' => 'A department claims money against them',
-                'bypasses_digest' => false,
+                'bypasses_digest' => true,
                 'tokens' => [
                     'person.name', 'company.name', 'process.name', 'case.number',
                     'claim.department', 'claim.amount', 'claim.reason', 'claim.raised_on',
@@ -147,7 +150,7 @@ class TemplateCatalogue
                 'name' => 'Your case has been completed',
                 'goes_to' => 'The person the case is about',
                 'sent_when' => 'The case is completed',
-                'bypasses_digest' => false,
+                'bypasses_digest' => true,
                 'tokens' => ['person.name', 'company.name', 'process.name', 'case.number', 'case.closed_on'],
                 'subject' => 'Your {{ process.name }} at {{ company.name }} is complete',
                 'body' => <<<'TEXT'
@@ -340,7 +343,7 @@ class TemplateCatalogue
                 'name' => 'A message did not reach somebody',
                 'goes_to' => 'Whoever raised the case',
                 'sent_when' => 'We tried to send a message and it did not arrive',
-                'bypasses_digest' => false,
+                'bypasses_digest' => true,
                 'tokens' => [
                     'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
                     'failed.recipient', 'failed.address', 'failed.what_it_was', 'failed.reason',
@@ -364,7 +367,7 @@ class TemplateCatalogue
                 'sent_when' => 'Once a day, at the hour that person chose',
                 'bypasses_digest' => false,
                 'tokens' => ['person.name', 'items', 'items.more', 'queue.link'],
-                'subject' => 'What became yours today',
+                'subject' => 'Your daily summary',
                 'body' => <<<'TEXT'
                     {{ person.name }},
 

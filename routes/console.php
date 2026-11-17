@@ -3,6 +3,7 @@
 use App\Models\NotificationDelivery;
 use App\Models\Tenant;
 use App\Notifications\Chasing;
+use App\Notifications\DailySummary;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -14,7 +15,8 @@ Artisan::command('inspire', function () {
 /*
 | The one scheduled pass in the product (module 06). Every minute, for every client company:
 | remind whoever holds a step that is part-way through its time, tell whoever is above it
-| once it has run out, and warn when a case has passed the deadline the law sets.
+| once it has run out, warn when a case has passed the deadline the law sets, and send each
+| daily summary whose hour has come.
 |
 | Each message goes out in its own short write, so a slow mail server holds up one message
 | rather than a whole client's, and a failure cannot take the record of the others with it.
@@ -29,7 +31,7 @@ Artisan::command('inspire', function () {
 Artisan::command('steps:chase', function (): void {
     foreach (Tenant::query()->where('active', true)->orderBy('id')->get() as $company) {
         try {
-            $owed = TenantContext::run($company, fn () => (new Chasing)->owed());
+            $owed = TenantContext::run($company, fn () => [...(new Chasing)->owed(), ...(new DailySummary)->owed()]);
 
             $sent = collect($owed)
                 ->map(fn (Closure $send) => TenantContext::run($company, $send))
@@ -42,6 +44,6 @@ Artisan::command('steps:chase', function (): void {
             $this->error($company->name.': '.$failed->getMessage());
         }
     }
-})->purpose('Chase late steps: remind, escalate at the deadline, and warn when a legal deadline has passed')
+})->purpose('Chase late steps, warn when a legal deadline has passed, and send each daily summary at its hour')
     ->everyMinute()
     ->withoutOverlapping(10);

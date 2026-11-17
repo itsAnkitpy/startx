@@ -53,4 +53,12 @@ final class Wording
             $text,
         );
     }
+
+    /** Whether these words carry this token, matched exactly as filling them in matches it. */
+    public static function uses(string $text, string $token): bool
+    {
+        preg_match_all(self::ATokenName, $text, $tokens);
+
+        return in_array($token, $tokens[1], true);
+    }
 }

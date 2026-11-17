@@ -196,8 +196,11 @@ class WhatHappenedOnIt
                                     ->color('gray')
                                     ->state(fn (NotificationDelivery $record): string => $record->whyItWentOut()),
 
+                                // When it left, which for a message in somebody's daily
+                                // summary is when the summary went, not when it was written.
                                 TextEntry::make('created_at')
                                     ->hiddenLabel()
+                                    ->state(fn (NotificationDelivery $record) => $record->sent_at ?? $record->created_at)
                                     ->dateTime(),
 
                                 TextEntry::make('status')

@@ -55,7 +55,7 @@ function rakeshsExitAtTheOneMoment(): ProcessCase
 
     ProcessCase::query()->whereKey($exit->getKey())->update(['opened_at' => TheOneMoment]);
     CaseStep::query()->where('case_id', $exit->getKey())->whereNotNull('acted_at')->update(['acted_at' => TheOneMoment]);
-    NotificationDelivery::query()->where('case_id', $exit->getKey())->update(['created_at' => TheOneMoment]);
+    NotificationDelivery::query()->where('case_id', $exit->getKey())->update(['created_at' => TheOneMoment, 'sent_at' => TheOneMoment]);
 
     return $exit->fresh();
 }

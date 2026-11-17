@@ -72,6 +72,11 @@ final class Sender
         $person = $this->whoAndWhere($case, $to);
         $values = [...$this->factsAbout($case, $person['name'], $person['user']?->timezone), ...$values];
 
+        // Somebody who chose one email a day gets this in it, unless it is on the closed
+        // list that never waits. A message the catalogue no longer knows goes at once.
+        $waits = $person['user']?->daily_summary_hour !== null
+            && ! (TemplateCatalogue::definitionOf($key)['bypasses_digest'] ?? true);
+
         return $this->deliver(
             $case,
             $key,
@@ -80,6 +85,32 @@ final class Sender
             Wording::filledIn($template->body, $values),
             $stepSequence,
             $chasedBy,
+            $waits,
+        );
+    }
+
+    /**
+     * Send somebody their daily summary, which is about several cases and so about none.
+     *
+     * @param  array<string, string>  $values  the summary's own tokens
+     */
+    public function sendTheDailySummary(User $to, array $values): ?NotificationDelivery
+    {
+        $template = NotificationTemplate::query()->where('key', TemplateCatalogue::DailyDigest)->first();
+
+        if (! $template instanceof NotificationTemplate) {
+            Log::warning('No wording for the daily summary.', ['person' => $to->getKey()]);
+
+            return null;
+        }
+
+        return $this->deliver(
+            null,
+            TemplateCatalogue::DailyDigest,
+            $this->whoAndWhere(null, $to),
+            Wording::filledIn($template->subject, $values),
+            Wording::filledIn($template->body, $values),
+            null,
         );
     }
 
@@ -111,16 +142,20 @@ final class Sender
      * never heard back is an honest thing for a screen to show; a message that went out
      * with nothing recorded is the silent failure this whole module exists to remove.
      *
+     * A message held for somebody's daily summary is written the same way and not sent: the
+     * summary sends it, and the case shows it waiting until then.
+     *
      * @param  array{name: string, email: string, user: User|null}  $person
      */
     private function deliver(
-        ProcessCase $case,
+        ?ProcessCase $case,
         string $key,
         array $person,
         string $subject,
         string $body,
         ?int $stepSequence,
         ?User $chasedBy = null,
+        bool $waits = false,
     ): ?NotificationDelivery {
         // Cut to what the record holds. A client's subject line may be the full 255 on its
         // own, and the facts put into it can only make it longer — a refused record would be
@@ -134,14 +169,14 @@ final class Sender
             // an error page on the exit somebody just raised is a worse answer than this.
             Log::warning('A message came out with no words in it and was not sent.', [
                 'message' => $key,
-                'case' => $case->getKey(),
+                'case' => $case?->getKey(),
             ]);
 
             return null;
         }
 
         $delivery = NotificationDelivery::create([
-            'case_id' => $case->getKey(),
+            'case_id' => $case?->getKey(),
             'step_sequence' => $stepSequence,
             'recipient_user_id' => $person['user']?->getKey(),
             'recipient_address' => $person['email'],
@@ -150,8 +185,12 @@ final class Sender
             'channel' => NotificationDelivery::Email,
             'subject' => $subject,
             'body' => $body,
-            'status' => NotificationDelivery::Sending,
+            'status' => $waits ? NotificationDelivery::Waiting : NotificationDelivery::Sending,
         ]);
+
+        if ($waits) {
+            return $delivery;
+        }
 
         try {
             Mail::raw($body, fn (Message $message) => $message
@@ -187,7 +226,7 @@ final class Sender
      * @param  User|array{name: string, email: string}  $to
      * @return array{name: string, email: string, user: User|null}
      */
-    private function whoAndWhere(ProcessCase $case, User|array $to): array
+    private function whoAndWhere(?ProcessCase $case, User|array $to): array
     {
         if (is_array($to)) {
             return ['name' => $to['name'], 'email' => $to['email'], 'user' => null];
@@ -195,7 +234,7 @@ final class Sender
 
         $personal = trim((string) $to->personal_email);
 
-        $address = $case->subject?->is($to) && $personal !== ''
+        $address = $case?->subject?->is($to) && $personal !== ''
             ? $personal
             : trim((string) $to->work_email);
 
