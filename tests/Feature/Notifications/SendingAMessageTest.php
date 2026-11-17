@@ -350,8 +350,8 @@ it('records a refused send against the case and does not undo the case', functio
         $case = (new CaseEngine)->open(theExitMeridianRuns(), whoIsOnMeridiansStaff('rohit'), whoIsOnMeridiansStaff('chandni'));
 
         // The exit is open. A mail server that is down must not undo a case somebody just
-        // raised, and it must not be quiet about it either — retrying, and telling whoever
-        // raised the case, is the step that owns failed sends.
+        // raised, and it must not be quiet about it either: the case says it is being tried
+        // again.
         expect($case->fresh()->opened_at)->not->toBeNull();
 
         $sent = NotificationDelivery::query()->where('case_id', $case->getKey())->sole();
@@ -359,7 +359,8 @@ it('records a refused send against the case and does not undo the case', functio
         expect($sent->status)->toBe(NotificationDelivery::Failed)
             ->and($sent->sent_at)->toBeNull()
             ->and($sent->failure_reason)->toBe('Connection could not be established.')
-            ->and($sent->howItWent())->toBe('Did not send');
+            ->and($sent->retries)->toBe(0)
+            ->and($sent->howItWent())->toBe('Not sent yet — trying again');
     });
 });
 

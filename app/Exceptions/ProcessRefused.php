@@ -590,8 +590,7 @@ class ProcessRefused extends RuntimeException
 
     /**
      * A chase pressed on a step nobody here can be chased about: it has moved on since the
-     * page loaded, or it is answered through a link by somebody with no account, or the one
-     * person holding it is the one pressing.
+     * page loaded, or the one person holding it is the one pressing.
      */
     public static function nobodyToChase(string $step): self
     {
@@ -614,12 +613,14 @@ class ProcessRefused extends RuntimeException
 
     /**
      * A chase pressed while the mail server would not take it. Said rather than reported as
-     * sent, and it does not count as the day's chase, so pressing again later works.
+     * sent. The product tries it again by itself, so it counts as the day's chase: pressing
+     * again would reach them twice once the retry goes (settled with Ankit on 17 November
+     * 2026).
      *
      * @param  list<string>  $names
      */
     public static function chaseDidNotGo(string $step, array $names): self
     {
-        return new self('The email to '.implode(' and ', $names)." about {$step} did not go out. Try again in a few minutes.");
+        return new self('The email to '.implode(' and ', $names)." about {$step} did not go out just now. It will be tried again by itself over the next few hours.");
     }
 }

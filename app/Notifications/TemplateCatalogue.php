@@ -342,8 +342,11 @@ class TemplateCatalogue
             self::MessageUndelivered => [
                 'name' => 'A message did not reach somebody',
                 'goes_to' => 'Whoever raised the case',
-                'sent_when' => 'We tried to send a message and it did not arrive',
+                'sent_when' => 'A message could not be sent',
                 'bypasses_digest' => true,
+                // Reworded 17 November 2026 to read right for all three ways it is sent: a
+                // message given up on, a link with no address to go to, and a daily summary
+                // that carried several of this person's cases, sent on one of them.
                 'tokens' => [
                     'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
                     'failed.recipient', 'failed.address', 'failed.what_it_was', 'failed.reason',
@@ -352,9 +355,9 @@ class TemplateCatalogue
                 'body' => <<<'TEXT'
                     {{ person.name }},
 
-                    We tried to send {{ failed.what_it_was }} to {{ failed.recipient }} at {{ failed.address }} about {{ case.number }}, {{ case.what_it_is_about }}, and it did not arrive. The reason given was: {{ failed.reason }}
+                    We could not send {{ failed.what_it_was }} to {{ failed.recipient }} ({{ failed.address }}). The reason given was: {{ failed.reason }}
 
-                    We are telling you because you raised this case and they cannot be reached by email. Nobody is waiting on a message they never got, so it is worth contacting them another way, or correcting their address.
+                    You raised {{ case.number }}, {{ case.what_it_is_about }}, so you are being told rather than left to find out. They cannot be reached by email and nobody is waiting on a message they never got, so it is worth contacting them another way, or correcting their address.
 
                     Open the case here: {{ case.link }}
 

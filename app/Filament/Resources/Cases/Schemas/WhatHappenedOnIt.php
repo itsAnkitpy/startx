@@ -185,10 +185,12 @@ class WhatHappenedOnIt
                                 // with no account — a leaver answering through a link — has
                                 // an address to show and nobody to link it to, and the
                                 // address is what a tribunal reads either way.
+                                // A link that could not be sent for want of a personal
+                                // address has no address to show, and says so.
                                 TextEntry::make('recipient_address')
                                     ->hiddenLabel()
                                     ->state(fn (NotificationDelivery $record): string => $record->recipient instanceof User
-                                        ? $record->recipient->name.' · '.$record->recipient_address
+                                        ? $record->recipient->name.' · '.($record->recipient_address !== '' ? $record->recipient_address : 'no address on record')
                                         : $record->recipient_address.' (no account here)'),
 
                                 TextEntry::make('why')
@@ -209,7 +211,8 @@ class WhatHappenedOnIt
                                     ->state(fn (NotificationDelivery $record): string => $record->howItWent())
                                     ->color(fn (NotificationDelivery $record): string => match ($record->status) {
                                         NotificationDelivery::Sent => 'success',
-                                        NotificationDelivery::Failed => 'danger',
+                                        NotificationDelivery::Failed => 'warning',
+                                        NotificationDelivery::Undelivered => 'danger',
                                         default => 'gray',
                                     }),
 

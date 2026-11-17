@@ -83,10 +83,12 @@ final class StepLink
      *
      * Any live link for the step is marked replaced first, so asking again never leaves
      * two working links for one answer.
+     *
+     * @param  User|null  $chasedBy  whoever pressed the chase button on the case, where that is what sent it
      */
-    public function issue(ProcessCase $case, int $sequence): string
+    public function issue(ProcessCase $case, int $sequence, ?User $chasedBy = null): string
     {
-        return DB::transaction(function () use ($case, $sequence): string {
+        return DB::transaction(function () use ($case, $sequence, $chasedBy): string {
             // The case's own row for the rest of this, and its live rows read again
             // behind it — the same order every other write in the engine takes. Two
             // people pressing "send me a new link" in the same second would otherwise
@@ -162,6 +164,7 @@ final class StepLink
                     .'The link works for the next '.self::LastsHours.' hours and can be opened '
                     .self::Opens." times. If it stops working, it will offer you a new one.\n",
                 $sequence,
+                $chasedBy,
             );
 
             return $address;

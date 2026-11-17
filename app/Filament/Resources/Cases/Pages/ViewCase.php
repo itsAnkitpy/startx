@@ -51,8 +51,8 @@ class ViewCase extends ViewRecord
      * it, so the whole company cannot use it to pester one department.
      *
      * It goes at once, whatever the day, to whoever holds the step today, and only once a
-     * day each. The second press is refused with a sentence rather than the button
-     * disappearing, so it says why.
+     * day each. A step only a link can answer is chased with a fresh link. The second press
+     * is refused with a sentence rather than the button disappearing, so it says why.
      */
     private function chase(): Action
     {
@@ -61,7 +61,7 @@ class ViewCase extends ViewRecord
             ->icon('heroicon-o-bell-alert')
             ->visible(fn (): bool => $this->whatCanBeChased() !== [])
             ->modalHeading('Chase whoever is holding this up')
-            ->modalDescription('They are emailed straight away, with your name on it, and it shows below under what we sent. Each person can be chased about each step once a day.')
+            ->modalDescription('They are emailed straight away, with your name on it, and it shows below under what we sent. Somebody answering through a link is sent a fresh link instead. Each person can be chased about each step once a day.')
             ->modalSubmitActionLabel('Chase them')
             ->schema([
                 Select::make('sequence')

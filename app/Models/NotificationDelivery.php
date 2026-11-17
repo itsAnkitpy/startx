@@ -30,8 +30,8 @@ class NotificationDelivery extends Model
     use BelongsToTenant;
 
     /**
-     * Held for the recipient's daily summary, then written, sent, and never got there.
-     * Enforced by the table as well.
+     * Held for the recipient's daily summary, then written, sent, refused and still being
+     * tried again, and given up on. Enforced by the table as well.
      */
     public const Waiting = 'waiting';
 
@@ -40,6 +40,8 @@ class NotificationDelivery extends Model
     public const Sent = 'sent';
 
     public const Failed = 'failed';
+
+    public const Undelivered = 'undelivered';
 
     /** The only channel at launch. On the row because the record of a send needs it. */
     public const Email = 'email';
@@ -112,9 +114,12 @@ class NotificationDelivery extends Model
      */
     public function howItWent(): string
     {
+        $inASummary = $this->digest_batch_id !== null;
+
         return match ($this->status) {
-            self::Sent => $this->digest_batch_id === null ? 'Sent' : 'Sent in their daily summary',
-            self::Failed => 'Did not send',
+            self::Sent => $inASummary ? 'Sent in their daily summary' : 'Sent',
+            self::Failed => $inASummary ? 'Not sent yet — trying their daily summary again' : 'Not sent yet — trying again',
+            self::Undelivered => $inASummary ? 'Could not be sent in their daily summary' : 'Could not be sent',
             self::Waiting => 'Waiting for their daily summary',
             default => 'Still sending',
         };

@@ -4,6 +4,7 @@ use App\Models\NotificationDelivery;
 use App\Models\Tenant;
 use App\Notifications\Chasing;
 use App\Notifications\DailySummary;
+use App\Notifications\TryingAgain;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -15,12 +16,14 @@ Artisan::command('inspire', function () {
 /*
 | The one scheduled pass in the product (module 06). Every minute, for every client company:
 | remind whoever holds a step that is part-way through its time, tell whoever is above it
-| once it has run out, warn when a case has passed the deadline the law sets, and send each
-| daily summary whose hour has come.
+| once it has run out, warn when a case has passed the deadline the law sets, send each
+| daily summary whose hour has come, and try again each message the mail server refused.
 |
 | Each message goes out in its own short write, so a slow mail server holds up one message
 | rather than a whole client's, and a failure cannot take the record of the others with it.
-| One client company failing is reported and the rest are still chased.
+| Each send catches its own error, so one message that keeps failing cannot hold up the rest
+| of its company every minute. One client company failing is reported and the rest are still
+| chased.
 |
 | ponytail: sent here rather than queued, because the queue needs a worker running and this
 | volume does not. Move the sends onto the queue when one pass stops fitting in its minute.
@@ -31,10 +34,22 @@ Artisan::command('inspire', function () {
 Artisan::command('steps:chase', function (): void {
     foreach (Tenant::query()->where('active', true)->orderBy('id')->get() as $company) {
         try {
-            $owed = TenantContext::run($company, fn () => [...(new Chasing)->owed(), ...(new DailySummary)->owed()]);
+            $owed = TenantContext::run($company, fn () => [
+                ...(new Chasing)->owed(),
+                ...(new DailySummary)->owed(),
+                ...(new TryingAgain)->owed(),
+            ]);
 
             $sent = collect($owed)
-                ->map(fn (Closure $send) => TenantContext::run($company, $send))
+                ->map(function (Closure $send) use ($company): ?NotificationDelivery {
+                    try {
+                        return TenantContext::run($company, $send);
+                    } catch (Throwable $failed) {
+                        report($failed);
+
+                        return null;
+                    }
+                })
                 ->filter(fn (?NotificationDelivery $delivery) => $delivery?->status === NotificationDelivery::Sent)
                 ->count();
 
@@ -44,6 +59,6 @@ Artisan::command('steps:chase', function (): void {
             $this->error($company->name.': '.$failed->getMessage());
         }
     }
-})->purpose('Chase late steps, warn when a legal deadline has passed, and send each daily summary at its hour')
+})->purpose('Chase late steps, warn when a legal deadline has passed, send each daily summary at its hour, and try again each message the mail server refused')
     ->everyMinute()
     ->withoutOverlapping(10);

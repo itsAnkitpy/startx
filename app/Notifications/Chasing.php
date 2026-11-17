@@ -90,13 +90,17 @@ final class Chasing
      * the client's today, counted from the record of what was sent rather than from a
      * counter that would disagree with it the first time the cache is cleared.
      *
+     * A step only a link can answer is chased by sending a fresh link, counted once a day the
+     * same way from the links sent for it, so a leaver whose address was missing when the
+     * step opened gets one the moment somebody fills it in and presses.
+     *
      * ponytail: two presses in the same instant both find nobody chased yet and both send.
      * The button is disabled while its request runs; add a lock here if that ever proves
      * not enough.
      *
      * @return Collection<int, User> whoever the chase actually reached the mail server for
      *
-     * @throws ProcessRefused when there is nobody to chase, everybody has been today, or not one email went out
+     * @throws ProcessRefused when there is nobody to chase, everybody has been today, a link has nowhere to go, or not one email went out
      */
     public function byHand(ProcessCase $case, int $sequence, User $by): Collection
     {
@@ -109,16 +113,22 @@ final class Chasing
             throw ProcessRefused::nobodyToChase($step?->step->name ?? 'that step');
         }
 
+        $byLink = $this->resolver->isForSomebodyWithNoAccount($step->step);
+
         // Laravel writes a time into a query exactly as it reads, so the client's midnight
         // goes in as UTC rather than as a wall-clock time UTC would misread.
         $startOfToday = CarbonImmutable::now($case->tenant->timezone)->startOfDay()->utc();
 
-        // A chase that never left is not a chase, so it does not use up the day's one.
+        // A chase given up on is not a chase, so it does not use up the day's one. One still
+        // being tried again does, or the retry would reach them a second time (settled with
+        // Ankit on 17 November 2026). Only a press counts: the link that went out when the
+        // step opened, or one the leaver asked for, is not a chase.
         $chasedToday = NotificationDelivery::query()
             ->where('case_id', $case->getKey())
             ->where('step_sequence', $sequence)
-            ->where('template_key', TemplateCatalogue::StepNudgeHolder)
-            ->where('status', '!=', NotificationDelivery::Failed)
+            ->where('template_key', $byLink ? TemplateCatalogue::LinkToAnswerAStep : TemplateCatalogue::StepNudgeHolder)
+            ->whereNotNull('triggered_by')
+            ->where('status', '!=', NotificationDelivery::Undelivered)
             ->where('created_at', '>=', $startOfToday)
             ->pluck('recipient_user_id')
             ->map(fn (mixed $id) => (int) $id)
@@ -133,7 +143,7 @@ final class Chasing
         $chased = collect();
 
         foreach ($notYet as $person) {
-            $sent = $this->sender->send(
+            $sent = $byLink ? $this->aFreshLink($case, $sequence, $by) : $this->sender->send(
                 $case,
                 TemplateCatalogue::StepNudgeHolder,
                 $person,
@@ -172,9 +182,10 @@ final class Chasing
                 (new StepLink)->issue($step->case, $step->step->sequence);
             } catch (ProcessRefused $nowhereToSendIt) {
                 // The answer that opened the step has already been saved, so it must not
-                // come back to the person who gave it as a refusal. Said in the log; the
-                // link can be sent by hand once the address is filled in.
-                report($nowhereToSendIt);
+                // come back to the person who gave it as a refusal. It shows on the case as
+                // could not be sent and whoever raised it is told now; the chase button
+                // sends a fresh link once the address is filled in.
+                (new TryingAgain($this->sender))->couldNotSendTheLink($step, $nowhereToSendIt->getMessage());
             }
 
             return;
@@ -198,16 +209,37 @@ final class Chasing
     }
 
     /**
-     * Who pressing the button about this step would reach: whoever holds it today, less the
-     * person pressing — chasing yourself is not a chase.
+     * Who pressing the button about this step would reach: whoever holds it today, or the
+     * person a link step is waiting on, less the person pressing — chasing yourself is not a
+     * chase.
      *
      * @return Collection<int, User>
      */
     public function whoCanBeChasedBy(AvailableStep $step, User $by): Collection
     {
-        return $this->holdersToday($step)
+        $people = $this->resolver->isForSomebodyWithNoAccount($step->step)
+            ? collect([$step->case->subject])->filter()
+            : $this->holdersToday($step);
+
+        return $people
             ->reject(fn (User $person) => (int) $person->getKey() === (int) $by->getKey())
             ->values();
+    }
+
+    /**
+     * Send a fresh link for a step, with the name of whoever pressed the button on its record,
+     * and hand back that record. A missing address is refused in the link's own sentence.
+     */
+    private function aFreshLink(ProcessCase $case, int $sequence, User $by): ?NotificationDelivery
+    {
+        (new StepLink)->issue($case, $sequence, $by);
+
+        return NotificationDelivery::query()
+            ->where('case_id', $case->getKey())
+            ->where('step_sequence', $sequence)
+            ->where('template_key', TemplateCatalogue::LinkToAnswerAStep)
+            ->latest('id')
+            ->first();
     }
 
     /**

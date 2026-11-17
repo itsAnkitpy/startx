@@ -123,6 +123,7 @@ final class Sender
      * yet insist a client keeps a token in a sentence they have rewritten.
      *
      * @param  User|array{name: string, email: string}  $to  somebody here, or somebody with no account
+     * @param  User|null  $chasedBy  whoever pressed the chase button, where a person sent it rather than the product
      */
     public function sendOurOwnWords(
         ProcessCase $case,
@@ -131,8 +132,9 @@ final class Sender
         string $subject,
         string $body,
         ?int $stepSequence = null,
+        ?User $chasedBy = null,
     ): ?NotificationDelivery {
-        return $this->deliver($case, $key, $this->whoAndWhere($case, $to), $subject, $body, $stepSequence);
+        return $this->deliver($case, $key, $this->whoAndWhere($case, $to), $subject, $body, $stepSequence, $chasedBy);
     }
 
     /**
@@ -192,14 +194,27 @@ final class Sender
             return $delivery;
         }
 
+        return $this->handOver($delivery, $person['name']);
+    }
+
+    /**
+     * Hand a message already on record to the mail server, in the words on the row, and say
+     * on the row how that went.
+     *
+     * **What a retry sends is the row, never the wording rendered again**, so the record stays
+     * the words actually sent however the client has reworded the message since.
+     *
+     * A refusal is caught rather than allowed out: a mail server that is down must not undo a
+     * clearance somebody has just given. The row says it failed, and the scheduled pass tries
+     * it again.
+     */
+    public function handOver(NotificationDelivery $delivery, ?string $name = null): NotificationDelivery
+    {
         try {
-            Mail::raw($body, fn (Message $message) => $message
-                ->to($person['email'], $person['name'])
-                ->subject($subject));
+            Mail::raw($delivery->body, fn (Message $message) => $message
+                ->to($delivery->recipient_address, $name ?? $delivery->recipient?->name)
+                ->subject($delivery->subject));
         } catch (Throwable $refused) {
-            // Caught rather than allowed out: a mail server that is down must not undo a
-            // clearance somebody has just given. Retrying it, and telling whoever raised
-            // the case that their message never arrived, is step 6.
             $delivery->status = NotificationDelivery::Failed;
             $delivery->failure_reason = Str::limit($refused->getMessage(), self::RoomForAFailure);
             $delivery->save();
@@ -209,6 +224,7 @@ final class Sender
 
         $delivery->status = NotificationDelivery::Sent;
         $delivery->sent_at = now();
+        $delivery->failure_reason = null;
         $delivery->save();
 
         return $delivery;
@@ -223,10 +239,13 @@ final class Sender
      * for somebody with no account already follows, and it is why module 01 records a
      * personal address at all.
      *
+     * Public because a message tried again goes wherever this says now, not where it first
+     * went: somebody may have corrected the address that refused it.
+     *
      * @param  User|array{name: string, email: string}  $to
      * @return array{name: string, email: string, user: User|null}
      */
-    private function whoAndWhere(?ProcessCase $case, User|array $to): array
+    public function whoAndWhere(?ProcessCase $case, User|array $to): array
     {
         if (is_array($to)) {
             return ['name' => $to['name'], 'email' => $to['email'], 'user' => null];

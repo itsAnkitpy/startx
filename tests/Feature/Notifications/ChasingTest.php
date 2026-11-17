@@ -15,6 +15,7 @@ use App\Notifications\TemplateCatalogue;
 use App\Process\AssigneeResolver;
 use App\Process\AvailableSteps;
 use App\Process\CaseEngine;
+use App\Process\StepLink;
 use App\Settings\Settings;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -368,7 +369,7 @@ it('chases by hand from the case, at once on a Sunday, once a day, and names who
     });
 });
 
-it('says so when a chase pressed by hand did not go out, and lets it be pressed again', function () {
+it('says so when a chase pressed by hand did not go out, and tries it again by itself rather than letting it be pressed twice', function () {
     TenantContext::run($this->meridian, function () {
         $anjali = meridianColleague('anjali');
         $request = ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')
@@ -385,19 +386,52 @@ it('says so when a chase pressed by hand did not go out, and lets it be pressed 
 
         Mail::swap($mailer);
 
+        // Pressed again while it is still being tried: Priya would otherwise get it twice
+        // once the retry goes (settled with Ankit on 17 November 2026).
+        $this->travelTo(onMeridiansClock('2026-11-22 11:03'));
+
         Livewire::actingAs($anjali)->test(ViewCase::class, ['record' => $request->getKey()])
             ->callAction('chase', ['sequence' => 2])
-            ->assertNotified('Chased Priya Nair');
+            ->assertNotified('Nobody was chased');
 
-        expect(NotificationDelivery::query()->where('template_key', TemplateCatalogue::StepNudgeHolder)->orderBy('id')->pluck('status')->all())
-            ->toBe([NotificationDelivery::Failed, NotificationDelivery::Sent]);
+        $this->travelTo(onMeridiansClock('2026-11-22 11:05'));
+        chaseLateSteps();
+
+        expect(NotificationDelivery::query()->where('template_key', TemplateCatalogue::StepNudgeHolder)->pluck('status')->all())
+            ->toBe([NotificationDelivery::Sent])
+            ->and(chasesThatLeft($request))->toBe(['priya@meridian.test — Anjali Rao is waiting on Line-of-business approval — #'.$request->number]);
     });
 });
 
-it('offers no chase on a step only a link can answer', function () {
+it('chases a step only a link can answer with a fresh link, once a day, with the name of whoever pressed it', function () {
     TenantContext::run($this->meridian, function () {
-        Livewire::actingAs(meridianColleague('chandni'))->test(ViewCase::class, ['record' => meridianExitOf('rakesh')->getKey()])
-            ->assertActionHidden('chase');
+        $chandni = meridianColleague('chandni');
+        $rakeshs = meridianExitOf('rakesh');
+
+        // A link going out by itself today, as when the step opens or when Rakesh asks for a
+        // new one, is not a chase and does not use up the day's one.
+        (new StepLink)->issue($rakeshs, 4);
+        chasesThatLeft();
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rakeshs->getKey()])
+            ->callAction('chase', ['sequence' => 4])
+            ->assertHasNoActionErrors()
+            ->assertNotified('Chased Rakesh Menon')
+            ->assertSee('Chandni Verma pressed the chase button');
+
+        expect(chasesThatLeft())->toBe(['rakesh@personal.example — Meridian Logistics — Leaver confirms the handover']);
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rakeshs->getKey()])
+            ->callAction('chase', ['sequence' => 4])
+            ->assertNotified('Nobody was chased');
+
+        $this->travelTo(onMeridiansClock('2026-11-17 00:01'));
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rakeshs->getKey()])
+            ->callAction('chase', ['sequence' => 4])
+            ->assertNotified('Chased Rakesh Menon');
+
+        expect(chasesThatLeft())->toHaveCount(1);
     });
 });
 
