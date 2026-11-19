@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\Tenant;
+use App\Models\User;
 use App\Tenancy\Rls;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +23,7 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
-    ->in('Feature');
+    ->in('Feature', 'Browser');
 
 /*
 |--------------------------------------------------------------------------
@@ -190,4 +193,46 @@ function tenantWallFaults(string $table, ?array $tenantOwned = null): array
     }
 
     return $faults;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Browser helpers
+|--------------------------------------------------------------------------
+|
+| The browser tests run the application inside the test itself, and the browser always
+| talks to 127.0.0.1. Which client company a request belongs to is read from its host,
+| so the plugin rewrites the host on every request from one shared setting — which is
+| why it is set here for the whole test, never per visit: a per-visit host is put back
+| as soon as the first page has loaded, and every click after it would arrive at no
+| company at all.
+|
+*/
+
+/** Somebody at a seeded client company, by first name: `personAt('meridian', 'anjali')`. */
+function personAt(string $company, string $first): User
+{
+    $tenant = Tenant::query()->where('slug', $company)->sole();
+
+    return TenantContext::run($tenant, fn (): User => User::query()->where('work_email', "{$first}@{$company}.test")->sole());
+}
+
+/**
+ * Open one or more screens in a real browser, signed in as this person, at their own
+ * company's address.
+ *
+ * @param  string|list<string>  $paths
+ */
+function browseAs(User $person, string|array $paths): mixed
+{
+    // The application answering the browser lives as long as the test, and so does its
+    // session, which a real server would start empty for each visitor. Left alone, the
+    // previous person's sign-in stays in it, and the panel signs the next person out for
+    // arriving on somebody else's session.
+    test()->flushSession();
+    test()->actingAs($person);
+
+    pest()->browser()->withHost($person->tenant->slug.'.'.config('tenancy.central_domain'));
+
+    return visit($paths);
 }
