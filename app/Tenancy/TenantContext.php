@@ -25,7 +25,10 @@ use Throwable;
  *   run inside one. A `SET LOCAL` written at request start would end before
  *   Filament's first query and every screen would come back empty.
  * - A job, command or import uses `SET LOCAL` inside its own transaction
- *   ({@see run}), which clears itself when that transaction ends.
+ *   ({@see run}), which clears itself when that transaction ends. Where that
+ *   transaction is its own, a plain `SET` is added just before it commits and put
+ *   back afterwards, because Laravel runs what was left for after the commit — every
+ *   message the case engine sends — once `SET LOCAL` has already gone.
  */
 class TenantContext
 {
@@ -173,6 +176,10 @@ class TenantContext
             $result = $callback();
 
             if ($openedTransaction) {
+                // What waits for the commit runs after Postgres has dropped the SET LOCAL,
+                // while this scope still names the company. Without this the seeder's
+                // emails found no wording and its first note on a case was refused.
+                self::writeMarkers($tenantId, $crossTenant, local: false);
                 $connection->commit();
             }
 
@@ -188,15 +195,15 @@ class TenantContext
             self::$crossTenant = $previousCrossTenant;
 
             // Where we opened the transaction it has now ended, taking its
-            // SET LOCAL with it. Where we ran inside someone else's transaction,
-            // the markers have to be put back by hand — best-effort, because that
-            // transaction may already be aborted after a database error.
-            if (! $openedTransaction) {
-                try {
-                    self::writeMarkers($previousTenantId, $previousCrossTenant, local: true);
-                } catch (Throwable) {
-                    // The owner of the aborted transaction will roll it back.
-                }
+            // SET LOCAL with it, and the plain SET written for after the commit is put
+            // back. Where we ran inside someone else's transaction, the markers have to
+            // be put back by hand. Both best-effort: a transaction aborted after a
+            // database error is rolled back by its owner, and a dead connection is
+            // replaced by a new one carrying no marker at all.
+            try {
+                self::writeMarkers($previousTenantId, $previousCrossTenant, local: ! $openedTransaction);
+            } catch (Throwable) {
+                // See above.
             }
         }
     }

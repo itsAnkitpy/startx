@@ -95,6 +95,40 @@ it('keeps a web request\'s marker alive across a transaction inside the request'
     expect(markerOnConnection())->toBeNull();
 });
 
+it('keeps the database marker for what runs once a seeder or command has saved its work', function () {
+    // Every test runs inside one long transaction, so a scope here never commits its own
+    // and Laravel runs after-commit work while that scope's SET LOCAL is still alive. A
+    // seeder, command or job starts from no transaction at all. A second connection to
+    // the same database is that start, and nothing is written to any table on it. The
+    // default goes back before the test ends, or the test's own transaction is never
+    // rolled back and the next test waits on it forever.
+    $theTests = config('database.default');
+
+    config([
+        'database.connections.outside_the_test' => config("database.connections.{$theTests}"),
+        'database.default' => 'outside_the_test',
+    ]);
+
+    try {
+        $seenAfterCommit = 'never ran';
+
+        TenantContext::run($this->meridian, function () use (&$seenAfterCommit) {
+            DB::afterCommit(function () use (&$seenAfterCommit) {
+                $seenAfterCommit = markerOnConnection();
+            });
+        });
+
+        $afterwards = markerOnConnection();
+    } finally {
+        config(['database.default' => $theTests]);
+        DB::purge('outside_the_test');
+    }
+
+    expect($seenAfterCommit)->toBe((string) $this->meridian->getKey())
+        ->and($afterwards)->toBeNull()
+        ->and(TenantContext::id())->toBeNull();
+});
+
 it('reads the client company from the subdomain, before anyone has signed in', function () {
     $middleware = new BindTenantToRequest;
 
