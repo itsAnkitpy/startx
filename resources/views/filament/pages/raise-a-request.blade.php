@@ -36,6 +36,9 @@
             </x-filament-forms::field-wrapper>
 
             @if ($chosen && $this->isAnExit())
+                {{-- Their own exit, while it is open, in place of a second one. --}}
+                @php($yours = $this->isTheirOwn() ? $this->yourOpenExit() : null)
+
                 {{-- An exit answers no step when it is raised: these four are what the case
                      itself carries, and the first step is somebody else's. --}}
                 <x-filament::fieldset label="Who is leaving, and when">
@@ -51,53 +54,82 @@
                             </x-filament::input.wrapper>
                         </x-filament-forms::field-wrapper>
 
-                        <x-filament-forms::field-wrapper id="exit-last-day" label="Last working day" :required="true" state-path="lastWorkingDay">
-                            <x-filament::input.wrapper :valid="! $errors->has('lastWorkingDay')">
-                                <x-filament::input type="date" id="exit-last-day" wire:model.live="lastWorkingDay" />
-                            </x-filament::input.wrapper>
-                            <p style="font-size: 0.75rem;">
-                                Everything owed to them is due two working days after this, counted on their own office's calendar.
+                        @if ($yours)
+                            <p style="font-size: 0.875rem;">
+                                Your exit is open. It was raised on {{ $yours['raised_on'] }}, and your last working day is {{ $yours['last_working_day'] }}.
                             </p>
-                        </x-filament-forms::field-wrapper>
 
-                        @if ($this->isTheirOwn())
-                            <p style="font-size: 0.875rem;">Your own exit is recorded as a resignation.</p>
-                        @elseif ($this->leaverId)
-                            <x-filament-forms::field-wrapper id="exit-ended-by" label="How their employment is ending" :required="true" state-path="employmentEndedBy">
-                                <x-filament::input.wrapper :valid="! $errors->has('employmentEndedBy')">
-                                    <x-filament::input.select id="exit-ended-by" wire:model.live="employmentEndedBy">
-                                        <option value="">Choose one</option>
-                                        @foreach (\App\Models\ProcessCase::WaysEmploymentEnds as $value => $label)
-                                            <option value="{{ $value }}">{{ $label }}</option>
-                                        @endforeach
-                                    </x-filament::input.select>
+                            @if ($yours['may_withdraw'])
+                                <x-filament-forms::field-wrapper id="withdraw-reason" label="Why you are withdrawing it" :required="true" state-path="withdrawalReason">
+                                    {{-- `fi-fo-textarea` on the wrapper and no class on the box, for
+                                         the reason the queue's reason box gives. --}}
+                                    <x-filament::input.wrapper :valid="! $errors->has('withdrawalReason')" class="fi-fo-textarea">
+                                        <textarea id="withdraw-reason" rows="3" wire:model.live.blur="withdrawalReason"></textarea>
+                                    </x-filament::input.wrapper>
+                                    <p style="font-size: 0.75rem;">You can withdraw it yourself until anybody acts on it. Whoever it is waiting on is emailed this reason.</p>
+                                </x-filament-forms::field-wrapper>
+                            @else
+                                <p style="font-size: 0.875rem;">Only HR can withdraw it or change your last working day now.</p>
+                            @endif
+                        @else
+                            <x-filament-forms::field-wrapper id="exit-last-day" label="Last working day" :required="true" state-path="lastWorkingDay">
+                                <x-filament::input.wrapper :valid="! $errors->has('lastWorkingDay')">
+                                    <x-filament::input type="date" id="exit-last-day" wire:model.live="lastWorkingDay" />
                                 </x-filament::input.wrapper>
                                 <p style="font-size: 0.75rem;">
-                                    Whether a gratuity deadline is tracked turns on this.
+                                    Everything owed to them is due two working days after this, counted on their own office's calendar.
+                                </p>
+                            </x-filament-forms::field-wrapper>
+
+                            @if ($this->isTheirOwn())
+                                <p style="font-size: 0.875rem;">Your own exit is recorded as a resignation.</p>
+                            @elseif ($this->leaverId)
+                                <x-filament-forms::field-wrapper id="exit-ended-by" label="How their employment is ending" :required="true" state-path="employmentEndedBy">
+                                    <x-filament::input.wrapper :valid="! $errors->has('employmentEndedBy')">
+                                        <x-filament::input.select id="exit-ended-by" wire:model.live="employmentEndedBy">
+                                            <option value="">Choose one</option>
+                                            @foreach (\App\Models\ProcessCase::WaysEmploymentEnds as $value => $label)
+                                                <option value="{{ $value }}">{{ $label }}</option>
+                                            @endforeach
+                                        </x-filament::input.select>
+                                    </x-filament::input.wrapper>
+                                    <p style="font-size: 0.75rem;">
+                                        Whether a gratuity deadline is tracked turns on this.
+                                    </p>
+                                </x-filament-forms::field-wrapper>
+                            @endif
+
+                            <x-filament-forms::field-wrapper id="exit-personal-email" label="Personal email" :required="true" state-path="personalEmail">
+                                <x-filament::input.wrapper :valid="! $errors->has('personalEmail')">
+                                    <x-filament::input type="email" id="exit-personal-email" wire:model.live.blur="personalEmail" />
+                                </x-filament::input.wrapper>
+                                <p style="font-size: 0.75rem;">
+                                    Their relieving letter and settlement are sent here once their sign-in has ended. Check it is one they still use.
                                 </p>
                             </x-filament-forms::field-wrapper>
                         @endif
-
-                        <x-filament-forms::field-wrapper id="exit-personal-email" label="Personal email" :required="true" state-path="personalEmail">
-                            <x-filament::input.wrapper :valid="! $errors->has('personalEmail')">
-                                <x-filament::input type="email" id="exit-personal-email" wire:model.live.blur="personalEmail" />
-                            </x-filament::input.wrapper>
-                            <p style="font-size: 0.75rem;">
-                                Their relieving letter and settlement are sent here once their sign-in has ended. Check it is one they still use.
-                            </p>
-                        </x-filament-forms::field-wrapper>
                     </div>
                 </x-filament::fieldset>
 
-                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
-                    <x-filament::button color="success" wire:click="raise" wire:loading.attr="disabled">
-                        Raise the exit
-                    </x-filament::button>
+                @if ($yours)
+                    @if ($yours['may_withdraw'])
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+                            <x-filament::button color="danger" wire:click="withdrawTheirOwn" wire:loading.attr="disabled">
+                                Withdraw my exit
+                            </x-filament::button>
+                        </div>
+                    @endif
+                @else
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+                        <x-filament::button color="success" wire:click="raise" wire:loading.attr="disabled">
+                            Raise the exit
+                        </x-filament::button>
 
-                    <span wire:loading wire:target="raise" style="font-size: 0.875rem;">
-                        Raising…
-                    </span>
-                </div>
+                        <span wire:loading wire:target="raise" style="font-size: 0.875rem;">
+                            Raising…
+                        </span>
+                    </div>
+                @endif
             @elseif ($chosen)
                 {{-- A first step that asks nothing is a request with no detail on it, which
                      is legitimate — an access request that is only "I am asking" — so the

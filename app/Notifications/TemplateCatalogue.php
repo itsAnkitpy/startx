@@ -41,6 +41,10 @@ class TemplateCatalogue
      * the case rather than an approval in between, which is how Pocket HRMS and Keka treat it
      * too: Pocket HRMS emails the employee the manager's remarks, and Keka shows the reason on
      * their profile. It carries no link, because the case's page is not theirs to read.
+     *
+     * **And two more since module 07 step 2: their last working day moved, and their exit
+     * withdrawn by somebody else.** Both change what they are owed and when, which is the
+     * same reason the opening is sent, and neither is an approval in between. No link either.
      */
     public const CaseOpenedSubject = 'case_opened_subject';
 
@@ -49,6 +53,19 @@ class TemplateCatalogue
     public const CaseClosedSubject = 'case_closed_subject';
 
     public const CaseTurnedDownSubject = 'case_turned_down_subject';
+
+    public const LastDayMovedSubject = 'last_day_moved_subject';
+
+    public const CaseWithdrawnSubject = 'case_withdrawn_subject';
+
+    /**
+     * The same two moments, for everybody holding an open step and whoever raised the case.
+     * A clearance holder planning against a settlement date that has moved is planning
+     * against the wrong day, and one still working on a withdrawn exit is wasting it.
+     */
+    public const LastDayMovedWorkingOnIt = 'last_day_moved_working_on_it';
+
+    public const CaseWithdrawnWorkingOnIt = 'case_withdrawn_working_on_it';
 
     /** Sent to whoever raised the case, who today has to go and look for all three. */
     public const CaseMovedInitiator = 'case_moved_initiator';
@@ -190,6 +207,92 @@ class TemplateCatalogue
                     Nothing more will happen on it. If you have any questions, speak to {{ step.answered_by }} or to HR.
 
                     {{ company.name }}
+                    TEXT,
+            ],
+
+            self::LastDayMovedSubject => [
+                'name' => 'Your last working day has changed',
+                'goes_to' => 'The person the case is about',
+                'sent_when' => 'Somebody changes their last working day',
+                'bypasses_digest' => true,
+                'tokens' => [
+                    'person.name', 'company.name', 'process.name', 'case.number',
+                    'case.last_working_day_was', 'case.last_working_day', 'case.deadline', 'case.changed_by', 'case.reason',
+                ],
+                'subject' => 'Your last working day at {{ company.name }} is now {{ case.last_working_day }}',
+                'body' => <<<'TEXT'
+                    Dear {{ person.name }},
+
+                    {{ case.changed_by }} has changed your last working day from {{ case.last_working_day_was }} to {{ case.last_working_day }}. The reference of your {{ process.name }} is {{ case.number }}.
+
+                    The reason given was: {{ case.reason }}
+
+                    Everything you are owed is now due by {{ case.deadline }}. If this is not what you agreed, speak to {{ case.changed_by }} or to HR.
+
+                    {{ company.name }}
+                    TEXT,
+            ],
+
+            self::CaseWithdrawnSubject => [
+                'name' => 'Your case has been withdrawn',
+                'goes_to' => 'The person the case is about',
+                'sent_when' => 'Somebody else withdraws it',
+                'bypasses_digest' => true,
+                'tokens' => ['person.name', 'company.name', 'process.name', 'case.number', 'case.changed_by', 'case.reason'],
+                'subject' => 'Your {{ process.name }} at {{ company.name }} has been withdrawn',
+                'body' => <<<'TEXT'
+                    Dear {{ person.name }},
+
+                    {{ case.changed_by }} has withdrawn your {{ process.name }}. Its reference is {{ case.number }}.
+
+                    The reason given was: {{ case.reason }}
+
+                    Nothing more will happen on it. If you have any questions, speak to {{ case.changed_by }} or to HR.
+
+                    {{ company.name }}
+                    TEXT,
+            ],
+
+            self::LastDayMovedWorkingOnIt => [
+                'name' => 'The last working day on an exit has changed',
+                'goes_to' => 'Everybody holding an open step on it, and whoever raised it',
+                'sent_when' => 'Somebody changes the last working day',
+                'bypasses_digest' => false,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
+                    'case.last_working_day_was', 'case.last_working_day', 'case.deadline', 'case.changed_by', 'case.reason',
+                ],
+                'subject' => '{{ case.number }} — last working day is now {{ case.last_working_day }}',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ case.changed_by }} has changed the last working day on {{ case.number }}, {{ case.what_it_is_about }}, from {{ case.last_working_day_was }} to {{ case.last_working_day }}. Everything owed to them is now due by {{ case.deadline }}.
+
+                    The reason given was: {{ case.reason }}
+
+                    Open it here: {{ case.link }}
+
+                    TEXT,
+            ],
+
+            self::CaseWithdrawnWorkingOnIt => [
+                'name' => 'A case has been withdrawn',
+                'goes_to' => 'Everybody holding an open step on it, and whoever raised it',
+                'sent_when' => 'Somebody withdraws it',
+                'bypasses_digest' => false,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link', 'case.changed_by', 'case.reason',
+                ],
+                'subject' => '{{ case.number }} has been withdrawn',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ case.changed_by }} has withdrawn {{ case.number }}, {{ case.what_it_is_about }}. Nothing on it is waiting on anybody any more.
+
+                    The reason given was: {{ case.reason }}
+
+                    You can read the whole story of it here: {{ case.link }}
+
                     TEXT,
             ],
 

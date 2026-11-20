@@ -1,5 +1,6 @@
 <?php
 
+use App\Authorization\Permission;
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
@@ -11,6 +12,7 @@ use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\AvailableStep;
@@ -35,6 +37,10 @@ use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
+
+    // Whoever holds the exit team role may withdraw an exit or move its date, which is a
+    // granted action since module 07 step 2.
+    TenantContext::run($this->meridian, fn () => Role::factory()->keyed('exit_team')->withPermissions([Permission::ChangeExit])->create());
 });
 
 afterEach(function () {

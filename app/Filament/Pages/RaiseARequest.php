@@ -19,6 +19,7 @@ use BackedEnum;
 use Closure;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Support\Facades\FilamentTimezone;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,11 @@ use UnitEnum;
  * who, their last working day, how their employment is ending, and the personal address
  * everything owed to them goes to once their sign-in has ended. The first step is then
  * somebody else's, usually their manager's. Vertex's exit has always opened this way.
+ *
+ * **Deepak's own open exit is shown here instead of a second one**, with a Withdraw button
+ * while it is still his to take back, because the exit's own page is not his to read
+ * (Ankit, 20 November 2026). Keka and Pocket HRMS put the employee's withdrawal on their own
+ * view of their resignation in the same way, not on HR's page.
  */
 class RaiseARequest extends Page
 {
@@ -99,6 +105,9 @@ class RaiseARequest extends Page
 
     /** Where everything owed to them goes once their sign-in has ended, to confirm or correct. */
     public ?string $personalEmail = null;
+
+    /** Why somebody is withdrawing their own exit. */
+    public ?string $withdrawalReason = null;
 
     /** @var array<int, string>|null */
     private ?array $leavers = null;
@@ -314,6 +323,65 @@ class RaiseARequest extends Page
     }
 
     /**
+     * Their own exit while it is open, as the screen shows it in place of a second one.
+     *
+     * The two dates they already know and whether they may still take it back, rather than
+     * the case itself: a public method is one the browser may call by name and read the
+     * answer to, and the case carries what each department said about them.
+     *
+     * @return array{last_working_day: string, raised_on: string, may_withdraw: bool}|null
+     */
+    public function yourOpenExit(): ?array
+    {
+        $case = $this->theirOpenExit();
+
+        if ($case === null) {
+            return null;
+        }
+
+        return [
+            'last_working_day' => $case->statutory_from->format('j F Y'),
+            'raised_on' => $case->opened_at->timezone(FilamentTimezone::get())->format('j F Y'),
+            'may_withdraw' => (new CaseEngine)->theLeaverMayStillWithdraw($case),
+        ];
+    }
+
+    /**
+     * Withdraw their own resignation. The engine decides again, under the case's lock,
+     * whether it is still theirs to take back, so a manager approving it a second earlier
+     * wins and Deepak is told only HR can withdraw it now.
+     */
+    public function withdrawTheirOwn(): void
+    {
+        $this->validate(
+            ['withdrawalReason' => ['required', 'string', 'max:255']],
+            ['withdrawalReason.required' => 'Say why you are withdrawing it.'],
+            ['withdrawalReason' => 'reason'],
+        );
+
+        $case = $this->theirOpenExit();
+
+        if ($case === null) {
+            Notification::make()->danger()->title('You have no exit open.')->send();
+
+            return;
+        }
+
+        try {
+            (new CaseEngine)->cancel($case, $this->person(), (string) $this->withdrawalReason);
+        } catch (ProcessRefused $refused) {
+            Notification::make()->danger()->title($refused->getMessage())->send();
+
+            return;
+        }
+
+        Notification::make()->success()->title('Your exit is withdrawn.')
+            ->body('Whoever it was waiting on has been emailed.')->send();
+
+        $this->reset('processId', 'leaverId', 'lastWorkingDay', 'employmentEndedBy', 'personalEmail', 'withdrawalReason');
+    }
+
+    /**
      * The process being raised, read back off the list rather than trusted from the
      * browser — which is what makes the number in the box a choice rather than a way in.
      */
@@ -457,6 +525,17 @@ class RaiseARequest extends Page
         Notification::make()->success()->title('Exit raised for '.$leaver->name.'.')->send();
 
         $this->redirect(CaseResource::getUrl('view', ['record' => $case]));
+    }
+
+    /** Their own exit carrying a last working day that has neither finished nor been withdrawn. */
+    private function theirOpenExit(): ?ProcessCase
+    {
+        return ProcessCase::query()
+            ->where('subject_user_id', $this->person()->getKey())
+            ->whereNotNull('statutory_from')
+            ->whereNull('closed_at')
+            ->whereNull('cancelled_at')
+            ->first();
     }
 
     private function firstStepOf(ProcessTemplate $process): ProcessStep

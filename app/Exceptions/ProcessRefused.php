@@ -345,6 +345,26 @@ class ProcessRefused extends RuntimeException
         return new self("{$act} is not yours to do when the case is about you.");
     }
 
+    public static function thatExitIsNotYoursToChange(): self
+    {
+        return new self('Only somebody who looks after exits for that part of the company can withdraw this exit or change its last working day.');
+    }
+
+    /**
+     * Deepak withdrawing his own exit once it has gone past his own say-so: his manager has
+     * answered, HR has moved the date or handed his work on, or it was never his resignation
+     * to withdraw.
+     */
+    public static function onlyHrCanWithdrawItNow(): self
+    {
+        return new self('Somebody has already acted on your exit, or it is not your resignation, so only HR can withdraw it now.');
+    }
+
+    public static function theLastWorkingDayHasPassed(string $name, string $day): self
+    {
+        return new self("{$name}'s last working day, {$day}, has passed, so the exit can no longer be withdrawn. Bringing them back is a rehire.");
+    }
+
     /**
      * A cover being handed on to a third person.
      *

@@ -1,5 +1,6 @@
 <?php
 
+use App\Authorization\Permission;
 use App\Exceptions\ProcessRefused;
 use App\Models\CaseEvent;
 use App\Models\Designation;
@@ -9,6 +10,7 @@ use App\Models\OfficeHoliday;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\CaseEngine;
@@ -30,6 +32,10 @@ use App\Tenancy\TenantContext;
 
 beforeEach(function () {
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
+
+    // Whoever holds the exit team role may withdraw an exit or move its date, which is a
+    // granted action since module 07 step 2.
+    TenantContext::run($this->meridian, fn () => Role::factory()->keyed('exit_team')->withPermissions([Permission::ChangeExit])->create());
 });
 
 /** Meridian's exit as a live one-step process, which is all a deadline needs. */
@@ -256,6 +262,9 @@ it('keeps how the employment ended when the last working day moves', function ()
 });
 
 it('refuses a second exit for somebody whose exit is still open, and allows one once it is withdrawn', function () {
+    // Before his last working day, which is when an exit can still be withdrawn.
+    $this->travelTo('2026-08-10');
+
     TenantContext::run($this->meridian, function () {
         $exit = exitCarryingDeadlines();
         $rakesh = leaverBasedAt(Office::factory()->named('Shimla')->create());
@@ -555,6 +564,8 @@ it('will not move a deadline without saying why', function () {
 })->throws(ProcessRefused::class, 'Moving the date a case counts its deadlines from has to say why');
 
 it('will not move the deadline of an exit that has already ended', function () {
+    $this->travelTo('2026-08-10');
+
     TenantContext::run($this->meridian, function () {
         $shimla = Office::factory()->named('Shimla')->create();
         $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();

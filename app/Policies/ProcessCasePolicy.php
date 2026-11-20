@@ -76,6 +76,30 @@ class ProcessCasePolicy
     }
 
     /**
+     * Withdrawing an exit, or changing its last working day.
+     *
+     * Over the department the case pinned, the same question {@see view()} asks, so Rakesh,
+     * HR head over Shimla, acts on Deepak's exit and not on Rohit's in Pune. Never on a case
+     * about themselves: Rakesh moving his own last working day moves the deadline on his
+     * own money. Deepak withdrawing his own resignation is not a permission and is not
+     * asked here — the engine allows it until anybody has acted on it.
+     */
+    public function changeExit(User $user, ProcessCase $case): bool
+    {
+        if ((int) $case->subject_user_id === (int) $user->getKey()) {
+            return false;
+        }
+
+        $unit = $case->subjectEmploymentRecord?->org_unit_id;
+
+        return $this->permissions->allows(
+            $user,
+            Permission::ChangeExit,
+            $unit === null ? null : OrgUnit::query()->find($unit),
+        );
+    }
+
+    /**
      * Nothing on this screen writes to a case. Deciding a step is the queue's job, and
      * module 12's editor is where a process itself is changed.
      */

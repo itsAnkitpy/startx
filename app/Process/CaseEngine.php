@@ -11,6 +11,7 @@ use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Succession;
 use App\Models\User;
 use App\Notifications\Chasing;
 use App\Notifications\Sender;
@@ -692,14 +693,31 @@ final class CaseEngine
      * The calendar is read as it stands now rather than as it stood at open. Amending is
      * a deliberate act with a reason on it, so it is also the one moment a genuinely
      * wrong holiday list gets to be right.
+     *
+     * **How the employment is ending is corrected here too**, because the gratuity deadline
+     * is the same sum: Rohit's fixed-term contract recorded as a resignation is fixed by HR
+     * changing it in the same dialog (module 07, grill 3). Both old and new answers go into
+     * the record.
+     *
+     * A moved date tells everybody holding an open step, the leaver and whoever raised it,
+     * with the new deadline — see {@see self::tellEverybodyOnIt()}. A corrected ending alone
+     * tells nobody: nobody's work is due on a different day.
+     *
+     * @param  string|null  $employmentEndedBy  one of {@see ProcessCase::WaysEmploymentEnds}, or null to keep it
+     * @return bool whether anything changed
      */
     public function amendTheDateTheClocksCountFrom(
         ProcessCase $case,
         string $statutoryFrom,
         User $by,
         string $reason,
-    ): void {
+        ?string $employmentEndedBy = null,
+    ): bool {
         $this->refuseIfTheCaseIsAboutThem($case, $by, 'Moving the date a case counts its deadlines from');
+
+        if ($by->cannot('changeExit', $case)) {
+            throw ProcessRefused::thatExitIsNotYoursToChange();
+        }
 
         $reason = trim($reason);
 
@@ -707,7 +725,7 @@ final class CaseEngine
             throw ProcessRefused::needsAReason('Moving the date a case counts its deadlines from');
         }
 
-        DB::transaction(function () use ($case, $statutoryFrom, $by, $reason): void {
+        return DB::transaction(function () use ($case, $statutoryFrom, $by, $reason, $employmentEndedBy): bool {
             $this->holdTheCaseStill($case);
 
             if ($case->state !== ProcessCase::Open) {
@@ -715,12 +733,14 @@ final class CaseEngine
             }
 
             $from = CarbonImmutable::parse($statutoryFrom)->startOfDay();
+            $endedBy = $employmentEndedBy ?? $case->employment_ended_by;
+            $dateMoves = ! $case->statutory_from?->isSameDay($from);
 
-            // The same date again moves nothing, so it says nothing — the same choice
+            // The same answers again move nothing, so they say nothing — the same choice
             // picking up a step that is already yours makes. A line in the one record
             // this product asks a tribunal to read should mean something happened.
-            if ($case->statutory_from?->isSameDay($from)) {
-                return;
+            if (! $dateMoves && $endedBy === $case->employment_ended_by) {
+                return false;
             }
 
             $record = $case->subjectEmploymentRecord;
@@ -730,24 +750,76 @@ final class CaseEngine
                 'counted_from' => $case->statutory_from?->toDateString(),
                 'statutory_due_at' => $case->statutory_due_at?->toDateString(),
                 'gratuity_due_at' => $case->gratuity_due_at?->toDateString(),
+                'employment_ended_by' => $case->employment_ended_by,
             ];
+            $wasFrom = $case->statutory_from?->format('j F Y') ?? 'no date';
 
-            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom($from, $office, $record, $case->employment_ended_by);
+            // Read now: once the database refuses the save below, nothing more can be asked
+            // of it inside this write, the person's name included.
+            $leaver = $case->subject;
+
+            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom($from, $office, $record, $endedBy);
 
             $case->statutory_from = $from;
+            $case->employment_ended_by = $endedBy;
             $case->statutory_due_at = $statutoryDueAt;
             $case->gratuity_due_at = $gratuityDueAt;
-            $case->save();
+
+            // An exit opened with no date never counted towards the one-open-exit rule, so
+            // giving it one can collide with the person's real exit. Said in the sentence
+            // opening a second one gets, rather than as a database error.
+            try {
+                $case->save();
+            } catch (UniqueConstraintViolationException $duplicate) {
+                if (! str_contains($duplicate->getMessage(), 'cases_one_open_exit_per_person')) {
+                    throw $duplicate;
+                }
+
+                throw ProcessRefused::theyAlreadyHaveAnOpenCase((string) $leaver?->name);
+            }
 
             $this->record($case, 'case_amended', $by, [
                 'counted_from' => ['was' => $before['counted_from'], 'now' => $from->toDateString()],
                 'statutory_due_at' => ['was' => $before['statutory_due_at'], 'now' => $statutoryDueAt->toDateString()],
                 'gratuity_due_at' => ['was' => $before['gratuity_due_at'], 'now' => $gratuityDueAt?->toDateString()],
+                'employment_ended_by' => ['was' => $before['employment_ended_by'], 'now' => $endedBy],
                 'reason' => $reason,
                 'counted_against' => $office->name,
                 'open_steps' => $this->stepsWhoseDeadlineJustMoved($case),
             ]);
+
+            if ($dateMoves) {
+                $this->tellEverybodyOnIt($case, $this->reader->for($case), $by, TemplateCatalogue::LastDayMovedSubject, TemplateCatalogue::LastDayMovedWorkingOnIt, [
+                    'case.last_working_day_was' => $wasFrom,
+                    'case.last_working_day' => $from->format('j F Y'),
+                    'case.deadline' => $statutoryDueAt->format('j F Y'),
+                    'case.changed_by' => $by->name,
+                    'case.reason' => $reason,
+                ]);
+            }
+
+            return true;
         });
+    }
+
+    /**
+     * Both deadlines this case would carry if its clocks counted from another date and
+     * ending, worked out exactly as moving it would, so the date dialog can show them
+     * before anybody saves.
+     *
+     * @return array{CarbonImmutable, ?CarbonImmutable} the settlement deadline, and the
+     *                                                  gratuity one where it is owed
+     */
+    public function deadlinesIfItCountedFrom(ProcessCase $case, string $statutoryFrom, ?string $employmentEndedBy): array
+    {
+        $record = $case->subjectEmploymentRecord;
+
+        return $this->deadlinesCountedFrom(
+            CarbonImmutable::parse($statutoryFrom)->startOfDay(),
+            $this->calendarTheClocksCountAgainst($record, $case->template),
+            $record,
+            $employmentEndedBy,
+        );
     }
 
     /**
@@ -755,10 +827,26 @@ final class CaseEngine
      * the one that needs it. Steps already acted on stay exactly as they are and stay
      * readable; untouched steps never had a row. Nothing is deleted, and a cancelled case
      * can never be closed.
+     *
+     * **Whoever looks after exits for that part of the company may withdraw one**, and the
+     * person it is about may withdraw their own resignation until anybody has acted on it
+     * (Ankit, 18 November 2026) — the one exception to nobody acting on a case about
+     * themselves. Pocket HRMS and Keka draw the line in the same place: before the manager
+     * answers.
+     *
+     * **Refused once the last working day has passed**, on the company's own calendar. By
+     * then the person has left, and bringing them back is a rehire.
+     *
+     * Everybody who was holding an open step, the leaver and whoever raised it are told it
+     * has stopped — see {@see self::tellEverybodyOnIt()}.
      */
     public function cancel(ProcessCase $case, User $by, string $reason): void
     {
-        $this->refuseIfTheCaseIsAboutThem($case, $by, 'Cancelling a case');
+        $theirOwn = $case->subject_user_id !== null && (int) $case->subject_user_id === (int) $by->getKey();
+
+        if (! $theirOwn && $by->cannot('changeExit', $case)) {
+            throw ProcessRefused::thatExitIsNotYoursToChange();
+        }
 
         $reason = trim($reason);
 
@@ -770,12 +858,26 @@ final class CaseEngine
             throw ProcessRefused::thatReasonIsTooLong(self::LongestReason);
         }
 
-        DB::transaction(function () use ($case, $by, $reason): void {
+        DB::transaction(function () use ($case, $by, $reason, $theirOwn): void {
             $this->holdTheCaseStill($case);
 
             if ($case->state !== ProcessCase::Open) {
                 throw ProcessRefused::thisCaseHasAlreadyEnded($case->state);
             }
+
+            if ($this->theLastWorkingDayHasPassed($case)) {
+                throw ProcessRefused::theLastWorkingDayHasPassed((string) $case->subject?->name, $case->statutory_from->format('j F Y'));
+            }
+
+            // Asked under the lock, so Rakesh approving Deepak's resignation in the same
+            // second as Deepak withdraws it cannot leave both standing.
+            if ($theirOwn && ! $this->theLeaverMayStillWithdraw($case)) {
+                throw ProcessRefused::onlyHrCanWithdrawItNow();
+            }
+
+            // Read before it stops: a withdrawn case has nothing waiting on anybody.
+            $case->unsetRelation('liveSteps');
+            $waiting = $this->reader->for($case);
 
             $case->cancelled_at = now();
             $case->cancellation_reason = $reason;
@@ -783,7 +885,66 @@ final class CaseEngine
             $case->save();
 
             $this->record($case, 'case_cancelled', $by, ['reason' => $reason]);
+
+            $this->tellEverybodyOnIt($case, $waiting, $by, TemplateCatalogue::CaseWithdrawnSubject, TemplateCatalogue::CaseWithdrawnWorkingOnIt, [
+                'case.changed_by' => $by->name,
+                'case.reason' => $reason,
+            ]);
         });
+    }
+
+    /**
+     * Whether the person an exit is about may still withdraw it themselves: it is their
+     * resignation, nobody has answered a step of it, moved its date or handed their work
+     * on, and their last working day has not passed. Asked by the raise screen to decide
+     * between a Withdraw button and "speak to HR", and by {@see self::cancel()} under the
+     * case's lock.
+     *
+     * A resignation rather than an exit they raised, because a resignation HR typed in from
+     * Deepak's letter is still his to take back, and a dismissal is never his to withdraw.
+     */
+    public function theLeaverMayStillWithdraw(ProcessCase $case): bool
+    {
+        return $case->state === ProcessCase::Open
+            && $case->employment_ended_by === 'resignation'
+            && ! $this->theLastWorkingDayHasPassed($case)
+            && ! CaseEvent::query()
+                ->where('case_id', $case->getKey())
+                ->whereIn('type', ['step_acted', 'case_amended', Succession::HandoverSettledEvent])
+                ->exists();
+    }
+
+    /** Whether the last working day is behind us on the company's own calendar. */
+    private function theLastWorkingDayHasPassed(ProcessCase $case): bool
+    {
+        return $case->statutory_from !== null
+            && CarbonImmutable::now($case->tenant->timezone)->toDateString() > $case->statutory_from->toDateString();
+    }
+
+    /**
+     * Tell everybody a withdrawal or a moved date reaches: the person the case is about, in
+     * their own words at their personal address and with no link, and everybody holding an
+     * open step and whoever raised the case in the other words. Not whoever pressed it, who
+     * is looking at the screen.
+     *
+     * @param  Collection<int, AvailableStep>  $waiting  the steps open when it happened
+     * @param  array<string, string>  $values
+     */
+    private function tellEverybodyOnIt(ProcessCase $case, Collection $waiting, User $by, string $toThem, string $toEverybodyElse, array $values): void
+    {
+        $subject = $case->subject;
+
+        if (! $subject?->is($by)) {
+            $this->tell($case, $toThem, $subject, $values);
+        }
+
+        $chasing = new Chasing;
+
+        $waiting->flatMap(fn (AvailableStep $step) => $chasing->whoCanBeChasedBy($step, $by))
+            ->push($case->initiatedBy)
+            ->filter(fn (?User $person) => $person instanceof User && ! $person->is($by) && ! $person->is($subject))
+            ->unique(fn (User $person) => (int) $person->getKey())
+            ->each(fn (User $person) => $this->tell($case, $toEverybodyElse, $person, $values));
     }
 
     /**
@@ -924,12 +1085,15 @@ final class CaseEngine
      * three are the signature this product cannot afford to record, arriving without a
      * step to be gated on.
      *
-     * Only this half. *Which* other employees may cancel a case, move that date or
-     * override a hold is a permission with no answer in the plan yet and module 07's
-     * screens to own — HR overriding a hold is deliberately not a candidate for the step
-     * it overrides, so the step gate is the wrong question to ask here.
+     * Only this half. *Which* other employees may cancel a case or move that date is the
+     * exit permission, asked by each of those two since module 07 step 2. Cancelling is the
+     * one exception to this rule: the leaver may withdraw their own resignation until
+     * anybody has acted on it, so {@see self::cancel()} does not come here. HR overriding a
+     * hold is deliberately not a candidate for the step it overrides, so the step gate is the
+     * wrong question to ask there.
      *
-     * ponytail: any other account holder still reaches all three until module 07 gates them.
+     * ponytail: any other account holder still reaches overriding a hold until module 07
+     * step 3 gates it.
      */
     private function refuseIfTheCaseIsAboutThem(ProcessCase $case, User $by, string $act): void
     {

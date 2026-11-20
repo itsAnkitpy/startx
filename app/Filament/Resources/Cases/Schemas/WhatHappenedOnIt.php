@@ -110,6 +110,16 @@ class WhatHappenedOnIt
                                 };
                             })
                             ->visible(fn (?string $state): bool => filled($state)),
+
+                        // A moved last working day and a withdrawal happen to the case
+                        // rather than at a step, so the step list below never shows them.
+                        TextEntry::make('changes_since_it_opened')
+                            ->label('Changed since it opened')
+                            ->state(fn (ProcessCase $record): array => $history->changesSinceItOpened($record))
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            ->columnSpanFull()
+                            ->visible(fn (?array $state): bool => filled($state)),
                     ]),
 
                 Section::make('The handover settled here')

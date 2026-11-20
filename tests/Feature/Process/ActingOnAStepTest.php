@@ -258,16 +258,18 @@ it('lets only the department that is holding turn its hold into a disputed line'
 | The person the case is about, on the acts that sit outside a step
 */
 
-it('will not let the person a case is about cancel it', function () {
+it('will not let the person a case is about cancel it unless it is their own resignation', function () {
     TenantContext::run($this->meridian, function () {
         $rakesh = atMeridian('Rakesh Menon');
         $deepak = atMeridian('Deepak Rao', 'it_team');
 
         $case = (new CaseEngine)->open(anExitClearedBy('it_team'), $rakesh, $deepak);
 
-        // Rakesh cannot clear his own exit and cannot make it go away either.
+        // Rakesh cannot clear his own exit and cannot make it go away either. Since module
+        // 07 step 2 the one exception is withdrawing his own resignation before anybody has
+        // acted on it, and Deepak raised this one without saying it was a resignation.
         expect(fn () => (new CaseEngine)->cancel($case, $rakesh, 'Changed my mind.'))
-            ->toThrow(ProcessRefused::class, 'when the case is about you');
+            ->toThrow(ProcessRefused::class, 'only HR can withdraw it now');
 
         expect(ProcessCase::find($case->getKey())->state)->toBe(ProcessCase::Open);
     });

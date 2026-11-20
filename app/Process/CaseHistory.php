@@ -9,6 +9,7 @@ use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Succession;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Filament\Support\Facades\FilamentTimezone;
 
 /**
@@ -256,6 +257,48 @@ class CaseHistory
                 'reporting_lines' => (int) (((array) ($said['moved'] ?? []))['reporting_lines'] ?? 0),
             ],
         ];
+    }
+
+    /**
+     * What was changed on the case itself rather than at one of its steps, oldest first: a
+     * moved last working day, a corrected way of leaving, and a withdrawal, each with who,
+     * when and why. Read off the case's own trail, so the page says what was done on the
+     * day.
+     *
+     * @return list<string>
+     */
+    public function changesSinceItOpened(ProcessCase $case): array
+    {
+        return $case->events
+            ->whereIn('type', ['case_amended', 'case_cancelled'])
+            ->map(function (CaseEvent $event): string {
+                $said = (array) $event->payload;
+                $byAndWhen = ' by '.($event->actor?->name ?? 'somebody').' on '
+                    .$event->created_at->timezone(FilamentTimezone::get())->format('j F Y').'.';
+                $why = trim((string) ($said['reason'] ?? '')) === '' ? '' : ' Why: '.$said['reason'];
+
+                if ($event->type === 'case_cancelled') {
+                    return 'Withdrawn'.$byAndWhen.$why;
+                }
+
+                $date = fn (?string $day): string => $day === null ? 'no date' : CarbonImmutable::parse($day)->format('j F Y');
+                $ending = fn (?string $way): string => ProcessCase::WaysEmploymentEnds[$way] ?? 'not recorded';
+                $from = (array) ($said['counted_from'] ?? []);
+                $endedBy = (array) ($said['employment_ended_by'] ?? []);
+
+                $what = array_filter([
+                    ($from['was'] ?? null) !== ($from['now'] ?? null)
+                        ? 'last working day moved from '.$date($from['was'] ?? null).' to '.$date($from['now'] ?? null)
+                        : null,
+                    array_key_exists('now', $endedBy) && $endedBy['was'] !== $endedBy['now']
+                        ? 'how their employment ends changed from '.$ending($endedBy['was']).' to '.$ending($endedBy['now'])
+                        : null,
+                ]);
+
+                return ucfirst(implode(', and ', $what)).$byAndWhen.$why;
+            })
+            ->values()
+            ->all();
     }
 
     /** @return list<int> */

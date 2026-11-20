@@ -107,6 +107,16 @@ final class Permission
     public const SettleHandover = 'settle_handover';
 
     /**
+     * Withdrawing somebody's exit, and changing its last working day or how their
+     * employment is ending.
+     *
+     * One action for both, because the same people do both (module 07, grill 6). Asked over
+     * the department the exit pinned, like reading it, so a branch HR head acts on their own
+     * branch's exits and nobody else's.
+     */
+    public const ChangeExit = 'change_exit';
+
+    /**
      * Rewording the messages this product sends on the client's behalf.
      *
      * Apart from {@see ManageSettings} even though both change what happens on every case
@@ -182,6 +192,10 @@ final class Permission
                     self::DeactivatePerson => [
                         'label' => 'Stop somebody signing in',
                         'description' => 'For a leaver. Their record and their whole history stay exactly as they are.',
+                    ],
+                    self::ChangeExit => [
+                        'label' => "Withdraw somebody's exit, or change its last working day",
+                        'description' => 'Done from the exit\'s own page. Changing the date moves both legal deadlines, and everybody working on the exit and the person leaving are told. Somebody may withdraw their own resignation until anybody has acted on it without this.',
                     ],
                     self::ViewStatutoryId => [
                         'label' => "Read somebody's tax and bank numbers",

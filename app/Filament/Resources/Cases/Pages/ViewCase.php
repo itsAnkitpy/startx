@@ -10,17 +10,25 @@ use App\Models\User;
 use App\Notifications\Chasing;
 use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
+use App\Process\CaseEngine;
 use App\Process\CaseHistory;
+use Carbon\CarbonImmutable;
+use Carbon\Exceptions\InvalidFormatException;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Callout;
+use Filament\Schemas\Components\Text;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Facades\FilamentTimezone;
 
 /**
- * One case, with the whole story of it underneath — and, on the exit of somebody who has
- * left, the one thing that can be done from this screen.
+ * One case, with the whole story of it underneath — and, on somebody's exit, the three
+ * things that can be done to it from this screen: change its last working day, withdraw
+ * it, and hand over their work.
  */
 class ViewCase extends ViewRecord
 {
@@ -38,8 +46,247 @@ class ViewCase extends ViewRecord
     {
         return [
             $this->chase(),
+            $this->changeLastWorkingDay(),
+            $this->withdraw(),
             $this->handOverTheirWork(),
         ];
+    }
+
+    /**
+     * Move the last working day, or correct how the employment is ending, and both legal
+     * deadlines with them.
+     *
+     * **The new deadlines are on screen before anybody saves**, and the dialog says plainly
+     * when the settlement date has already passed: an absconder's real last day is in the
+     * past, and refusing it would make HR type a false date (module 07, grill 4).
+     */
+    private function changeLastWorkingDay(): Action
+    {
+        return Action::make('changeLastWorkingDay')
+            ->label('Change last working day')
+            ->icon('heroicon-o-calendar-days')
+            ->color('gray')
+            ->visible(fn (): bool => $this->mayBeChangedHere())
+            ->modalHeading(fn (): string => 'Change '.$this->leaver()?->name.'\'s last working day')
+            ->modalDescription('Both legal deadlines are worked out again from what you choose here. If the date changes, everybody working on the exit and the person leaving are emailed the new date.')
+            ->modalSubmitActionLabel('Save the change')
+            ->fillForm(fn (): array => [
+                'last_working_day' => $this->theCase()->statutory_from?->toDateString(),
+                'employment_ended_by' => $this->theCase()->employment_ended_by,
+            ])
+            ->schema([
+                DatePicker::make('last_working_day')
+                    ->label('Last working day')
+                    ->required()
+                    ->live()
+                    ->validationMessages([
+                        'required' => 'Give their last working day.',
+                    ]),
+
+                Select::make('employment_ended_by')
+                    ->label('How their employment ends')
+                    ->options(ProcessCase::WaysEmploymentEnds)
+                    ->native(false)
+                    ->required()
+                    ->live()
+                    ->validationMessages([
+                        'required' => 'Choose how their employment is ending.',
+                    ]),
+
+                Text::make(fn (Get $get): string => $this->theDeadlinesItWouldHave($get('last_working_day'), $get('employment_ended_by')))
+                    ->key('deadlines'),
+
+                $this->theHandoverStaysAsItIs(),
+
+                Textarea::make('reason')
+                    ->label('Why it is changing')
+                    ->helperText('If the date changes, the person leaving is emailed this reason.')
+                    ->required()
+                    ->maxLength(255)
+                    ->rows(2)
+                    ->validationMessages([
+                        'required' => 'Say why it is changing.',
+                    ]),
+            ])
+            ->action(function (array $data, Action $action): void {
+                $case = $this->theCase();
+
+                try {
+                    $changed = (new CaseEngine)->amendTheDateTheClocksCountFrom(
+                        $case,
+                        (string) $data['last_working_day'],
+                        auth()->user(),
+                        (string) $data['reason'],
+                        (string) $data['employment_ended_by'],
+                    );
+                } catch (ProcessRefused $refused) {
+                    // The engine may have written the new dates onto this copy before the
+                    // database refused them.
+                    $case->refresh();
+
+                    Notification::make()
+                        ->danger()
+                        ->title('The last working day was not changed')
+                        ->body($refused->getMessage())
+                        ->send();
+
+                    $action->halt();
+
+                    return;
+                }
+
+                // The page reads the change off the case's own trail and lists what was
+                // sent, and the copy it holds was loaded before either existed.
+                $case->refresh();
+
+                if (! $changed) {
+                    Notification::make()
+                        ->info()
+                        ->title('Nothing changed')
+                        ->body('That is already its last working day and how their employment ends.')
+                        ->send();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->success()
+                    ->title('Last working day changed')
+                    ->body('Settlement is now due by '.$case->statutory_due_at->format('j F Y').'.')
+                    ->send();
+            });
+    }
+
+    /**
+     * Withdraw the exit, because the person is staying.
+     *
+     * Nothing already done is undone: what each department said stays readable, and the
+     * case reads as cancelled for ever. Deepak withdrawing his own resignation does it from
+     * the raise screen, because this page is not his to read.
+     */
+    private function withdraw(): Action
+    {
+        return Action::make('withdraw')
+            ->label('Withdraw')
+            ->icon('heroicon-o-arrow-uturn-left')
+            ->color('gray')
+            ->visible(fn (): bool => $this->mayBeChangedHere())
+            ->modalHeading(fn (): string => 'Withdraw '.$this->leaver()?->name.'\'s exit')
+            ->modalDescription('Nothing already done on it is undone or deleted, and it can never be finished afterwards. Everybody working on it, the person leaving and whoever raised it are emailed.')
+            ->modalSubmitActionLabel('Withdraw it')
+            ->schema([
+                $this->theHandoverStaysAsItIs(),
+
+                Textarea::make('reason')
+                    ->label('Why it is being withdrawn')
+                    ->helperText('The person leaving is emailed this reason.')
+                    ->required()
+                    ->maxLength(255)
+                    ->rows(2)
+                    ->validationMessages([
+                        'required' => 'Say why it is being withdrawn.',
+                    ]),
+            ])
+            ->action(function (array $data, Action $action): void {
+                $case = $this->theCase();
+
+                try {
+                    (new CaseEngine)->cancel($case, auth()->user(), (string) $data['reason']);
+                } catch (ProcessRefused $refused) {
+                    Notification::make()
+                        ->danger()
+                        ->title('This exit was not withdrawn')
+                        ->body($refused->getMessage())
+                        ->send();
+
+                    $action->halt();
+
+                    return;
+                }
+
+                $case->refresh();
+
+                Notification::make()
+                    ->success()
+                    ->title('Exit withdrawn')
+                    ->body('Everybody working on it has been emailed.')
+                    ->send();
+            });
+    }
+
+    /**
+     * Whether this person may change this case from here: an exit still running, in the
+     * part of the company they look after, and not their own.
+     */
+    private function mayBeChangedHere(): bool
+    {
+        $case = $this->theCase();
+
+        return $case->state === ProcessCase::Open
+            && $case->subject_user_id !== null
+            && (auth()->user()?->can('changeExit', $case) ?? false);
+    }
+
+    /**
+     * The settlement and gratuity deadlines the dialog's answers would give, said before
+     * anybody saves.
+     */
+    private function theDeadlinesItWouldHave(?string $day, ?string $endedBy): string
+    {
+        if (blank($day)) {
+            return '';
+        }
+
+        $case = $this->theCase();
+
+        try {
+            [$settlement, $gratuity] = (new CaseEngine)->deadlinesIfItCountedFrom($case, $day, $endedBy);
+        } catch (ProcessRefused $refused) {
+            return $refused->getMessage();
+        } catch (InvalidFormatException) {
+            return '';
+        }
+
+        $passed = $settlement->toDateString() < CarbonImmutable::now($case->tenant->timezone)->toDateString();
+
+        return 'Settlement would be due by '.$settlement->format('j F Y').'.'
+            .($passed ? ' That date has already passed.' : '')
+            .' Gratuity: '.($gratuity === null ? 'not owed.' : 'due by '.$gratuity->format('j F Y').'.');
+    }
+
+    /**
+     * The warning both dialogs carry once the leaver's work has been handed on: who took it,
+     * from when and what moved, and that it stays where it is. Withdrawing is still allowed,
+     * because refusing it would switch off somebody who is staying (module 07, grill 5), and
+     * there is no undo for a handover.
+     */
+    private function theHandoverStaysAsItIs(): Callout
+    {
+        return Callout::make('Their work has already been handed over')
+            ->key('handover')
+            ->warning()
+            ->description(function (): string {
+                $handover = (new CaseHistory)->handoverSettled($this->theCase());
+
+                if ($handover === null) {
+                    return '';
+                }
+
+                return $handover['to'].' took it on from '.CarbonImmutable::parse($handover['on'])->format('j F Y').': '
+                    .$handover['moved']['roles'].' '.($handover['moved']['roles'] === 1 ? 'role' : 'roles').', '
+                    .$handover['moved']['reporting_lines'].' '.($handover['moved']['reporting_lines'] === 1 ? 'person' : 'people').' reporting to them and '
+                    .$handover['moved']['approvals'].' '.($handover['moved']['approvals'] === 1 ? 'approval' : 'approvals').'. '
+                    .'That stays as it is. Give roles and people back by hand on the roles and people screens.';
+            })
+            ->visible(fn (): bool => (new CaseHistory)->handoverSettled($this->theCase()) !== null);
+    }
+
+    private function theCase(): ProcessCase
+    {
+        /** @var ProcessCase $case */
+        $case = $this->getRecord();
+
+        return $case;
     }
 
     /**
