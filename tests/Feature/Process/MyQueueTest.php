@@ -75,20 +75,22 @@ function isWaitingOnThemAt(ProcessCase $case, int $sequence, User $person): bool
 it('seeds a company worth looking at', function () {
     TenantContext::run($this->meridian, function () {
         expect(User::query()->count())->toBe(6)
-            // Three exits nobody has touched; Rakesh's, which everybody who works here
-            // has already cleared and which now waits on Rakesh himself through a link,
-            // because his sign-in is gone; Priya's, which runs on the process built with
+            // Three exits their managers have accepted and nobody has cleared; Rakesh's,
+            // which everybody who works here has already cleared and which now waits on
+            // Rakesh himself through a link; Priya's, which runs on the process built with
             // the mistake publishing now refuses; and the two hiring requests, one under
             // the salary threshold and one over it.
             ->and(ProcessCase::query()->whereNull('closed_at')->count())->toBe(7);
 
-        // Nobody has touched any of the three, so not one of their waiting steps has a row
-        // anywhere. That is the whole point of the lists below.
+        // Only the managers' approvals have been given on those, so not one of their waiting
+        // clearances has a row anywhere — bar the link each leaver was sent, which is a row
+        // because it is a link. That is the whole point of the lists below.
         $untouched = ProcessCase::query()
             ->whereRelation('subject', 'first_name', '!=', 'Rakesh')
             ->pluck('id');
 
-        expect(CaseStep::query()->whereIn('case_id', $untouched)->count())->toBe(0);
+        expect(CaseStep::query()->whereIn('case_id', $untouched)
+            ->where('sequence', '!=', 1)->whereNull('external_assignee')->count())->toBe(0);
     });
 });
 
@@ -122,12 +124,15 @@ it('shows each person only the steps that are theirs', function () {
         // Nobody holds HR head over Pune, so Rohit's clearance falls to the stand-in the
         // client named. Anjali's is there for a different reason — it is five days past a
         // two-day deadline, and a late step widens to the HR director without ever leaving
-        // the two people it already belonged to. Chandni's own finance clearance is a
-        // later group and is not her turn yet.
-        // Priya's finance clearance is genuinely hers, on the exit built with the mistake.
+        // the two people it already belonged to. Every finance clearance is genuinely
+        // hers, and runs beside HR's rather than after it; Priya's is on the exit built
+        // with the mistake.
         expect(waitingOnThem(atMeridianCalled('chandni')))
             ->toBe([
+                'Finance clearance — Anjali Rao',
+                'Finance clearance — Deepak Iyer',
                 'Finance clearance — Priya Nair',
+                'Finance clearance — Rohit Menon',
                 'HR clearance — Anjali Rao',
                 'HR clearance — Rohit Menon',
             ]);
@@ -144,7 +149,7 @@ it('takes a shared step out of the other person\'s list once somebody picks it u
         $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->call('pickUp', $anjalisExit->getKey(), 1)
+            ->call('pickUp', $anjalisExit->getKey(), 2)
             ->assertOk();
 
         expect(waitingOnThem($rakesh))
@@ -164,7 +169,7 @@ it('takes a shared step out of the other person\'s list once somebody picks it u
     });
 });
 
-it('lets the holder decide a step, and opens the next group to somebody else', function () {
+it('lets the holder decide a step, and takes it off everybody else it was waiting on', function () {
     TenantContext::run($this->meridian, function () {
         $rakesh = atMeridianCalled('rakesh');
         $chandni = atMeridianCalled('chandni');
@@ -173,13 +178,14 @@ it('lets the holder decide a step, and opens the next group to somebody else', f
         // HR's clearance asks whether the ID card came back, and it is a required
         // question, so a decision without it is refused on the server.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
-            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->set("answers.{$anjalisExit->getKey()}.2.id_card_returned", '1')
+            ->call('decide', $anjalisExit->getKey(), 2, 'approved')
             ->assertHasNoErrors()
             ->assertOk();
 
-        // Gone from Rakesh's list, and the finance clearance behind it is now Chandni's —
-        // which nothing wrote down in advance.
+        // Gone from Rakesh's list, and from Chandni's, where it had arrived because it was
+        // late. Her finance clearance on the same exit stays: it runs beside HR's, and HR's
+        // final check waits for both.
         expect(waitingOnThem($rakesh))
             ->toBe([
                 'HR clearance — Deepak Iyer',
@@ -189,7 +195,9 @@ it('lets the holder decide a step, and opens the next group to somebody else', f
             ->and(waitingOnThem($chandni))
             ->toBe([
                 'Finance clearance — Anjali Rao',
+                'Finance clearance — Deepak Iyer',
                 'Finance clearance — Priya Nair',
+                'Finance clearance — Rohit Menon',
                 'HR clearance — Rohit Menon',
             ]);
     });
@@ -208,11 +216,11 @@ it('refuses a step that is not yours, in words', function () {
         // step has no business being told what it asks. So this refusal is the ownership
         // one and not a required question he was never shown.
         Livewire::actingAs($deepak)->test(MyQueue::class)
-            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
+            ->call('decide', $anjalisExit->getKey(), 2, 'approved')
             ->assertHasNoErrors()
             ->assertOk();
 
-        expect(CaseStep::query()->where('case_id', $anjalisExit->getKey())->count())->toBe(0);
+        expect(CaseStep::query()->where('case_id', $anjalisExit->getKey())->where('sequence', 2)->count())->toBe(0);
     });
 });
 
@@ -307,13 +315,8 @@ it('says on the card when a step only reached somebody because nobody holds the 
         $chandni = atMeridianCalled('chandni');
         $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        // Clearing Anjali's HR step puts the finance clearance — genuinely Chandni's job —
-        // in her list beside Rohit's, which only reached her because Pune has no HR head.
-        Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
-            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
-            ->assertHasNoErrors();
-
+        // The finance clearances in her list are genuinely Chandni's job, beside Rohit's HR
+        // clearance, which only reached her because Pune has no HR head.
         Livewire::actingAs($chandni)->test(MyQueue::class)
             ->assertOk()
             ->assertSee('Finance clearance')
@@ -333,8 +336,8 @@ it('says on the card when a step only reached somebody because nobody holds the 
         // The warning is on Rohit's clearance and not on the finance one. A marker that
         // appeared on every card would say nothing at all.
         expect((new MyQueue)->heldByNobody((new AvailableSteps)->waitingOn($chandni)))
-            ->toBe([$rohitsExit->getKey().':1'])
-            ->not->toContain($anjalis->getKey().':2');
+            ->toBe([$rohitsExit->getKey().':2'])
+            ->not->toContain($anjalis->getKey().':3');
     });
 });
 
@@ -356,7 +359,13 @@ it('leaves the card unmarked once somebody actually holds the role', function ()
         // Rohit's clearance leaves her list the moment Pune has its own HR head. Anjali's
         // stays, for the unrelated reason that it is overdue and escalates to her.
         expect(waitingOnThem($chandni))
-            ->toBe(['Finance clearance — Priya Nair', 'HR clearance — Anjali Rao'])
+            ->toBe([
+                'Finance clearance — Anjali Rao',
+                'Finance clearance — Deepak Iyer',
+                'Finance clearance — Priya Nair',
+                'Finance clearance — Rohit Menon',
+                'HR clearance — Anjali Rao',
+            ])
             ->and(waitingOnThem(atMeridianCalled('priya')))
             ->toContain('HR clearance — Rohit Menon');
     });
@@ -455,24 +464,18 @@ it('asks which step a request goes back to only where there is a choice', functi
 
 it('holds a clearance with a reason, and drops a figure the later answer hides', function () {
     TenantContext::run($this->meridian, function () {
-        $rakesh = atMeridianCalled('rakesh');
         $chandni = atMeridianCalled('chandni');
         $anjalisExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
-
-        Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalisExit->getKey()}.1.id_card_returned", '1')
-            ->call('decide', $anjalisExit->getKey(), 1, 'approved')
-            ->assertHasNoErrors();
 
         // The clearance cannot be answered honestly yet: the imprest card is missing and
         // twelve thousand rupees are being argued about.
         Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$anjalisExit->getKey()}.2.imprest_card_returned", '0')
-            ->set("answers.{$anjalisExit->getKey()}.2.recover_from_them", 12000)
-            ->set("answers.{$anjalisExit->getKey()}.2.recovery_reason", 'imprest')
-            ->call('askFor', $anjalisExit->getKey(), 2, 'held')
-            ->set("reasons.{$anjalisExit->getKey()}.2", 'Waiting on the imprest card before anything is recovered.')
-            ->call('decide', $anjalisExit->getKey(), 2, 'held')
+            ->set("answers.{$anjalisExit->getKey()}.3.imprest_card_returned", '0')
+            ->set("answers.{$anjalisExit->getKey()}.3.recover_from_them", 12000)
+            ->set("answers.{$anjalisExit->getKey()}.3.recovery_reason", 'imprest')
+            ->call('askFor', $anjalisExit->getKey(), 3, 'held')
+            ->set("reasons.{$anjalisExit->getKey()}.3", 'Waiting on the imprest card before anything is recovered.')
+            ->call('decide', $anjalisExit->getKey(), 3, 'held')
             ->assertHasNoErrors()
             ->assertOk();
 
@@ -487,9 +490,9 @@ it('holds a clearance with a reason, and drops a figure the later answer hides',
             // the button's own instruction are written as they stand, so a check that
             // escaped them would look for something no page ever contains and pass
             // whether the button is there or not.
-            ->assertDontSee("askFor({$anjalisExit->getKey()}, 2, 'held')", escape: false);
+            ->assertDontSee("askFor({$anjalisExit->getKey()}, 3, 'held')", escape: false);
 
-        $held = CaseStep::query()->where('case_id', $anjalisExit->getKey())->where('sequence', 2)->sole();
+        $held = CaseStep::query()->where('case_id', $anjalisExit->getKey())->where('sequence', 3)->sole();
 
         // A hold is not a decision: it is still hers to answer, and the figure is on it.
         expect($held->outcome)->toBe('held')
@@ -500,12 +503,32 @@ it('holds a clearance with a reason, and drops a figure the later answer hides',
         // asked for it — the answers on a step are what a later step's condition reads,
         // and the recovery question is not even on the form any more.
         Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$anjalisExit->getKey()}.2.imprest_card_returned", '1')
-            ->call('decide', $anjalisExit->getKey(), 2, 'approved')
+            ->set("answers.{$anjalisExit->getKey()}.3.imprest_card_returned", '1')
+            ->call('decide', $anjalisExit->getKey(), 3, 'approved')
             ->assertHasNoErrors();
 
         expect($held->fresh()->outcome)->toBe('approved')
             ->and(array_keys($held->fresh()->payload))->toBe(['imprest_card_returned']);
+    });
+});
+
+it('warns whoever turns down an exit that the leaver is emailed the reason, and nobody else', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $deepaksExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole();
+        $request = ProcessCase::query()->whereRelation('template', 'key', 'hiring_request')->first();
+
+        // Deepak is sent whatever Rakesh types here, so the box says so.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $deepaksExit->getKey(), 2, 'rejected')
+            ->assertSee('Why is this being rejected?')
+            ->assertSee('The person leaving is emailed this reason.');
+
+        // A hiring request is about nobody, so there is no leaver to warn about.
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->call('askFor', $request->getKey(), 2, 'rejected')
+            ->assertSee('Why is this being rejected?')
+            ->assertDontSee('The person leaving is emailed this reason.');
     });
 });
 
@@ -559,14 +582,14 @@ it('narrows the queue to what is past its deadline', function () {
 
         $screen = Livewire::actingAs(atMeridianCalled('chandni'))->test(MyQueue::class);
 
-        // Three clearances, one of which blew a two-working-day deadline five days ago and
-        // reached Chandni for that reason alone.
-        expect($screen->instance()->getTableRecords())->toHaveCount(3);
+        // Six clearances. Two of them, on Anjali's exit, blew a two-working-day deadline
+        // five days ago — HR's, which reached Chandni for that reason alone, and her own.
+        expect($screen->instance()->getTableRecords())->toHaveCount(6);
 
         $screen->filterTable('state', 'late');
 
         expect($screen->instance()->getTableRecords()->keys()->all())
-            ->toBe([$anjalisExit->getKey().':1']);
+            ->toEqualCanonicalizing([$anjalisExit->getKey().':2', $anjalisExit->getKey().':3']);
 
         $screen->assertSee('Anjali Rao')->assertDontSee('Rohit Menon');
     });
@@ -578,15 +601,16 @@ it('reads the ones past their deadline first, most overdue at the top', function
         $deepaksExit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole();
 
         // Deepak's clearance is second in the list as the demo seeds it and is not late.
-        // Opened two months ago it is the worse of the two breaches, so it has to lead —
-        // which is a different answer from the order the list arrives in.
+        // Accepted by his manager two months ago it is the worse of the two breaches, so it
+        // has to lead — which is a different answer from the order the list arrives in.
         $deepaksExit->update(['opened_at' => now()->subDays(60)]);
+        $deepaksExit->steps()->where('sequence', 1)->sole()->update(['acted_at' => now()->subDays(60)]);
 
         $shown = Livewire::actingAs(atMeridianCalled('rakesh'))->test(MyQueue::class)
             ->instance()->getTableRecords()->keys()->all();
 
-        expect($shown[0])->toBe($deepaksExit->getKey().':1')
-            ->and($shown[1])->toBe($anjalisExit->getKey().':1');
+        expect($shown[0])->toBe($deepaksExit->getKey().':2')
+            ->and($shown[1])->toBe($anjalisExit->getKey().':2');
 
         // And the two hiring approvals, which run no clock at all because a hiring request
         // is about nobody and there is no office calendar to count one against, sit at the

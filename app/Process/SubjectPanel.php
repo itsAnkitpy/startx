@@ -91,7 +91,9 @@ final class SubjectPanel
                 'Department' => $record->orgUnit?->name ?? self::NotRecorded,
                 'Office' => $record->office?->name ?? self::NotRecorded,
                 'Joined' => $this->asADate($record->joining_date),
-                'Last working day' => $this->asADate($record->last_working_day),
+                // The case's own date first: an exit raised from the screen stores it there,
+                // because the job row is frozen and this date has to be correctable.
+                'Last working day' => $this->asADate($case->statutory_from ?? $record->last_working_day),
                 'Reports to' => $record->reportsTo?->name ?? self::NotRecorded,
                 'Legal deadline' => $this->asADate($case->statutory_due_at),
             ],

@@ -105,6 +105,10 @@ it('puts the details above the form on the queue screen', function () {
 
     $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
 
+    // Anjali's employee number was never recorded, which is what the last check reads.
+    TenantContext::run($meridian, fn () => EmploymentRecord::query()
+        ->whereRelation('user', 'work_email', 'anjali@meridian.test')->update(['employee_code' => null]));
+
     TenantContext::run($meridian, fn () => Livewire::actingAs(
         User::query()->where('work_email', 'rakesh@meridian.test')->sole()
     )->test(MyQueue::class)

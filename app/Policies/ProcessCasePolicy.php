@@ -21,7 +21,9 @@ use App\Models\User;
  * Anjali holds nothing at all and raises every hiring request, so without this she could
  * have a request turned down with a reason written on it and no screen in the product that
  * says so. It is read off the case rather than asked of the permission rules because it is
- * not a permission: nobody grants it and nobody can take it away.
+ * not a permission: nobody grants it and nobody can take it away. **Except a case about
+ * themselves**: Deepak raising his own resignation is told it started and when it ends,
+ * never what each department said in between — {@see ProcessCase::scopeRaisedBy()}.
  *
  * A case with no department at all never had one — it is about a vacancy, or about a
  * candidate — and falls back to holding the action anywhere, which is the same answer
@@ -38,7 +40,7 @@ class ProcessCasePolicy
     public function viewAny(User $user): bool
     {
         return $this->permissions->allows($user, Permission::ViewPerson)
-            || ProcessCase::query()->where('initiated_by', $user->getKey())->exists();
+            || ProcessCase::query()->raisedBy($user)->exists();
     }
 
     public function view(User $user, ProcessCase $case): bool
@@ -95,6 +97,7 @@ class ProcessCasePolicy
     private function theyStartedIt(ProcessCase $case, User $user): bool
     {
         return $case->initiated_by !== null
-            && (int) $case->initiated_by === (int) $user->getKey();
+            && (int) $case->initiated_by === (int) $user->getKey()
+            && (int) $case->subject_user_id !== (int) $user->getKey();
     }
 }

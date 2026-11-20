@@ -542,3 +542,32 @@ it('says plainly on a case that nothing has been sent about it', function () {
             ->assertSee('Nothing has been sent about this case.');
     });
 });
+
+it('shows on an exit how the employment ended beside both deadlines, on the right day for a company behind UTC', function () {
+    // New York is behind UTC, so a plain date shown on the reader's clock reads as the day
+    // before — a legal deadline a day early.
+    $this->meridian->update(['timezone' => 'America/New_York']);
+
+    TenantContext::run($this->meridian, function () {
+        $chandni = whoUsesTheCasesScreen('chandni');
+
+        // Rohit's fixed-term contract is ending, so his is owed a gratuity deadline.
+        $rohits = theSeededExitOf('rohit');
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rohits->getKey()])
+            ->assertOk()
+            ->assertSee('Last working day')
+            ->assertSee($rohits->statutory_from->format('M j, Y'))
+            ->assertSee('End of a fixed-term contract')
+            ->assertSee('Settlement due by')
+            ->assertSee($rohits->statutory_due_at->format('M j, Y'))
+            ->assertSee('Gratuity due by')
+            ->assertSee($rohits->gratuity_due_at->format('M j, Y'))
+            ->assertDontSee($rohits->statutory_due_at->subDay()->format('M j, Y'));
+
+        // Anjali is resigning short of five years, and that reads as owing none.
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => theSeededExitOf('anjali')->getKey()])
+            ->assertSee('Resignation')
+            ->assertSee('Not owed');
+    });
+});

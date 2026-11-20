@@ -61,6 +61,28 @@ function turnMailThatLeft(): array
     return $left;
 }
 
+/**
+ * Deepak's seeded exit withdrawn and a fresh one raised by Chandni, waiting on Rakesh as his
+ * manager — the demo seeds every exit already past that, and a person has one open exit at
+ * a time. Whatever the two writes sent is cleared.
+ */
+function turnDeepakResignsAgain(): ProcessCase
+{
+    $chandni = turnColleague('chandni');
+    $engine = new CaseEngine;
+
+    $engine->cancel(ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole(), $chandni, 'Withdrew the resignation');
+
+    $exit = $engine->open(
+        ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole(),
+        turnColleague('deepak'), $chandni, '2026-12-11', 'resignation',
+    );
+
+    turnMailThatLeft();
+
+    return $exit;
+}
+
 /** The body of the last message that left for one address, narrowed by its subject line. */
 function turnBodyTo(string $address, string $subjectSays = ''): string
 {
@@ -162,9 +184,9 @@ it('tells somebody covering whose work it is, and gives a due date only where a 
             ->not->toContain('due by');
         expect(turnMailThatLeft())->toBe(['priya@meridian.test — Line-of-business approval is waiting on you — #'.$request->number]);
 
-        // Deepak's exit does have a clock: finance's two working days start the moment HR
-        // clears it.
-        (new CaseEngine)->decide(ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole(), 1, 'approved', turnColleague('priya'), ['id_card_returned' => true]);
+        // Deepak's exit does have a clock: finance's two working days start the moment his
+        // manager accepts it.
+        (new CaseEngine)->decide(turnDeepakResignsAgain(), 1, 'approved', turnColleague('rakesh'));
 
         expect(turnBodyTo('chandni@meridian.test', 'is waiting on you'))
             ->toContain('Finance clearance on #')
@@ -223,17 +245,17 @@ it('tells whoever raised an exit about a hold, and never tells the person an exi
         ProcessCase::query()->whereKey($deepaks->getKey())->update(['initiated_by' => turnColleague('rakesh')->getKey()]);
         ProcessCase::query()->whereKey($anjalis->getKey())->update(['initiated_by' => turnColleague('anjali')->getKey()]);
 
-        (new CaseEngine)->decide($deepaks->refresh(), 1, 'approved', turnColleague('priya'), ['id_card_returned' => true]);
+        (new CaseEngine)->decide($deepaks->refresh(), 2, 'approved', turnColleague('priya'), ['id_card_returned' => true]);
         turnMailThatLeft();
 
-        (new CaseEngine)->decide($deepaks, 2, 'held', turnColleague('chandni'), ['imprest_card_returned' => false], 'The imprest card has not come back.');
+        (new CaseEngine)->decide($deepaks, 3, 'held', turnColleague('chandni'), ['imprest_card_returned' => false], 'The imprest card has not come back.');
 
         expect(turnBodyTo('rakesh@meridian.test'))
             ->toContain('was put on hold by Chandni Verma.')
-            ->toContain('It is now waiting on Finance clearance.');
+            ->toContain('It is now waiting on Finance clearance and Leaver confirms the handover.');
         expect(turnMailThatLeft())->toBe(['rakesh@meridian.test — #'.$deepaks->number.' — Finance clearance was put on hold']);
 
-        (new CaseEngine)->decide($anjalis->refresh(), 1, 'approved', turnColleague('priya'), ['id_card_returned' => false]);
+        (new CaseEngine)->decide($anjalis->refresh(), 2, 'approved', turnColleague('priya'), ['id_card_returned' => false]);
 
         expect(collect(turnMailThatLeft())->filter(fn (string $sent) => str_starts_with($sent, 'anjali'))->all())->toBe([]);
     });
@@ -241,18 +263,17 @@ it('tells whoever raised an exit about a hold, and never tells the person an exi
 
 it('sends a step only a link can answer its link the moment it opens, and tells nobody here', function () {
     TenantContext::run($this->meridian, function () {
-        $deepaks = ProcessCase::query()->whereRelation('subject', 'first_name', 'Deepak')->sole();
-        $engine = new CaseEngine;
+        $deepaks = turnDeepakResignsAgain();
 
-        $engine->decide($deepaks, 1, 'approved', turnColleague('priya'), ['id_card_returned' => true]);
-        $engine->decide($deepaks, 2, 'approved', turnColleague('chandni'), ['imprest_card_returned' => true]);
-        turnMailThatLeft();
-
-        $engine->decide($deepaks, 3, 'approved', turnColleague('rakesh'));
+        // Rakesh accepting it opens every clearance at once. Deepak's own is a link to his
+        // personal address, and nobody here is told it is theirs.
+        (new CaseEngine)->decide($deepaks, 1, 'approved', turnColleague('rakesh'));
 
         expect(turnMailThatLeft())->toEqualCanonicalizing([
             'deepak@personal.example — Meridian Logistics — Leaver confirms the handover',
-            'chandni@meridian.test — #'.$deepaks->number.' — Manager sign-off was approved',
+            'priya@meridian.test — HR clearance is waiting on you — #'.$deepaks->number,
+            'chandni@meridian.test — Finance clearance is waiting on you — #'.$deepaks->number,
+            'chandni@meridian.test — #'.$deepaks->number.' — Manager approval was approved',
         ]);
     });
 });

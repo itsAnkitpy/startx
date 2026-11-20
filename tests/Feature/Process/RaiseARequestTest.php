@@ -1,6 +1,8 @@
 <?php
 
+use App\Authorization\PermissionResolver;
 use App\Filament\Pages\RaiseARequest;
+use App\Filament\Resources\Cases\CaseResource;
 use App\Models\CaseStep;
 use App\Models\Delegation;
 use App\Models\Designation;
@@ -10,9 +12,11 @@ use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\AvailableSteps;
+use App\Process\CaseEngine;
 use App\Process\StepForm;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
@@ -73,41 +77,61 @@ function theNewestRequest(): ProcessCase
     return ProcessCase::query()->whereNull('subject_user_id')->orderByDesc('id')->first();
 }
 
-it('offers each person only the processes whose first step is their own', function () {
+/** Meridian's two live exits, its real one and the one built with the mistake. */
+const MeridiansExits = ['Exit', 'Exit (the mistake this check catches)'];
+
+it('offers the hiring request only to whoever its first step names, and an exit to anybody who works here', function () {
     TenantContext::run($this->meridian, function () {
         // Meridian's hiring request names Anjali on its first step, and she holds no role
         // and has no queue of her own — which is the whole shape being checked: raising is
         // answered by the process, not by an action on somebody's role.
         expect(RaiseARequest::whatTheyCanRaise(theRaiserCalled('anjali'))->pluck('name')->all())
-            ->toBe(['Hiring request']);
+            ->toBe([...MeridiansExits, 'Hiring request']);
 
-        // Rakesh approves hiring requests and clears exits all day and cannot raise a
-        // thing, because no first step names him.
+        // Rakesh approves hiring requests and clears exits all day, and no first step names
+        // him, so the only thing he can raise is an exit — anybody who works here may resign.
         expect(RaiseARequest::whatTheyCanRaise(theRaiserCalled('rakesh'))->pluck('name')->all())
-            ->toBe([])
-            // Nor can Meridian's own administrator, which is the point of there being no
-            // permission for it.
+            ->toBe(MeridiansExits)
             ->and(RaiseARequest::whatTheyCanRaise(theRaiserCalled('chandni'))->pluck('name')->all())
-            ->toBe([]);
+            ->toBe(MeridiansExits);
     });
 });
 
-it('never offers a process that is about a person', function () {
+it('offers an exit to somebody with no job here only once they may change somebody\'s details', function () {
     TenantContext::run($this->meridian, function () {
-        // Meridian's exit is live and its first step belongs to somebody. It is still not
-        // offered, because a case about an employee has to be told which employee — and
-        // an exit needs the leaver's last working day as well, which two legal clocks are
-        // counted from. That screen is not this one.
-        $exits = ProcessTemplate::query()
-            ->where('subject_kind', 'employee')
-            ->where('status', ProcessTemplate::Published)
-            ->pluck('name');
+        // An account whose job has not been recorded yet. There is nobody's exit it may
+        // raise, its own included, so it is offered none.
+        $newcomer = User::factory()->named('Kavya Rao')->create();
 
-        expect($exits)->not->toBeEmpty();
+        expect(RaiseARequest::whatTheyCanRaise($newcomer)->pluck('name')->all())->toBe([])
+            ->and(RaiseARequest::whoseExitTheyMayRaise($newcomer))->toBe([]);
 
-        foreach ([theRaiserCalled('anjali'), theRaiserCalled('rakesh'), theRaiserCalled('chandni')] as $person) {
-            expect(RaiseARequest::whatTheyCanRaise($person)->pluck('name')->intersect($exits))->toBeEmpty();
-        }
+        // Made HR head over Shimla, and the Shimla branch's exits are hers to raise.
+        Role::query()->where('key', 'hr_head')->sole()->assignments()->create([
+            'user_id' => $newcomer->getKey(),
+            'org_unit_id' => OrgUnit::query()->where('name', 'Shimla branch')->sole()->getKey(),
+            'includes_descendants' => false,
+        ]);
+        app(PermissionResolver::class)->forget();
+
+        expect(RaiseARequest::whatTheyCanRaise($newcomer)->pluck('name')->all())->toBe(MeridiansExits);
+    });
+});
+
+it('lists whose exit each person may raise, themselves first', function () {
+    TenantContext::run($this->meridian, function () {
+        // Anjali holds no role, so only her own.
+        expect(RaiseARequest::whoseExitTheyMayRaise(theRaiserCalled('anjali')))
+            ->toBe([theRaiserCalled('anjali')->getKey() => 'You (Anjali Rao)']);
+
+        // Rakesh is HR head over Shimla: his own, then the Shimla branch. Not Rohit in
+        // Pune, and not Chandni, who sits above the branch.
+        expect(array_values(RaiseARequest::whoseExitTheyMayRaise(theRaiserCalled('rakesh'))))
+            ->toBe(['You (Rakesh Menon)', 'Anjali Rao', 'Deepak Iyer', 'Priya Nair']);
+
+        // Chandni administers the whole company, so everybody.
+        expect(array_values(RaiseARequest::whoseExitTheyMayRaise(theRaiserCalled('chandni'))))
+            ->toBe(['You (Chandni Verma)', 'Anjali Rao', 'Deepak Iyer', 'Priya Nair', 'Rakesh Menon', 'Rohit Menon']);
     });
 });
 
@@ -116,18 +140,18 @@ it('lets whoever is covering somebody raise what that person raises', function (
         $anjali = theRaiserCalled('anjali');
         $rohit = theRaiserCalled('rohit');
 
-        // Rohit can raise nothing of his own.
-        expect(RaiseARequest::whatTheyCanRaise($rohit)->pluck('name')->all())->toBe([]);
+        // Rohit can raise nothing but his own exit.
+        expect(RaiseARequest::whatTheyCanRaise($rohit)->pluck('name')->all())->toBe(MeridiansExits);
 
         // Anjali goes away and Rohit holds her hiring requests while she is gone.
         Delegation::factory()->covering($anjali, $rohit)->create(['process_key' => 'hiring_request']);
 
         expect(RaiseARequest::whatTheyCanRaise($rohit)->pluck('name')->all())
-            ->toBe(['Hiring request'])
+            ->toBe([...MeridiansExits, 'Hiring request'])
             // And Anjali still can. Cover is somebody added beside the person away, never
             // somebody put in their place.
             ->and(RaiseARequest::whatTheyCanRaise($anjali)->pluck('name')->all())
-            ->toBe(['Hiring request']);
+            ->toBe([...MeridiansExits, 'Hiring request']);
     });
 });
 
@@ -164,7 +188,7 @@ it('asks barely more to draw the menu when a client runs twenty more processes',
         // Named "Extra", so all twenty are looked at before the hiring request Anjali can
         // actually raise — the worst order there is rather than a flattering one.
         expect(RaiseARequest::whatTheyCanRaise(theRaiserCalled('anjali'))->pluck('name')->all())
-            ->toBe(['Hiring request']);
+            ->toBe([...MeridiansExits, 'Hiring request']);
 
         // Who holds a role is asked once and then remembered for the rest of the walk, so
         // twenty more processes pointing at the same role cost a handful of questions
@@ -223,7 +247,7 @@ it('never offers a process whose first step cannot be approved', function () {
         $awkward->publish();
 
         expect(RaiseARequest::whatTheyCanRaise(theRaiserCalled('anjali'))->pluck('name')->all())
-            ->toBe(['Hiring request']);
+            ->toBe([...MeridiansExits, 'Hiring request']);
     });
 });
 
@@ -243,10 +267,12 @@ it('serves the raise screen to somebody a first step names', function () {
 
 it('refuses the raise address itself to somebody with nothing to raise', function () {
     // Asking the screen's own check is not the same as knocking on the door, and the door
-    // is what somebody would actually try. Rakesh is signed in and typing the address.
-    $rakesh = TenantContext::run($this->meridian, fn () => theRaiserCalled('rakesh'));
+    // is what somebody would actually try. An account whose job has not been recorded yet
+    // is signed in and typing the address: no first step names it, and it has no job to
+    // leave.
+    $newcomer = TenantContext::run($this->meridian, fn () => User::factory()->named('Kavya Rao')->create());
 
-    $this->actingAs($rakesh)->get(theRaiseAddress())->assertForbidden();
+    $this->actingAs($newcomer)->get(theRaiseAddress())->assertForbidden();
 });
 
 it('draws the client own questions and nothing written into the page', function () {
@@ -421,5 +447,173 @@ it('leaves nothing behind when the engine refuses what the screen sent', functio
             ->assertOk();
 
         expect(requestsInFlight())->toBe($before);
+    });
+});
+
+/*
+| Raising an exit — module 07, step 1.
+|
+| An exit answers no step when it is raised, because nobody answers a step on their own
+| case. It opens with who is leaving, their last working day, how their employment is
+| ending, and the personal address everything owed to them goes to once they have gone.
+*/
+
+/** Meridian's real exit process. */
+function meridiansLiveExit(): ProcessTemplate
+{
+    return ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole();
+}
+
+/**
+ * Somebody whose seeded exit has been withdrawn, so a new one can be raised for them.
+ * Everybody at Meridian bar Chandni has an exit running in the demo.
+ */
+function withTheirExitWithdrawn(string $first): User
+{
+    $person = theRaiserCalled($first);
+
+    ProcessCase::query()->where('subject_user_id', $person->getKey())
+        ->whereNull('closed_at')->whereNull('cancelled_at')->get()
+        ->each(fn (ProcessCase $case) => (new CaseEngine)->cancel($case, theRaiserCalled('chandni'), 'Withdrew the resignation'));
+
+    return $person;
+}
+
+/** The newest exit about somebody that has not been withdrawn. */
+function theNewestExitAbout(User $person): ?ProcessCase
+{
+    return ProcessCase::query()->where('subject_user_id', $person->getKey())
+        ->whereNull('cancelled_at')->latest('id')->first();
+}
+
+it('raises your own exit as a resignation, and keeps its page from you', function () {
+    TenantContext::run($this->meridian, function () {
+        $deepak = withTheirExitWithdrawn('deepak');
+        $lastDay = now()->addDays(30)->toDateString();
+
+        Livewire::actingAs($deepak)->test(RaiseARequest::class)
+            ->set('processId', meridiansLiveExit()->getKey())
+            // It starts on his own exit, with the address on file in the box to confirm.
+            ->assertSet('leaverId', $deepak->getKey())
+            ->assertSet('personalEmail', 'deepak@personal.example')
+            ->assertSee('Your own exit is recorded as a resignation.')
+            ->assertDontSee('How their employment is ending')
+            // Reaching past the screen to say otherwise changes nothing.
+            ->set('employmentEndedBy', 'disablement')
+            ->set('lastWorkingDay', $lastDay)
+            ->call('raise')
+            ->assertHasNoErrors()
+            // Told where everything about it goes, and left on an empty form rather than
+            // sent to a page that is not his to read.
+            ->assertNotified('Your exit is raised.')
+            ->assertNoRedirect()
+            ->assertSet('processId', null);
+
+        $raised = theNewestExitAbout($deepak);
+
+        expect($deepak->can('view', $raised))->toBeFalse();
+
+        // Two years in and resigning, so both deadlines are worked out and only the
+        // settlement one is owed.
+        expect($raised->employment_ended_by)->toBe('resignation')
+            ->and((int) $raised->initiated_by)->toBe((int) $deepak->getKey())
+            ->and($raised->statutory_from->toDateString())->toBe($lastDay)
+            ->and($raised->statutory_due_at)->not->toBeNull()
+            ->and($raised->gratuity_due_at)->toBeNull();
+
+        // And no step was answered: it waits on Rakesh, his manager.
+        expect((new AvailableSteps)->waitingOn(theRaiserCalled('rakesh'))
+            ->contains(fn ($waiting) => $waiting->case->is($raised)))->toBeTrue()
+            ->and(CaseStep::query()->where('case_id', $raised->getKey())->count())->toBe(0);
+    });
+});
+
+it('raises somebody else\'s exit with how it is ending, and corrects their address', function () {
+    TenantContext::run($this->meridian, function () {
+        $deepak = withTheirExitWithdrawn('deepak');
+        $rakesh = theRaiserCalled('rakesh');
+
+        Livewire::actingAs($rakesh)->test(RaiseARequest::class)
+            ->set('processId', meridiansLiveExit()->getKey())
+            ->set('leaverId', $deepak->getKey())
+            ->assertSet('personalEmail', 'deepak@personal.example')
+            ->assertSee('How their employment is ending')
+            ->set('lastWorkingDay', now()->addDays(10)->toDateString())
+            ->set('personalEmail', 'deepak.iyer@example.net')
+            // Asked of somebody raising another person's, because the gratuity rule reads it.
+            ->call('raise')
+            ->assertHasErrors(['employmentEndedBy' => 'required'])
+            ->set('employmentEndedBy', 'dismissal')
+            ->call('raise')
+            ->assertHasNoErrors()
+            ->assertRedirect(CaseResource::getUrl('view', ['record' => theNewestExitAbout($deepak)]));
+
+        $raised = theNewestExitAbout($deepak);
+
+        expect($raised->employment_ended_by)->toBe('dismissal')
+            ->and((int) $raised->initiated_by)->toBe((int) $rakesh->getKey())
+            ->and($deepak->fresh()->personal_email)->toBe('deepak.iyer@example.net');
+    });
+});
+
+it('refuses an exit with no personal email, and opens nothing', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjali = withTheirExitWithdrawn('anjali');
+
+        $page = Livewire::actingAs($anjali)->test(RaiseARequest::class)
+            ->set('processId', meridiansLiveExit()->getKey())
+            ->set('lastWorkingDay', now()->addDays(30)->toDateString())
+            ->set('personalEmail', '   ')
+            ->call('raise')
+            ->assertHasErrors(['personalEmail' => 'required'])
+            ->assertSee('Give a personal email.');
+
+        $page->set('personalEmail', 'not an address')
+            ->call('raise')
+            ->assertHasErrors(['personalEmail' => 'email']);
+
+        expect(theNewestExitAbout($anjali))->toBeNull()
+            ->and($anjali->fresh()->personal_email)->toBe('anjali@personal.example');
+    });
+});
+
+it('refuses an exit for somebody outside the part of the company you look after', function () {
+    TenantContext::run($this->meridian, function () {
+        $rohit = withTheirExitWithdrawn('rohit');
+
+        // Rakesh is HR head over Shimla and Rohit works in Pune. Sent from past the list,
+        // nothing about Rohit reaches the box and nothing is raised.
+        Livewire::actingAs(theRaiserCalled('rakesh'))->test(RaiseARequest::class)
+            ->set('processId', meridiansLiveExit()->getKey())
+            ->set('leaverId', $rohit->getKey())
+            ->assertSet('personalEmail', null)
+            ->set('lastWorkingDay', now()->addDays(10)->toDateString())
+            ->set('employmentEndedBy', 'resignation')
+            ->set('personalEmail', 'rohit.new@example.net')
+            ->call('raise')
+            ->assertHasErrors(['leaverId' => 'in']);
+
+        expect(theNewestExitAbout($rohit))->toBeNull()
+            ->and($rohit->fresh()->personal_email)->toBe('rohit@personal.example');
+    });
+});
+
+it('refuses a second exit for somebody whose exit is open, and leaves their address as it was', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjali = theRaiserCalled('anjali');
+        $open = theNewestExitAbout($anjali);
+
+        Livewire::actingAs(theRaiserCalled('rakesh'))->test(RaiseARequest::class)
+            ->set('processId', meridiansLiveExit()->getKey())
+            ->set('leaverId', $anjali->getKey())
+            ->set('lastWorkingDay', now()->addDays(10)->toDateString())
+            ->set('employmentEndedBy', 'resignation')
+            ->set('personalEmail', 'anjali.rao@example.net')
+            ->call('raise')
+            ->assertNotified('Anjali Rao already has an exit open. It has to finish or be withdrawn before another one can be raised.')
+            ->assertNoRedirect();
+
+        expect(theNewestExitAbout($anjali)->is($open))->toBeTrue()
+            ->and($anjali->fresh()->personal_email)->toBe('anjali@personal.example');
     });
 });

@@ -53,22 +53,43 @@ final class CaseEngine
     private const Completed = 'completed';
 
     /**
-     * Section 7(3) of the Payment of Gratuity Act, 1972: gratuity is payable "within
-     * thirty days from the date it becomes payable". Thirty ordinary days, not thirty
-     * working days, so the office calendar must not touch this one.
+     * Section 56(3) of the Code on Social Security, 2020: gratuity is paid within thirty
+     * days of becoming payable. The Code's section 164 repealed the Payment of Gratuity
+     * Act, 1972, which is what this used to cite. Thirty ordinary days, not thirty working
+     * days, so the office calendar must not touch this one.
      */
     private const CalendarDaysToPayGratuity = 30;
 
     /**
-     * Gratuity is owed on leaving after five years of continuous service. The Act also
-     * waives the five years where the person left by death or disablement, and that is
-     * deliberately not here.
+     * Section 53(1) of the Code: gratuity is owed on leaving after five years of
+     * continuous service, and the five years are waived where employment ends "due to
+     * death or disablement or expiration of fixed term employment".
      *
-     * ponytail: nothing in the product records why somebody left — `employment_status` is
-     * a free string with no agreed words in it yet. Add the waiver when module 07 records
-     * the reason for an exit, which is the module that would set those words.
+     * Death is not a way of leaving in this product yet, because it needs a flow that
+     * writes to nobody and asks nothing of the person. Until that flow exists, the gratuity
+     * deadline after a death is not tracked, and module 07 records that as a known gap.
      */
     private const YearsOfServiceForGratuity = 5;
+
+    /**
+     * A fixed-term employee leaving any way other than their contract ending is owed
+     * gratuity from one year. That figure is the government's own factsheet on the Code,
+     * not its text, and the difference is a question for the client's lawyer. Until then
+     * the deadline is shown: one shown that was not owed costs HR a minute, and one missing
+     * that was owed is a legal payment missed with no warning.
+     */
+    private const YearsOfServiceForGratuityOnAFixedTerm = 1;
+
+    /**
+     * The two endings section 53(1) waives the years for, in the words
+     * {@see ProcessCase::WaysEmploymentEnds} stores. The waiver for a contract ending is
+     * read off how the employment ended rather than off the job row's type, so a job row
+     * nobody updated to "Fixed-term contract" still gets its deadline.
+     */
+    private const EndingsOwedGratuityWhateverTheService = ['disablement', 'fixed_term_ended'];
+
+    /** The job row's own word for a fixed-term contract, from the people screen's list. */
+    private const FixedTermEmployment = 'contract';
 
     private AvailableSteps $reader;
 
@@ -156,7 +177,9 @@ final class CaseEngine
      * Whoever raised it hears about every step answered, a hold and a send-back included, and
      * a turning down with its reason. Not about their own answer, not once the case has
      * finished (the closing message says that), and never when the case is about them: the
-     * person a case is about is told three things and only three.
+     * person a case is about hears only what {@see TemplateCatalogue::CaseOpenedSubject}
+     * lists. A turning down is one of those, whoever raised the case, and so is told to
+     * them here — unless the answer was their own, through their link.
      *
      * @param  string  $answeredBy  the name to give, which for a link is somebody with no account
      */
@@ -173,6 +196,17 @@ final class CaseEngine
 
         $this->tellWhoseTurnItIs($waiting, $answered, $by);
 
+        $why = trim((string) $reason) !== '' ? trim((string) $reason) : 'none';
+
+        // Nobody answers a step on their own case except through a link, so an answer with
+        // somebody signed in behind it is never the leaver's own.
+        if ($outcome === 'rejected' && $by !== null) {
+            $this->tell($case, TemplateCatalogue::CaseTurnedDownSubject, $case->subject, [
+                'step.answered_by' => $answeredBy,
+                'step.reason' => $why,
+            ], $answered->sequence);
+        }
+
         $raisedBy = $case->initiatedBy;
 
         if (! $raisedBy instanceof User || ($by !== null && $raisedBy->is($by)) || $raisedBy->is($case->subject)) {
@@ -183,7 +217,7 @@ final class CaseEngine
             $this->tell($case, TemplateCatalogue::CaseRejectedInitiator, $raisedBy, [
                 'step.name' => $answered->name,
                 'step.answered_by' => $answeredBy,
-                'step.reason' => trim((string) $reason) !== '' ? trim((string) $reason) : 'none',
+                'step.reason' => $why,
             ], $answered->sequence);
 
             return;
@@ -220,13 +254,21 @@ final class CaseEngine
      * Both legal deadlines are worked out here and nowhere else. `statutory_from` is the
      * one date they count from — the leaver's last working day for an exit — and the only
      * thing allowed to move them afterwards is a recorded amendment to that date. Neither
-     * is ever recomputed because a calendar changed underneath a running case.
+     * is ever recomputed because a calendar changed underneath a running case. How the
+     * employment ended is stored beside that date, because the gratuity rule reads both.
+     *
+     * A person has one open exit at a time — one open case carrying a legal clock — and the
+     * database is what refuses the second: two HR heads raising the same resignation in the
+     * same second are both past any check written here before either has saved.
+     *
+     * @param  string|null  $employmentEndedBy  one of {@see ProcessCase::WaysEmploymentEnds}
      */
     public function open(
         ProcessTemplate $template,
         ?User $subject = null,
         ?User $by = null,
         ?string $statutoryFrom = null,
+        ?string $employmentEndedBy = null,
     ): ProcessCase {
         if ($template->status !== ProcessTemplate::Published) {
             throw ProcessRefused::onlyALiveProcessRuns($template->name, $template->version, $template->status);
@@ -240,7 +282,7 @@ final class CaseEngine
             }
 
             $record = $this->liveJobRowOf($subject)
-                ?? throw ProcessRefused::thePersonHasNoCurrentJobRow($subject->getKey(), $template->name);
+                ?? throw ProcessRefused::thePersonHasNoCurrentJobRow($subject->name, $template->name);
         } elseif ($subject !== null) {
             throw ProcessRefused::thisProcessIsNotAboutAPerson($template->name, $template->subject_kind);
         }
@@ -258,22 +300,32 @@ final class CaseEngine
                 CarbonImmutable::parse($statutoryFrom)->startOfDay(),
                 $office,
                 $record,
+                $employmentEndedBy,
             );
         }
 
-        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
-            $case = ProcessCase::create([
-                'template_id' => $template->getKey(),
-                'subject_user_id' => $subject?->getKey(),
-                'subject_employment_record_id' => $record?->getKey(),
-                'initiated_by' => $by?->getKey(),
-                'opened_at' => now(),
-                'statutory_from' => $statutoryFrom,
-                'statutory_due_at' => $statutoryDueAt,
-                'gratuity_due_at' => $gratuityDueAt,
-                'settings_snapshot' => $this->settingsAsked($conditions),
-                'subject_facts_snapshot' => $this->subjectFactsAsked($conditions, $subject, $record),
-            ]);
+        return DB::transaction(function () use ($template, $subject, $record, $by, $statutoryFrom, $employmentEndedBy, $conditions, $office, $statutoryDueAt, $gratuityDueAt): ProcessCase {
+            try {
+                $case = ProcessCase::create([
+                    'template_id' => $template->getKey(),
+                    'subject_user_id' => $subject?->getKey(),
+                    'subject_employment_record_id' => $record?->getKey(),
+                    'initiated_by' => $by?->getKey(),
+                    'opened_at' => now(),
+                    'statutory_from' => $statutoryFrom,
+                    'employment_ended_by' => $employmentEndedBy,
+                    'statutory_due_at' => $statutoryDueAt,
+                    'gratuity_due_at' => $gratuityDueAt,
+                    'settings_snapshot' => $this->settingsAsked($conditions),
+                    'subject_facts_snapshot' => $this->subjectFactsAsked($conditions, $subject, $record),
+                ]);
+            } catch (UniqueConstraintViolationException $duplicate) {
+                if (! str_contains($duplicate->getMessage(), 'cases_one_open_exit_per_person')) {
+                    throw $duplicate;
+                }
+
+                throw ProcessRefused::theyAlreadyHaveAnOpenCase((string) $subject?->name);
+            }
 
             $opened = [
                 'process' => $template->name,
@@ -295,7 +347,9 @@ final class CaseEngine
             // Rakesh is told his exit has started, so he knows the clock on his money has
             // begun. Whoever raised it is deliberately not written to here: Chandni pressed
             // the button a second ago and is looking at the screen, and this module's own
-            // research is a complaint about exactly that mail.
+            // research is a complaint about exactly that mail. Deepak raising his own does
+            // get it a second after pressing, on purpose: it goes to the personal address he
+            // has just confirmed, and arriving is the first proof that address works.
             $this->tell($case, TemplateCatalogue::CaseOpenedSubject, $case->subject);
 
             // A process whose every step this case skips has nothing for anybody to do,
@@ -678,7 +732,7 @@ final class CaseEngine
                 'gratuity_due_at' => $case->gratuity_due_at?->toDateString(),
             ];
 
-            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom($from, $office, $record);
+            [$statutoryDueAt, $gratuityDueAt] = $this->deadlinesCountedFrom($from, $office, $record, $case->employment_ended_by);
 
             $case->statutory_from = $from;
             $case->statutory_due_at = $statutoryDueAt;
@@ -1188,7 +1242,7 @@ final class CaseEngine
         $record->loadMissing('office.holidays');
 
         return $record->office
-            ?? throw ProcessRefused::theirJobRowNamesNoOffice($record->user_id, $template->name);
+            ?? throw ProcessRefused::theirJobRowNamesNoOffice((string) $record->user?->name);
     }
 
     /**
@@ -1202,11 +1256,11 @@ final class CaseEngine
      * @return array{CarbonImmutable, ?CarbonImmutable} the settlement deadline, and the
      *                                                  gratuity one where it is owed
      */
-    private function deadlinesCountedFrom(CarbonImmutable $from, Office $office, EmploymentRecord $record): array
+    private function deadlinesCountedFrom(CarbonImmutable $from, Office $office, EmploymentRecord $record, ?string $employmentEndedBy): array
     {
         return [
             $office->addWorkingDays($from, self::WorkingDaysToSettle),
-            $this->gratuityDeadline($from, $record),
+            $this->gratuityDeadline($from, $record, $employmentEndedBy),
         ];
     }
 
@@ -1218,22 +1272,26 @@ final class CaseEngine
      * office calendar is deliberately absent: thirty days here means thirty days, so a
      * deadline landing on a Sunday the office also closes for stays on that Sunday.
      *
+     * Owed, in this order: whatever the service where the employment ended by disablement
+     * or a fixed-term contract running out; from one year for anybody else on a fixed-term
+     * contract; from five years for everybody else. An exit opened without saying how the
+     * employment ended gets the years with no waiver, which is the rule every exit had
+     * before the raise screen asked.
+     *
      * Continuous service is measured to the date the person is leaving, from the joining
      * date module 01 carries forward onto every one of their job rows — so a promotion or
      * a transfer along the way does not restart it.
      */
-    private function gratuityDeadline(CarbonImmutable $from, EmploymentRecord $record): ?CarbonImmutable
+    private function gratuityDeadline(CarbonImmutable $from, EmploymentRecord $record, ?string $employmentEndedBy): ?CarbonImmutable
     {
         $joined = $record->joining_date;
 
-        if ($joined === null) {
-            return null;
-        }
+        $years = $record->employment_type === self::FixedTermEmployment
+            ? self::YearsOfServiceForGratuityOnAFixedTerm
+            : self::YearsOfServiceForGratuity;
 
-        $owed = CarbonImmutable::parse($joined)
-            ->startOfDay()
-            ->addYears(self::YearsOfServiceForGratuity)
-            ->lessThanOrEqualTo($from);
+        $owed = in_array($employmentEndedBy, self::EndingsOwedGratuityWhateverTheService, true)
+            || ($joined !== null && CarbonImmutable::parse($joined)->startOfDay()->addYears($years)->lessThanOrEqualTo($from));
 
         return $owed ? $from->addDays(self::CalendarDaysToPayGratuity) : null;
     }

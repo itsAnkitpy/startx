@@ -237,11 +237,12 @@ class ProcessRefused extends RuntimeException
         return new self("[{$name}] is about an employee, so a case cannot be opened without one.");
     }
 
-    public static function thePersonHasNoCurrentJobRow(int $userId, string $name): self
+    /** Read on the raise screen by whoever pressed the button, so it names the person. */
+    public static function thePersonHasNoCurrentJobRow(string $person, string $process): self
     {
         return new self(
-            "Person {$userId} has no current job row, so a case on [{$name}] has nothing to record "
-            .'their department, designation and manager as they stand today.'
+            "{$person} has no current job row, so their {$process} has no department, designation "
+            .'or manager to record. HR adds one on the people screen.'
         );
     }
 
@@ -268,12 +269,21 @@ class ProcessRefused extends RuntimeException
      * No office on the job row means no working-day calendar, and a settlement deadline
      * counted against no calendar is a wrong legal date rather than a missing one.
      */
-    public static function theirJobRowNamesNoOffice(int $userId, string $name): self
+    public static function theirJobRowNamesNoOffice(string $person): self
     {
         return new self(
-            "Person {$userId} has no office on their current job row, so a case on [{$name}] "
-            .'has no working-day calendar to count their legal deadline against.'
+            "{$person} has no office on their current job row, so there is no working-day calendar "
+            .'to count their legal deadline against. HR sets their office on the people screen.'
         );
+    }
+
+    /**
+     * Two open exits would give one person two legal deadlines. The database refuses the
+     * second; this is the sentence whoever pressed the button reads.
+     */
+    public static function theyAlreadyHaveAnOpenCase(string $name): self
+    {
+        return new self("{$name} already has an exit open. It has to finish or be withdrawn before another one can be raised.");
     }
 
     /**

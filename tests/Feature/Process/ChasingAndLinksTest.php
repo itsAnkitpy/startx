@@ -113,7 +113,7 @@ it('adds the escalation target to an overdue step and takes it from nobody', fun
         // Widening the list is not a decoration: the engine lets her act on it, asked the
         // same question again at the moment of acting.
         $decided = (new CaseEngine)->decide(
-            theExitOf('Anjali'), 1, 'approved', whoWorksAtMeridian('chandni'),
+            theExitOf('Anjali'), 2, 'approved', whoWorksAtMeridian('chandni'),
             ['id_card_returned' => true]
         );
 
@@ -123,14 +123,14 @@ it('adds the escalation target to an overdue step and takes it from nobody', fun
 
 it('leaves a step alone until its deadline has actually passed', function () {
     TenantContext::run($this->meridian, function () {
-        // Deepak's exit was opened just now, so its clearance is nobody's but the two who
+        // Deepak's exit was accepted just now, so its clearance is nobody's but the two who
         // hold HR head in Shimla. A widening that happened on every step would prove
         // nothing at all about the widening above.
         expect(stepsWaitingOn(whoWorksAtMeridian('chandni')))
             ->not->toContain('HR clearance — Deepak Iyer');
 
         expect(fn () => (new CaseEngine)->decide(
-            theExitOf('Deepak'), 1, 'approved', whoWorksAtMeridian('chandni')
+            theExitOf('Deepak'), 2, 'approved', whoWorksAtMeridian('chandni')
         ))->toThrow(ProcessRefused::class, 'is not yours to act on');
     });
 });
@@ -207,17 +207,20 @@ it('sends a link to the leaver personal address and lets them answer once', func
     $sent = TenantContext::run($this->meridian, function () {
         $rakeshs = theExitOf('Rakesh');
 
-        // Everybody who works there has already cleared it, and the last step is his own —
-        // by which point he has no sign-in left.
+        // Everybody who works there has already cleared it, and what is left of the
+        // clearances is his own.
         expect(stepsWaitingOn(whoWorksAtMeridian('chandni')))
             ->not->toContain('Leaver confirms the handover — Rakesh Menon');
 
         return [tokenForStep($rakeshs, 4), $rakeshs->getKey()];
     });
 
-    // Two, because seeding the demo company already sent him one — the point is that both
-    // went to his own address and neither needed anybody to type it.
-    expect(addressesSentALink())->toBe(['rakesh@personal.example', 'rakesh@personal.example']);
+    // Seeding sent every leaver whose clearances are open one, Rakesh included, and this
+    // is his second — every one to the person's own address, none needing anybody to type it.
+    expect(addressesSentALink())->toBe([
+        'anjali@personal.example', 'deepak@personal.example', 'rohit@personal.example',
+        'rakesh@personal.example', 'rakesh@personal.example',
+    ]);
 
     $this->get(atMeridiansAddress('step/'.$sent[0]))
         ->assertOk()
@@ -238,16 +241,17 @@ it('sends a link to the leaver personal address and lets them answer once', func
             ->and($answered->external_assignee['email'])->toBe('rakesh@personal.example')
             ->and($answered->payload['note'])->toBe('All handed over.');
 
-        // The last thing recorded against the case, which is his answer — the three
-        // clearances in front of it were recorded against the employees who gave them.
+        // The last thing recorded against the case, which is his answer — the steps
+        // answered before it were recorded against the employees who gave them.
         $line = CaseEvent::query()->where('case_id', $sent[1])->where('type', 'step_acted')
             ->latest('id')->first();
 
         expect($line->actor_id)->toBeNull()
             ->and($line->payload['answered_by']['email'])->toBe('rakesh@personal.example');
 
-        // Nothing was left outstanding, so the exit closed on his answer.
-        expect(ProcessCase::query()->whereKey($sent[1])->sole()->closed_at)->not->toBeNull();
+        // His was the last clearance, so the exit now waits on HR's final check.
+        expect(ProcessCase::query()->whereKey($sent[1])->sole()->closed_at)->toBeNull()
+            ->and(stepsWaitingOn(whoWorksAtMeridian('priya')))->toContain('HR final check — Rakesh Menon');
     });
 
     // The second try, whoever is holding the address by then.
@@ -276,7 +280,7 @@ it('stops working once its time is up', function () {
     $token = TenantContext::run($this->meridian, function () {
         $token = tokenForStep(theExitOf('Rakesh'), 4);
 
-        $link = CaseStep::query()->where('sequence', 4)->whereNull('superseded_at')->sole();
+        $link = theExitOf('Rakesh')->steps()->where('sequence', 4)->whereNull('superseded_at')->sole();
         $held = $link->external_assignee;
         $held['expires_at'] = now()->subMinute()->toIso8601String();
         $link->forceFill(['external_assignee' => $held])->save();
@@ -295,7 +299,7 @@ it('issues a fresh link to the same address without an employee touching the cas
     $dead = TenantContext::run($this->meridian, function () {
         $token = tokenForStep(theExitOf('Rakesh'), 4);
 
-        $link = CaseStep::query()->where('sequence', 4)->whereNull('superseded_at')->sole();
+        $link = theExitOf('Rakesh')->steps()->where('sequence', 4)->whereNull('superseded_at')->sole();
         $held = $link->external_assignee;
         $held['expires_at'] = now()->subMinute()->toIso8601String();
         $link->forceFill(['external_assignee' => $held])->save();
@@ -308,15 +312,17 @@ it('issues a fresh link to the same address without an employee touching the cas
         ->assertSee('A new link is on its way');
 
     // Every message so far to the address already on the record — the seeded one, the one
-    // this test sent, and the one asked for from a dead link. Nobody typed an address and
-    // no employee opened the case to change anything.
-    expect(addressesSentALink())->toBe(array_fill(0, 3, 'rakesh@personal.example'));
+    // this test sent, and the one asked for from a dead link — beside the other leavers'
+    // seeded ones. Nobody typed an address and no employee opened the case to change
+    // anything.
+    expect(array_values(array_filter(addressesSentALink(), fn (string $to) => $to === 'rakesh@personal.example')))
+        ->toBe(array_fill(0, 3, 'rakesh@personal.example'));
 
     TenantContext::run($this->meridian, function () {
-        $live = CaseStep::query()->where('sequence', 4)->whereNull('superseded_at')->sole();
+        $live = theExitOf('Rakesh')->steps()->where('sequence', 4)->whereNull('superseded_at')->sole();
 
         expect($live->external_assignee['email'])->toBe('rakesh@personal.example')
-            ->and(CaseStep::query()->where('sequence', 4)->whereNotNull('superseded_at')->count())->toBe(2);
+            ->and(theExitOf('Rakesh')->steps()->where('sequence', 4)->whereNotNull('superseded_at')->count())->toBe(2);
     });
 
     // The dead one stays dead, so asking again never leaves two working links for one
@@ -344,12 +350,13 @@ it('lets only the newest link ask for another one', function () {
         ->assertForbidden()
         ->assertSee('A newer link for this step has already been sent');
 
-    // Three: the seeded one and the two this test asked for. Nothing further was sent.
-    expect(addressesSentALink())->toHaveCount(3);
+    // Three to Rakesh: the seeded one and the two this test asked for. Nothing further was
+    // sent.
+    expect(array_filter(addressesSentALink(), fn (string $to) => $to === 'rakesh@personal.example'))->toHaveCount(3);
 
     TenantContext::run($this->meridian, function () {
         // And his live link is still live, which is the whole point of refusing.
-        $live = CaseStep::query()->where('sequence', 4)->whereNull('superseded_at')->sole();
+        $live = theExitOf('Rakesh')->steps()->where('sequence', 4)->whereNull('superseded_at')->sole();
 
         expect(fn () => (new StepLink)->refuseUnlessItStillWorks($live))->not->toThrow(ProcessRefused::class);
     });
@@ -435,7 +442,8 @@ it('holds an answer sent through a link to the form the client wrote', function 
         // own limit and not a door that has stopped opening.
         (new CaseEngine)->decideThroughALink($token, 'approved', ['note' => 'All handed over.']);
 
-        expect($rakeshs->fresh()->closed_at)->not->toBeNull();
+        expect(CaseStep::query()->where('case_id', $rakeshs->getKey())->where('sequence', 4)
+            ->whereNull('superseded_at')->sole()->outcome)->toBe('approved');
     });
 });
 

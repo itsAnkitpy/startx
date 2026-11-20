@@ -45,12 +45,13 @@ function exitCarryingDeadlines(string $about = 'employee'): ProcessTemplate
 }
 
 /** A leaver whose job row names the office his deadlines are counted against. */
-function leaverBasedAt(Office $office, string $joined = '2019-04-01', string $called = 'Rakesh Menon'): User
+function leaverBasedAt(Office $office, string $joined = '2019-04-01', string $called = 'Rakesh Menon', string $type = 'permanent'): User
 {
     $person = User::factory()->holdingTheRole('exit_team')->named($called)->create();
 
     EmploymentRecord::factory()->forPerson($person)->basedAt($office)->create([
         'joining_date' => $joined,
+        'employment_type' => $type,
     ]);
 
     return $person;
@@ -129,6 +130,19 @@ it('counts a deadline against an office that works a Gulf week', function () {
     });
 });
 
+it('counts a deadline against an office whose only day off is Sunday', function () {
+    TenantContext::run($this->meridian, function () {
+        $depot = Office::factory()->named('Shimla depot')->weekendOn([0])->create();
+
+        // The depot works Saturdays, so two working days from Friday 14 August are the
+        // Saturday and the Monday. The Shimla office next door, closed both days, gives
+        // the same leaver the Tuesday.
+        $case = (new CaseEngine)->open(exitCarryingDeadlines(), leaverBasedAt($depot), null, '2026-08-14');
+
+        expect($case->statutory_due_at->toDateString())->toBe('2026-08-17');
+    });
+});
+
 /*
 | The gratuity deadline — thirty ordinary days, and only where it is owed
 */
@@ -194,6 +208,71 @@ it('counts a promoted leaver’s service from the day they first joined', functi
 
         expect($case->subject_employment_record_id)->toBe($rakesh->fresh()->currentEmployment->id)
             ->and($case->gratuity_due_at->toDateString())->toBe('2026-09-13');
+    });
+});
+
+/*
+| Whether gratuity is owed turns on how the employment ended — section 53(1) of the Code on
+| Social Security, and Ankit's answer on 18 November 2026 for a fixed-term employee who
+| resigns. Every leaver below leaves on Friday 14 August 2026, so a deadline is 13 September.
+*/
+
+it('owes gratuity by how the employment ended and the kind of contract', function (string $type, string $joined, string $endedBy, ?string $owed) {
+    TenantContext::run($this->meridian, function () use ($type, $joined, $endedBy, $owed) {
+        $shimla = Office::factory()->named('Shimla')->create();
+
+        $case = (new CaseEngine)->open(
+            exitCarryingDeadlines(), leaverBasedAt($shimla, joined: $joined, type: $type), null, '2026-08-14', $endedBy,
+        );
+
+        expect($case->employment_ended_by)->toBe($endedBy)
+            ->and($case->gratuity_due_at?->toDateString())->toBe($owed);
+    });
+})->with([
+    'a contract shorter than a year that simply ends' => ['contract', '2025-12-01', 'fixed_term_ended', '2026-09-13'],
+    'a fixed-term employee resigning after a year' => ['contract', '2025-08-14', 'resignation', '2026-09-13'],
+    'a fixed-term employee resigning a day short of a year' => ['contract', '2025-08-15', 'resignation', null],
+    'a permanent employee leaving disabled after two years' => ['permanent', '2024-04-01', 'disablement', '2026-09-13'],
+    'a permanent employee resigning after two years' => ['permanent', '2024-04-01', 'resignation', null],
+    'a permanent employee dismissed after two years' => ['permanent', '2024-04-01', 'dismissal', null],
+    'a permanent employee retiring after six years' => ['permanent', '2020-04-01', 'retirement', '2026-09-13'],
+]);
+
+it('keeps how the employment ended when the last working day moves', function () {
+    TenantContext::run($this->meridian, function () {
+        $shimla = Office::factory()->named('Shimla')->create();
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
+
+        // Two years in, so only the disablement earns her a gratuity deadline — and the
+        // moved date has to be worked out with it, not as a plain resignation.
+        $case = (new CaseEngine)->open(
+            exitCarryingDeadlines(), leaverBasedAt($shimla, joined: '2024-04-01'), null, '2026-08-14', 'disablement',
+        );
+
+        (new CaseEngine)->amendTheDateTheClocksCountFrom($case, '2026-08-21', $anjali, 'Notice extended by a week');
+
+        expect($case->fresh()->gratuity_due_at->toDateString())->toBe('2026-09-20');
+    });
+});
+
+it('refuses a second exit for somebody whose exit is still open, and allows one once it is withdrawn', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = exitCarryingDeadlines();
+        $rakesh = leaverBasedAt(Office::factory()->named('Shimla')->create());
+        $anjali = User::factory()->holdingTheRole('exit_team')->named('Anjali Verma')->create();
+
+        $first = (new CaseEngine)->open($exit, $rakesh, $anjali, '2026-08-14', 'resignation');
+
+        expect(fn () => (new CaseEngine)->open($exit, $rakesh, $anjali, '2026-08-21', 'resignation'))
+            ->toThrow(ProcessRefused::class, 'Rakesh Menon already has an exit open.');
+
+        // The refusal is the database's, so it holds however the second one arrives.
+        expect(ProcessCase::query()->where('subject_user_id', $rakesh->getKey())->count())->toBe(1);
+
+        (new CaseEngine)->cancel($first, $anjali, 'Withdrew his resignation');
+
+        expect((new CaseEngine)->open($exit, $rakesh, $anjali, '2026-09-30', 'resignation')->statutory_from->toDateString())
+            ->toBe('2026-09-30');
     });
 });
 
@@ -284,7 +363,7 @@ it('refuses a leaving date when the person’s job row names no office', functio
         EmploymentRecord::factory()->forPerson($rakesh)->create();
 
         expect(fn () => (new CaseEngine)->open(exitCarryingDeadlines(), $rakesh, null, '2026-08-14'))
-            ->toThrow(ProcessRefused::class, 'has no working-day calendar to count their legal deadline against');
+            ->toThrow(ProcessRefused::class, 'Rakesh Menon has no office on their current job row, so there is no working-day calendar to count their legal deadline against. HR sets their office on the people screen.');
 
         // Nothing was written. A case carrying a leaving date with no deadline beside it
         // would be a legal date nobody ever worked out.

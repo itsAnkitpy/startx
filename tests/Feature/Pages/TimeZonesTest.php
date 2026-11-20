@@ -45,6 +45,10 @@ function readerAtMeridian(string $first): User
  * Rakesh's exit, with the day it opened, every answer on it and every message about it
  * moved to the one moment. Its trail of events is add-only and cannot be moved, which
  * is why the sentences built from that trail have a test of their own below.
+ *
+ * His last working day is moved to that moment's own day in India too, and his settlement
+ * deadline with it, because the demo counts them from today and one of them could land on
+ * the very date the checks below say must not appear.
  */
 function rakeshsExitAtTheOneMoment(): ProcessCase
 {
@@ -53,7 +57,11 @@ function rakeshsExitAtTheOneMoment(): ProcessCase
         ->whereRelation('template', 'key', 'exit')
         ->sole();
 
-    ProcessCase::query()->whereKey($exit->getKey())->update(['opened_at' => TheOneMoment]);
+    ProcessCase::query()->whereKey($exit->getKey())->update([
+        'opened_at' => TheOneMoment,
+        'statutory_from' => '2026-12-02',
+        'statutory_due_at' => '2026-12-04',
+    ]);
     CaseStep::query()->where('case_id', $exit->getKey())->whereNotNull('acted_at')->update(['acted_at' => TheOneMoment]);
     NotificationDelivery::query()->where('case_id', $exit->getKey())->update(['created_at' => TheOneMoment, 'sent_at' => TheOneMoment]);
 

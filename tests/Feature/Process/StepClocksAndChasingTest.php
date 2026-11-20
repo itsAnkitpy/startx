@@ -5,6 +5,7 @@ use App\Models\CaseStep;
 use App\Models\EmploymentRecord;
 use App\Models\Office;
 use App\Models\OfficeHoliday;
+use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -391,15 +392,18 @@ it('finds every overdue step across many cases without asking the database per c
         $shimla = Office::factory()->named('Shimla')->create();
         $hr = User::factory()->holdingTheRole('exit_team')->create();
         $exit = exitWithATimedClearance(hours: 8);
-        $rakesh = leaverAt($shimla);
-        $record = EmploymentRecord::query()->where('user_id', $rakesh->getKey())->first();
 
         $this->travelTo('2026-08-12 09:00:00');
 
-        ProcessCase::factory()->count(40)->on($exit)->about($rakesh, $record)->create([
-            'opened_at' => now(),
-            'statutory_from' => '2026-08-14',
-        ]);
+        // Forty leavers, because a person has one open exit at a time, all at the one
+        // office whose calendar the clocks count against.
+        $branch = OrgUnit::factory()->create();
+
+        EmploymentRecord::factory()->count(40)->in($branch)->basedAt($shimla)->create()
+            ->each(fn (EmploymentRecord $record) => ProcessCase::factory()->on($exit)->about($record->user, $record)->create([
+                'opened_at' => now(),
+                'statutory_from' => '2026-08-14',
+            ]));
 
         // Every one of them past its first step, so forty clearances are running at once.
         ProcessCase::query()->pluck('id')->each(function (int $caseId) use ($hr) {

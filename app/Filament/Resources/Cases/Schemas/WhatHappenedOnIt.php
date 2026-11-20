@@ -68,6 +68,31 @@ class WhatHappenedOnIt
                             ->label('Raised by')
                             ->state(fn (ProcessCase $record): string => $record->initiatedBy?->name ?? 'The system'),
 
+                        // An exit's legal clock: the day it counts from, how the employment
+                        // ended, and the two deadlines that follow from both. Plain dates, so
+                        // deliberately not given the reader's clock the way "Started" is: a
+                        // company behind UTC would see every deadline a day early.
+                        TextEntry::make('statutory_from')
+                            ->label('Last working day')
+                            ->date()
+                            ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
+
+                        TextEntry::make('employment_ended_by')
+                            ->label('How their employment ends')
+                            ->state(fn (ProcessCase $record): string => ProcessCase::WaysEmploymentEnds[$record->employment_ended_by] ?? 'Not recorded')
+                            ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
+
+                        TextEntry::make('statutory_due_at')
+                            ->label('Settlement due by')
+                            ->date()
+                            ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
+
+                        TextEntry::make('gratuity_due_at')
+                            ->label('Gratuity due by')
+                            ->date()
+                            ->placeholder('Not owed')
+                            ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
+
                         // The failure the check at publishing exists to prevent, said at
                         // the top of the case it happened to as well as against the step
                         // itself further down. Absent on every ordinary case.

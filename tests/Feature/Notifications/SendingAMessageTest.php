@@ -214,11 +214,15 @@ it('writes to the person it is about and to whoever raised it when a case finish
         $rakeshs = rakeshsSeededExit();
         $token = basename((new StepLink)->issue($rakeshs, 4));
 
-        // Asking for the link is itself a message, so it is cleared before the answer that
-        // finishes the exit. The link's own record is checked in its own test below.
-        Mail::mailer()->getSymfonyTransport()->flush();
-
         (new CaseEngine)->decideThroughALink($token, 'approved', ['note' => 'All handed over.']);
+
+        // His answer was the last clearance, which opens HR's final check, and those
+        // messages are checked where whose turn it is is. Cleared before the answer that
+        // finishes the exit.
+        Mail::mailer()->getSymfonyTransport()->flush();
+        NotificationDelivery::query()->where('case_id', $rakeshs->getKey())->delete();
+
+        (new CaseEngine)->decide($rakeshs, 5, 'approved', whoIsOnMeridiansStaff('priya'));
 
         expect($rakeshs->fresh()->closed_at)->not->toBeNull();
 
@@ -232,7 +236,6 @@ it('writes to the person it is about and to whoever raised it when a case finish
         expect(NotificationDelivery::query()->where('case_id', $rakeshs->getKey())
             ->pluck('template_key')->all())
             ->toEqualCanonicalizing([
-                TemplateCatalogue::LinkToAnswerAStep,
                 TemplateCatalogue::CaseClosedSubject,
                 TemplateCatalogue::CaseClosedInitiator,
             ]);
@@ -313,6 +316,42 @@ it('tells whoever raised a case it was turned down, and sends nothing that reads
             ->and(whatOneOfThemSaid())->toContain('The reason given was: none');
     });
 });
+
+it('tells the leaver their exit was turned down, with who and why and no link, whoever raised it', function (string $raisedBy, array $told) {
+    TenantContext::run($this->meridian, function () use ($raisedBy, $told) {
+        $deepak = whoIsOnMeridiansStaff('deepak');
+        $engine = new CaseEngine;
+
+        $engine->cancel(
+            ProcessCase::query()->where('subject_user_id', $deepak->getKey())->sole(),
+            whoIsOnMeridiansStaff('chandni'),
+            'Withdrew the resignation',
+        );
+
+        $exit = $engine->open(theExitMeridianRuns(), $deepak, whoIsOnMeridiansStaff($raisedBy), now()->addDays(30)->toDateString(), 'resignation');
+
+        Mail::mailer()->getSymfonyTransport()->flush();
+
+        // Rakesh, his manager, turns it down at the first step.
+        $engine->decide($exit, 1, 'rejected', whoIsOnMeridiansStaff('rakesh'), [], 'We have agreed a new role for you in Pune.');
+
+        // Told at the address that outlives his job, like the other three he gets. Whoever
+        // raised it for him is told as well; raising his own, he hears it once.
+        expect(whatActuallyLeft())->toBe(array_map(fn (string $line) => str_replace('#N', '#'.$exit->number, $line), $told))
+            ->and(whatOneOfThemSaid())->toContain('Rakesh Menon has turned down your Exit. Its reference is #'.$exit->number.'.')
+            ->and(whatOneOfThemSaid())->toContain('The reason given was: We have agreed a new role for you in Pune.')
+            // The case's page is not his to read, so nothing points him at it.
+            ->and(whatOneOfThemSaid())->not->toContain('/admin/cases/');
+    });
+})->with([
+    'raised by Deepak himself' => ['deepak', [
+        'deepak@personal.example — Your Exit at Meridian Logistics has been turned down',
+    ]],
+    'raised for him by Chandni' => ['chandni', [
+        'deepak@personal.example — Your Exit at Meridian Logistics has been turned down',
+        'chandni@meridian.test — #N has been turned down',
+    ]],
+]);
 
 /*
 | The link a leaver answers through

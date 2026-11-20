@@ -22,8 +22,8 @@ use Database\Seeders\VertexSeeder;
 |
 | The list is the panel's own routes, taken from `php artisan route:list --path=admin`
 | on 18 November 2026. A screen added later has to be added here. "Raise a request" is
-| the one left out: only somebody who may start a process can open it, which at Meridian
-| is Anjali and at Vertex nobody yet, so the hiring walk-through checks it as her.
+| on it since module 07 step 1: anybody with a job may raise their own exit, so both
+| administrators can open it.
 */
 
 beforeEach(function () {
@@ -41,6 +41,7 @@ function everyScreenAt(string $company): array
     $tenant = Tenant::query()->where('slug', $company)->sole();
 
     return TenantContext::run($tenant, fn (): array => [
+        '/admin/raise-a-request',
         '/admin/my-queue',
         '/admin/cases',
         '/admin/cases/'.ProcessCase::query()->min('id'),

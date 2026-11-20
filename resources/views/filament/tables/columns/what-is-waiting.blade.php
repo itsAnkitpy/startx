@@ -246,6 +246,12 @@
                         wire:model.live.blur="{{ $reason }}"
                     ></textarea>
                 </x-filament::input.wrapper>
+
+                {{-- Turning down an exit emails this reason to the leaver word for word, so
+                     whoever types it is told before they write it. --}}
+                @if ($outcome === 'rejected' && $case->subject_user_id !== null)
+                    <p style="font-size: 0.75rem;">The person leaving is emailed this reason.</p>
+                @endif
             </x-filament-forms::field-wrapper>
 
             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">

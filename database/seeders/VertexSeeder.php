@@ -184,6 +184,7 @@ class VertexSeeder extends Seeder
                 // above every one of these seven forms is a date rather than a blank.
                 // Counted from the last working day on her own job row.
                 statutoryFrom: $people['neha']->currentEmployment->last_working_day->toDateString(),
+                employmentEndedBy: 'resignation',
             );
         });
     }

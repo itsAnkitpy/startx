@@ -55,13 +55,28 @@ function bundleDeepaksExit(): ProcessCase
     return ProcessCase::query()
         ->whereRelation('subject', 'work_email', 'deepak@meridian.test')
         ->whereRelation('template', 'key', 'exit')
+        ->whereNull('cancelled_at')
         ->sole();
 }
 
-/** Priya clears HR on Deepak's exit, which tells Chandni two things. */
-function bundlePriyaClearsHr(): void
+/**
+ * Deepak's seeded exit is withdrawn, Chandni raises a fresh one, and Rakesh accepts it —
+ * which tells Chandni two things: finance is now her turn, and the exit she raised has
+ * moved on.
+ */
+function bundleRakeshAcceptsDeepaksResignation(): void
 {
-    (new CaseEngine)->decide(bundleDeepaksExit(), 1, 'approved', bundleColleague('priya'), ['id_card_returned' => true]);
+    $chandni = bundleColleague('chandni');
+    $engine = new CaseEngine;
+
+    $engine->cancel(bundleDeepaksExit(), $chandni, 'Withdrew the resignation');
+
+    $exit = $engine->open(
+        ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole(),
+        bundleColleague('deepak'), $chandni, '2026-12-11', 'resignation',
+    );
+
+    $engine->decide($exit, 1, 'approved', bundleColleague('rakesh'));
 }
 
 /** The scheduled pass, run once, as the scheduler runs it. */
@@ -104,7 +119,7 @@ it('holds "your turn" and news of a request somebody raised for one email at the
         $chandni->update(['daily_summary_hour' => 18]);
 
         $this->travelTo(bundleOnClock('2026-11-16 10:00'));
-        bundlePriyaClearsHr();
+        bundleRakeshAcceptsDeepaksResignation();
 
         $held = NotificationDelivery::query()->where('recipient_user_id', $chandni->getKey())->orderBy('id')->get();
 
@@ -144,7 +159,7 @@ it('leaves a message written after the hour for the next day', function () {
         bundleColleague('chandni')->update(['daily_summary_hour' => 18]);
 
         $this->travelTo(bundleOnClock('2026-11-16 18:30'));
-        bundlePriyaClearsHr();
+        bundleRakeshAcceptsDeepaksResignation();
 
         $this->travelTo(bundleOnClock('2026-11-16 18:31'));
         bundlePass();
@@ -263,7 +278,7 @@ it('sends what was waiting in one email as soon as somebody goes back to being t
         $chandni->update(['daily_summary_hour' => 18]);
 
         $this->travelTo(bundleOnClock('2026-11-16 10:00'));
-        bundlePriyaClearsHr();
+        bundleRakeshAcceptsDeepaksResignation();
 
         $this->travelTo(bundleOnClock('2026-11-16 11:00'));
         $chandni->update(['daily_summary_hour' => null]);
@@ -307,7 +322,7 @@ it('lets a person choose a summary at nine in the morning on their own page, and
         expect($chandni->fresh()->daily_summary_hour)->toBe(9);
 
         $this->travelTo(bundleOnClock('2026-11-16 10:00'));
-        bundlePriyaClearsHr();
+        bundleRakeshAcceptsDeepaksResignation();
 
         $this->travelTo(bundleOnClock('2026-11-17 08:59'));
         bundlePass();

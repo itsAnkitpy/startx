@@ -6,6 +6,7 @@ use App\Tenancy\BelongsToTenant;
 use App\Tenancy\TenantScope;
 use Database\Factories\ProcessCaseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -27,7 +28,7 @@ use Illuminate\Support\Facades\DB;
  */
 #[Fillable([
     'number', 'template_id', 'subject_user_id', 'subject_employment_record_id', 'initiated_by',
-    'opened_at', 'statutory_from', 'statutory_due_at', 'gratuity_due_at',
+    'opened_at', 'statutory_from', 'employment_ended_by', 'statutory_due_at', 'gratuity_due_at',
     'settings_snapshot', 'subject_facts_snapshot',
 ])]
 class ProcessCase extends Model
@@ -74,6 +75,22 @@ class ProcessCase extends Model
         'office_id' => 'their office',
         'manages_anyone' => 'whether they manage anybody',
         'equipment_issued' => 'whether they hold any equipment',
+    ];
+
+    /**
+     * How somebody's employment ended, in the words a client reads. A fixed list rather
+     * than the client's own reasons for leaving, because the gratuity rule reads these
+     * words and the law has no others; the database refuses anything else.
+     *
+     * Death is deliberately not here. It needs a flow that writes to nobody and asks
+     * nothing of the person, and half of one would email a grieving family.
+     */
+    public const WaysEmploymentEnds = [
+        'resignation' => 'Resignation',
+        'fixed_term_ended' => 'End of a fixed-term contract',
+        'retirement' => 'Retirement',
+        'dismissal' => 'Dismissal',
+        'disablement' => 'Disablement',
     ];
 
     /**
@@ -183,6 +200,20 @@ class ProcessCase extends Model
     public function initiatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'initiated_by');
+    }
+
+    /**
+     * The cases somebody raised that are theirs to read: every one, except one about
+     * themselves. Deepak raising his own resignation does not make it his to read, because
+     * the person a case is about is told how it starts and how it ends and nothing about the
+     * approvals in between, and the case's page would tell him all of it.
+     */
+    public function scopeRaisedBy(Builder $query, User $person): void
+    {
+        $query->where('initiated_by', $person->getKey())
+            ->where(fn (Builder $about) => $about
+                ->whereNull('subject_user_id')
+                ->orWhere('subject_user_id', '!=', $person->getKey()));
     }
 
     public function cancelledBy(): BelongsTo

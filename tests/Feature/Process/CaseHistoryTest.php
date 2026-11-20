@@ -87,8 +87,9 @@ it('does not mark a step that has simply not come round yet', function () {
         $chandni = whoIsAtMeridian('chandni');
         $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        // Anjali's exit is on the real process and nobody has touched it, so all four of
-        // its steps have no row anywhere and not one of them is a failure.
+        // Anjali's exit is on the real process, past her manager and into its clearances.
+        // Nobody has cleared anything, and HR's final check has not come round — and not
+        // one of them is a failure.
         Livewire::actingAs($chandni)->test(ListCases::class)
             ->assertOk()
             ->assertSee('Anjali Rao')
@@ -99,7 +100,9 @@ it('does not mark a step that has simply not come round yet', function () {
             ->assertSee('It opens when the steps in front of it are done');
 
         expect(collect((new CaseHistory)->stepByStep($anjalis))->pluck('tone')->all())
-            ->toBe(['later', 'later', 'later', 'later']);
+            // Her manager's approval, the two clearances nobody has opened, the link she was
+            // sent, and HR's final check.
+            ->toBe(['done', 'later', 'later', 'waiting', 'later']);
     });
 });
 
@@ -167,12 +170,14 @@ it('does not cry failure on an exit somebody turned down', function () {
         $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
         // Priya clears HR for Shimla, which is Anjali's branch, and she turns the exit
-        // down at the first step. The three steps behind it were never due, so not one of
-        // them is an approval that never happened.
-        (new CaseEngine)->decide($anjalis, 1, 'rejected', whoIsAtMeridian('priya'), reason: 'She is staying.');
+        // down at HR's clearance. Finance beside it and HR's final check after it were
+        // never answered, so not one of them is an approval that never happened.
+        (new CaseEngine)->decide($anjalis, 2, 'rejected', whoIsAtMeridian('priya'), reason: 'She is staying.');
 
+        // The link she was sent as the clearances opened still reads as sent and not
+        // answered, which is what happened.
         expect(collect((new CaseHistory)->stepByStep($anjalis->fresh()))->pluck('tone')->all())
-            ->toBe(['done', 'stopped', 'stopped', 'stopped']);
+            ->toBe(['done', 'done', 'stopped', 'waiting', 'stopped']);
 
         theCasePageFor($anjalis->fresh(), whoIsAtMeridian('chandni'))
             ->assertOk()
@@ -187,8 +192,10 @@ it('does not cry failure on an exit that was withdrawn', function () {
 
         (new CaseEngine)->cancel($deepaks, whoIsAtMeridian('priya'), 'He withdrew his resignation.');
 
+        // His manager had accepted it, and the link he was sent still reads as sent and
+        // not answered. Nothing reads as an approval that never happened.
         expect(collect((new CaseHistory)->stepByStep($deepaks->fresh()))->pluck('tone')->all())
-            ->toBe(['stopped', 'stopped', 'stopped', 'stopped']);
+            ->toBe(['done', 'stopped', 'stopped', 'waiting', 'stopped']);
     });
 });
 
@@ -277,29 +284,29 @@ it('keeps the reason a step was held off the line saying it was cleared, and und
         $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$exit->getKey()}.1.id_card_returned", '1')
-            ->call('decide', $exit->getKey(), 1, 'approved')
-            ->assertHasNoErrors();
-
-        Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$exit->getKey()}.2.imprest_card_returned", '0')
-            ->set("answers.{$exit->getKey()}.2.recover_from_them", 12000)
-            ->set("answers.{$exit->getKey()}.2.recovery_reason", 'imprest')
-            ->call('askFor', $exit->getKey(), 2, 'held')
-            ->set("reasons.{$exit->getKey()}.2", 'Waiting on the imprest card.')
-            ->call('decide', $exit->getKey(), 2, 'held')
-            ->assertHasNoErrors();
-
-        Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$exit->getKey()}.2.imprest_card_returned", '1')
+            ->set("answers.{$exit->getKey()}.2.id_card_returned", '1')
             ->call('decide', $exit->getKey(), 2, 'approved')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$exit->getKey()}.3.imprest_card_returned", '0')
+            ->set("answers.{$exit->getKey()}.3.recover_from_them", 12000)
+            ->set("answers.{$exit->getKey()}.3.recovery_reason", 'imprest')
+            ->call('askFor', $exit->getKey(), 3, 'held')
+            ->set("reasons.{$exit->getKey()}.3", 'Waiting on the imprest card.')
+            ->call('decide', $exit->getKey(), 3, 'held')
+            ->assertHasNoErrors();
+
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->set("answers.{$exit->getKey()}.3.imprest_card_returned", '1')
+            ->call('decide', $exit->getKey(), 3, 'approved')
             ->assertHasNoErrors();
 
         // A step somebody held and then cleared has two lines about it in the case's
         // history. On the line saying it was cleared, the hold reason reads as money still
         // being argued about on the day it was settled — so it does not go there. Under
         // it, with its own date, it is the only record that the argument happened at all.
-        $clearance = collect((new CaseHistory)->stepByStep($exit->fresh()))->firstWhere('sequence', 2);
+        $clearance = collect((new CaseHistory)->stepByStep($exit->fresh()))->firstWhere('sequence', 3);
         $before = implode(' ', $clearance['earlier']);
 
         expect($clearance['said'])->toContain('Approved by Chandni Verma')
@@ -409,6 +416,39 @@ it('keeps the screen shut to somebody who has neither raised anything nor been g
         $this->actingAs(whoIsAtMeridian('anjali'));
 
         expect(CaseResource::canAccess())->toBeTrue();
+    });
+});
+
+it('keeps a leaver out of their own exit, even one they raised themselves', function () {
+    TenantContext::run($this->meridian, function () {
+        $deepak = whoIsAtMeridian('deepak');
+        $engine = new CaseEngine;
+
+        $engine->cancel(
+            ProcessCase::query()->where('subject_user_id', $deepak->getKey())->sole(),
+            whoIsAtMeridian('chandni'),
+            'Withdrew the resignation',
+        );
+
+        // Raised by Deepak himself, which would make it his to read if raising were enough.
+        $his = $engine->open(
+            ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole(),
+            $deepak,
+            $deepak,
+            now()->addDays(30)->toDateString(),
+            'resignation',
+        );
+
+        $this->actingAs($deepak);
+
+        // Told it started and when it ends, never what each department said in between:
+        // not on its own address, not on the list, and not even the list itself.
+        expect($deepak->can('view', $his))->toBeFalse()
+            ->and(CaseResource::getEloquentQuery()->count())->toBe(0)
+            ->and(CaseResource::canAccess())->toBeFalse();
+
+        // Rakesh, his HR head, still reads it.
+        expect(whoIsAtMeridian('rakesh')->can('view', $his))->toBeTrue();
     });
 });
 

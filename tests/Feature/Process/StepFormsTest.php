@@ -210,12 +210,13 @@ it('refuses an answer to a question the step does not ask', function () {
         // the finance clearance behind her and the exit would close as though finance had
         // cleared it.
         expect(fn () => (new CaseEngine)->decide(
-            $anjalis, 1, 'approved', $priya, ['imprest_card_returned' => true],
+            $anjalis, 2, 'approved', $priya, ['imprest_card_returned' => true],
         ))->toThrow(ProcessRefused::class, 'does not ask imprest_card_returned');
 
-        // And nothing was written on the way to being refused.
+        // And nothing was written on the way to being refused. Her manager's approval is
+        // the only thing ever answered on it.
         expect(CaseStep::query()->where('case_id', $anjalis->getKey())
-            ->whereNotNull('acted_at')->count())->toBe(0);
+            ->whereNotNull('acted_at')->where('sequence', '>', 1)->count())->toBe(0);
     });
 });
 
@@ -231,19 +232,19 @@ it('stores what was answered against the step that asked it', function () {
 
         // HR clears it first, so the finance clearance is actually Chandni's turn.
         $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
-        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+        (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, ['id_card_returned' => true]);
 
         // The imprest card did not come back, which is what makes finance's other two
         // questions asked at all — the demo form does not ask what to recover from
         // somebody who returned the card.
         Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '0')
-            ->set("answers.{$anjalis->getKey()}.2.recover_from_them", '2500.50')
-            ->set("answers.{$anjalis->getKey()}.2.recovery_reason", 'advance')
-            ->call('decide', $anjalis->getKey(), 2, 'approved')
+            ->set("answers.{$anjalis->getKey()}.3.imprest_card_returned", '0')
+            ->set("answers.{$anjalis->getKey()}.3.recover_from_them", '2500.50')
+            ->set("answers.{$anjalis->getKey()}.3.recovery_reason", 'advance')
+            ->call('decide', $anjalis->getKey(), 3, 'approved')
             ->assertHasNoErrors();
 
-        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)->sole();
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 3)->sole();
 
         // Postgres sorts a jsonb object's keys, so this is compared as a map and not as
         // the text it was written as.
@@ -285,8 +286,8 @@ it('shows the client own questions on the card, in their own words', function ()
             ->assertSee('fi-fo-textarea', escape: false);
 
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '1')
-            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->set("answers.{$anjalis->getKey()}.2.id_card_returned", '1')
+            ->call('decide', $anjalis->getKey(), 2, 'approved')
             ->assertHasNoErrors();
 
         // The same screen, the same code, a different set of questions — which is the
@@ -312,16 +313,16 @@ it('will not let a required question be left out of the request', function () {
 
         $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+        (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, ['id_card_returned' => true]);
 
         // Nothing sent at all for the one question finance has to answer. The browser is
         // the half of this an employee controls, so the refusal is on the server.
         Livewire::actingAs($chandni)->test(MyQueue::class)
-            ->call('decide', $anjalis->getKey(), 2, 'approved')
-            ->assertHasErrors("answers.{$anjalis->getKey()}.2.imprest_card_returned");
+            ->call('decide', $anjalis->getKey(), 3, 'approved')
+            ->assertHasErrors("answers.{$anjalis->getKey()}.3.imprest_card_returned");
 
         // And the step is still waiting, rather than approved with a hole in it.
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 3)
             ->whereNotNull('acted_at')->count())->toBe(0);
     });
 });
@@ -354,12 +355,12 @@ it('refuses a clearance with a required question empty, screen or no screen', fu
         // Nothing at all handed over for the one question HR has to answer, and no screen
         // in the way. The refusal names the question in the client's own words, because
         // the person reading it is the one who has to fix it.
-        expect(fn () => (new CaseEngine)->decide($anjalis, 1, 'approved', $priya))
+        expect(fn () => (new CaseEngine)->decide($anjalis, 2, 'approved', $priya))
             ->toThrow(ProcessRefused::class, 'ID card returned');
 
         // Half an answer is refused the same way: HR says the card came back, which is
         // what makes the photograph asked for at all, and sends no photograph.
-        expect(fn () => (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, [
+        expect(fn () => (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, [
             'id_card_returned' => true,
             'notice_shortfall_days' => 400,
         ]))->toThrow(ProcessRefused::class, 'Notice period short by (days)');
@@ -367,13 +368,13 @@ it('refuses a clearance with a required question empty, screen or no screen', fu
         // Anjali's exit is exactly where it was: nobody has cleared anything, and it has
         // not closed behind a clearance that never happened.
         expect(CaseStep::query()->where('case_id', $anjalis->getKey())
-            ->whereNotNull('acted_at')->count())->toBe(0)
+            ->whereNotNull('acted_at')->where('sequence', '>', 1)->count())->toBe(0)
             ->and($anjalis->fresh()->closed_at)->toBeNull();
 
         // And the answer that does fit goes through, so this is a check and not a wall.
-        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+        (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, ['id_card_returned' => true]);
 
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
             ->sole()->outcome)->toBe('approved');
     });
 });
@@ -390,7 +391,7 @@ it('lets a clearance be rejected over the very question that is empty', function
         // Rakesh holds HR's clearance on Anjali's exit. He is rejecting it because he
         // cannot say the ID card came back — so demanding that answer would leave the one
         // outcome the situation calls for as the one he cannot record.
-        $rejected = (new CaseEngine)->decide($anjalis, 1, 'rejected', $rakesh, [], 'Card never came back.');
+        $rejected = (new CaseEngine)->decide($anjalis, 2, 'rejected', $rakesh, [], 'Card never came back.');
 
         expect($rejected->outcome)->toBe('rejected')
             ->and($anjalis->fresh()->state)->toBe(ProcessCase::Closed);
@@ -399,7 +400,7 @@ it('lets a clearance be rejected over the very question that is empty', function
         // two ways a step is not finished, and neither demands the form either. Both get
         // their screen and their walk-through in module 05's step 6.
         $step = ProcessStep::query()->whereRelation('template', 'key', 'exit')
-            ->where('sequence', 2)->sole();
+            ->where('sequence', 3)->sole();
 
         expect((new StepForm)->rules($step, [], finishingTheStep: false))
             ->toHaveKey('imprest_card_returned')
@@ -418,13 +419,13 @@ it('holds a rejection to the limits the client wrote on the question', function 
         $chandni = User::query()->where('work_email', 'chandni@meridian.test')->sole();
         $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+        (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, ['id_card_returned' => true]);
 
         // Chandni is rejecting finance's clearance, so nothing is required of her. What is
         // still refused is a recovery of minus two and a half thousand rupees, which is a
         // payable and has its own line on the settlement statement. A figure that cannot
         // be right is not made right by the step ending badly.
-        expect(fn () => (new CaseEngine)->decide($anjalis, 2, 'rejected', $chandni, [
+        expect(fn () => (new CaseEngine)->decide($anjalis, 3, 'rejected', $chandni, [
             'imprest_card_returned' => false,
             'recover_from_them' => -2500,
         ], 'Figures do not add up.'))->toThrow(ProcessRefused::class, 'Amount to recover from them');
@@ -468,10 +469,10 @@ it('lets the queue screen reject a step whose required box is empty', function (
         // that used to demand a full form whatever the button said. Rakesh could not
         // reject the clearance whose empty box was his reason for rejecting it.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->call('decide', $anjalis->getKey(), 1, 'rejected')
+            ->call('decide', $anjalis->getKey(), 2, 'rejected')
             ->assertHasNoErrors();
 
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
             ->sole()->outcome)->toBe('rejected');
     });
 });
@@ -489,21 +490,21 @@ it('puts the refusal under the box when a yes or no is left unanswered', functio
         // empty box, not a "no" — and it has to be refused under the box he has to fill in,
         // not in a sentence across the top of the page about a box with no mark on it.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '')
-            ->call('decide', $anjalis->getKey(), 1, 'approved')
-            ->assertHasErrors("answers.{$anjalis->getKey()}.1.id_card_returned");
+            ->set("answers.{$anjalis->getKey()}.2.id_card_returned", '')
+            ->call('decide', $anjalis->getKey(), 2, 'approved')
+            ->assertHasErrors("answers.{$anjalis->getKey()}.2.id_card_returned");
 
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
             ->whereNotNull('acted_at')->count())->toBe(0);
 
         // And an explicit "no" is a real answer, which is the reason the empty one cannot
         // simply be treated as one.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '0')
-            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->set("answers.{$anjalis->getKey()}.2.id_card_returned", '0')
+            ->call('decide', $anjalis->getKey(), 2, 'approved')
             ->assertHasNoErrors();
 
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
             ->sole()->payload)->toEqual(['id_card_returned' => '0']);
     });
 });
@@ -618,13 +619,13 @@ it('records a question left blank as unanswered rather than as an empty answer',
         // Rakesh answers the one question HR has to answer and leaves the other two boxes
         // as he found them — the shortfall in days, and the remarks.
         Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '1')
-            ->set("answers.{$anjalis->getKey()}.1.notice_shortfall_days", '')
-            ->set("answers.{$anjalis->getKey()}.1.remarks", '')
-            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->set("answers.{$anjalis->getKey()}.2.id_card_returned", '1')
+            ->set("answers.{$anjalis->getKey()}.2.notice_shortfall_days", '')
+            ->set("answers.{$anjalis->getKey()}.2.remarks", '')
+            ->call('decide', $anjalis->getKey(), 2, 'approved')
             ->assertHasNoErrors();
 
-        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)->sole();
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)->sole();
 
         // Only the answer he gave. An empty box stored as an answer is read as an answer
         // by every later step: one that opens when the shortfall was answered at all would
@@ -649,15 +650,15 @@ it('keeps what somebody typed when the engine refuses what they pressed', functi
         // the boxes underneath it would make Rakesh type the whole clearance again to read
         // the same sentence.
         $screen = Livewire::actingAs($rakesh)->test(MyQueue::class)
-            ->set("answers.{$anjalis->getKey()}.1.id_card_returned", '1')
-            ->set("answers.{$anjalis->getKey()}.1.remarks", 'Card handed to the Pune office.')
-            ->call('decide', $anjalis->getKey(), 1, 'sent_back');
+            ->set("answers.{$anjalis->getKey()}.2.id_card_returned", '1')
+            ->set("answers.{$anjalis->getKey()}.2.remarks", 'Card handed to the Pune office.')
+            ->call('decide', $anjalis->getKey(), 2, 'sent_back');
 
-        $screen->assertSet("answers.{$anjalis->getKey()}.1.remarks", 'Card handed to the Pune office.')
-            ->assertSet("answers.{$anjalis->getKey()}.1.id_card_returned", '1');
+        $screen->assertSet("answers.{$anjalis->getKey()}.2.remarks", 'Card handed to the Pune office.')
+            ->assertSet("answers.{$anjalis->getKey()}.2.id_card_returned", '1');
 
         // And nothing was recorded on the way to being refused.
-        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)
+        expect(CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)
             ->whereNotNull('acted_at')->count())->toBe(0);
     });
 });
@@ -785,7 +786,7 @@ it('asks finance what to recover only once it says the card did not come back', 
 
         // HR clears it first, so the finance clearance is Chandni's turn.
         $priya = User::query()->where('work_email', 'priya@meridian.test')->sole();
-        (new CaseEngine)->decide($anjalis, 1, 'approved', $priya, ['id_card_returned' => true]);
+        (new CaseEngine)->decide($anjalis, 2, 'approved', $priya, ['id_card_returned' => true]);
 
         $screen = Livewire::actingAs($chandni)->test(MyQueue::class)
             ->assertSee('Imprest card returned')
@@ -797,30 +798,30 @@ it('asks finance what to recover only once it says the card did not come back', 
             // Livewire's own default is to send nothing until a button is pressed. A
             // Filament component that quietly dropped the attribute would look identical
             // from here.
-            ->assertSee('wire:model.live="answers.'.$anjalis->getKey().'.2.imprest_card_returned"', escape: false)
-            ->assertSee('wire:model.live.blur="answers.'.$anjalis->getKey().'.2.pay_to_them"', escape: false);
+            ->assertSee('wire:model.live="answers.'.$anjalis->getKey().'.3.imprest_card_returned"', escape: false)
+            ->assertSee('wire:model.live.blur="answers.'.$anjalis->getKey().'.3.pay_to_them"', escape: false);
 
         // She says it did not come back. This is the whole thing Ankit can watch happen on
         // the card: one answer, two more questions.
-        $screen->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '0')
+        $screen->set("answers.{$anjalis->getKey()}.3.imprest_card_returned", '0')
             ->assertSee('Amount to recover from them')
             ->assertDontSee('What the recovery is for');
 
         // A figure, and the reason for it is asked as well.
-        $screen->set("answers.{$anjalis->getKey()}.2.recover_from_them", '2500')
+        $screen->set("answers.{$anjalis->getKey()}.3.recover_from_them", '2500')
             ->assertSee('What the recovery is for')
             ->assertSee('Imprest not settled');
 
         // And back again — she was wrong, the card is on her desk. Both questions go.
-        $screen->set("answers.{$anjalis->getKey()}.2.imprest_card_returned", '1')
+        $screen->set("answers.{$anjalis->getKey()}.3.imprest_card_returned", '1')
             ->assertDontSee('Amount to recover from them')
             ->assertDontSee('What the recovery is for');
 
         // The figure she typed is not stored against the clearance, even though it is still
         // held on the page.
-        $screen->call('decide', $anjalis->getKey(), 2, 'approved')->assertHasNoErrors();
+        $screen->call('decide', $anjalis->getKey(), 3, 'approved')->assertHasNoErrors();
 
-        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)->sole();
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 3)->sole();
 
         expect((array) $answered->payload)->toEqual(['imprest_card_returned' => '1']);
     });
@@ -1147,13 +1148,13 @@ it('lets HR attach the photograph of a returned card, on the card Ankit opens', 
         $screen = Livewire::actingAs($rakesh)->test(MyQueue::class)
             ->assertDontSee('Photo or scan of the returned card');
 
-        $screen->set("answers.{$anjalis->getKey()}.1.id_card_returned", '1')
+        $screen->set("answers.{$anjalis->getKey()}.2.id_card_returned", '1')
             ->assertSee('Photo or scan of the returned card')
             // The half a `set` in a test cannot prove: what the browser is handed really is
             // a file box, and it really is bound to this answer. Without either, nothing
             // uploads in a browser and every assertion below still passes.
             ->assertSee('type="file"', escape: false)
-            ->assertSee('wire:model="answers.'.$anjalis->getKey().'.1.id_card_photo"', escape: false)
+            ->assertSee('wire:model="answers.'.$anjalis->getKey().'.2.id_card_photo"', escape: false)
             ->assertDontSee('Choose a different file');
 
         // And that what stands on the screen in the file box's place is a label carrying
@@ -1165,7 +1166,7 @@ it('lets HR attach the photograph of a returned card, on the card Ankit opens', 
         expect($screen->html())->toMatch(
             // The box's id is built from where its answer lives on the page, which is what
             // lets one partial serve the queue and the screen a request is raised from.
-            '/<label\s[^>]*class="fi-btn[^"]*" for="q-answers-'.$anjalis->getKey().'-1-id_card_photo"/',
+            '/<label\s[^>]*class="fi-btn[^"]*" for="q-answers-'.$anjalis->getKey().'-2-id_card_photo"/',
         );
 
         // And the step the browser actually takes first, which handing the page a file
@@ -1174,13 +1175,13 @@ it('lets HR attach the photograph of a returned card, on the card Ankit opens', 
         // around it still passes while nothing works in a browser.
         $screen->call(
             '_startUpload',
-            "answers.{$anjalis->getKey()}.1.id_card_photo",
+            "answers.{$anjalis->getKey()}.2.id_card_photo",
             [['name' => 'anjali-card.jpg', 'size' => 40 * 1024, 'type' => 'image/jpeg']],
             false,
         )->assertHasNoErrors();
 
         $screen->set(
-            "answers.{$anjalis->getKey()}.1.id_card_photo",
+            "answers.{$anjalis->getKey()}.2.id_card_photo",
             UploadedFile::fake()->create('anjali-card.jpg', 40, 'image/jpeg'),
         )
             // The real file box is off the screen, and this page redraws on every answer
@@ -1188,10 +1189,10 @@ it('lets HR attach the photograph of a returned card, on the card Ankit opens', 
             // nothing tells an attached document apart from none.
             ->assertSee('anjali-card.jpg')
             ->assertSee('Choose a different file')
-            ->call('decide', $anjalis->getKey(), 1, 'approved')
+            ->call('decide', $anjalis->getKey(), 2, 'approved')
             ->assertHasNoErrors();
 
-        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 1)->sole();
+        $answered = CaseStep::query()->where('case_id', $anjalis->getKey())->where('sequence', 2)->sole();
 
         $document = ((array) $answered->payload)['id_card_photo'];
 

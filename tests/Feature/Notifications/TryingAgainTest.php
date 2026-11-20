@@ -61,6 +61,7 @@ function retryExitOf(string $first): ProcessCase
     return ProcessCase::query()
         ->whereRelation('subject', 'work_email', $first.'@meridian.test')
         ->whereRelation('template', 'key', 'exit')
+        ->whereNull('cancelled_at')
         ->orderBy('id')
         ->firstOrFail();
 }
@@ -245,7 +246,7 @@ it('stops trying a message about a step once the step is answered, and keeps try
         // Priya clears HR, which tells Chandni her request moved on. That news names the step
         // just answered, and is about the case as a whole.
         test()->travelTo(retryOnClock('2026-11-17 09:02'));
-        (new CaseEngine)->decide($deepaks, 1, 'approved', retryColleague('priya'), ['id_card_returned' => true]);
+        (new CaseEngine)->decide($deepaks, 2, 'approved', retryColleague('priya'), ['id_card_returned' => true]);
 
         $movedOn = NotificationDelivery::query()
             ->where('case_id', $deepaks->getKey())
@@ -293,7 +294,7 @@ it('never tells anybody that a notice of a message not arriving did not arrive e
 
 it('tells nobody when the person a case is about raised it themselves', function () {
     TenantContext::run($this->meridian, function () {
-        // Everybody at work, so whoever HR clearance is waiting on is refused "your turn".
+        // Everybody at work, so whoever the first step is waiting on is refused "your turn".
         retryRefusing(...array_map(fn (string $first) => $first.'@meridian.test', ['chandni', 'rakesh', 'priya', 'deepak', 'anjali']));
 
         $rohits = (new CaseEngine)->open(
@@ -397,14 +398,23 @@ it('shows a link with nowhere to go as could not be sent, tells whoever raised t
     TenantContext::run($this->meridian, function () {
         $chandni = retryColleague('chandni');
         $deepak = retryColleague('deepak');
-        $deepaks = retryExitOf('deepak');
         $engine = new CaseEngine;
+
+        // His seeded exit is withdrawn and Chandni raises a fresh one, so the link goes out
+        // the moment Rakesh accepts it. The raise screen will not open an exit without a
+        // personal email; this is an address that went missing afterwards.
+        $engine->cancel(retryExitOf('deepak'), $chandni, 'Withdrew the resignation');
+        $deepaks = $engine->open(
+            ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole(),
+            $deepak, $chandni, '2026-12-11', 'resignation',
+        );
+
+        // Opening it told Deepak it had started, at the address he still had then.
+        Mail::mailer()->getSymfonyTransport()->flush();
 
         $deepak->update(['personal_email' => null]);
 
-        $engine->decide($deepaks, 1, 'approved', retryColleague('priya'), ['id_card_returned' => true]);
-        $engine->decide($deepaks, 2, 'approved', $chandni, ['imprest_card_returned' => true]);
-        $engine->decide($deepaks, 3, 'approved', retryColleague('rakesh'));
+        $engine->decide($deepaks, 1, 'approved', retryColleague('rakesh'));
 
         $link = NotificationDelivery::query()->where('case_id', $deepaks->getKey())
             ->where('template_key', TemplateCatalogue::LinkToAnswerAStep)->sole();

@@ -210,12 +210,14 @@ class MeridianSeeder extends Seeder
             'priya' => $priya,
             'deepak' => $this->person('Deepak Iyer', $units['shimla'], $offices['shimla'], $officer, $rakesh),
             'anjali' => $this->person('Anjali Rao', $units['shimla'], $offices['shimla'], $officer, $rakesh),
-            'rohit' => $this->person('Rohit Menon', $units['pune'], $offices['pune'], $officer, $chandni),
+            // On a fixed-term contract, so his exit shows the gratuity rule the Code has for
+            // a contract that simply ends.
+            'rohit' => $this->person('Rohit Menon', $units['pune'], $offices['pune'], $officer, $chandni, 'contract'),
         ];
     }
 
     /** Somebody with an address they can sign in with and a dated job row. */
-    private function person(string $name, OrgUnit $unit, Office $office, Designation $designation, ?User $manager = null): User
+    private function person(string $name, OrgUnit $unit, Office $office, Designation $designation, ?User $manager = null, string $type = 'permanent'): User
     {
         [$first] = explode(' ', $name, 2);
 
@@ -232,7 +234,7 @@ class MeridianSeeder extends Seeder
             ]);
 
         $row = EmploymentRecord::factory()->forPerson($person)->in($unit)->basedAt($office)
-            ->designated($designation);
+            ->designated($designation)->state(['employment_type' => $type]);
 
         $manager === null ? $row->create() : $row->reportingTo($manager)->create();
 
@@ -300,20 +302,29 @@ class MeridianSeeder extends Seeder
     }
 
     /**
-     * A four-step exit: HR clears it, then finance, then the leaver's own manager signs it
-     * off, and last the leaver themselves confirms the handover. Four groups rather than
-     * one so that a later step can be watched staying out of everybody's list until the
-     * step in front of it closes.
+     * The exit Meridian really runs: the leaver's manager accepts it, every clearance runs
+     * at once, and HR checks the whole thing last.
+     *
+     * **The clearances are one group**, so HR, finance and the leaver's own confirmation
+     * all open the moment the manager approves — usually on the day the person resigns,
+     * which gives every department the whole notice period. HR's final check is the group
+     * after, so it cannot open while any one of them is still outstanding. How many
+     * clearances there are is the number of rows written here; Vertex writes seven.
+     *
+     * **Raising it answers no step.** The leaver may raise their own, and nobody answers a
+     * step on their own case, so the first step is the manager's.
      *
      * **Every step an employee answers says where it goes when it runs late,** which is
-     * the HR director over the whole company. It is on all three even though no client
-     * asked for it: a process without it is an email chain with extra steps, and the
-     * escalation is only visible at all on a step that has actually gone past its target.
+     * the HR director over the whole company. A process without it is an email chain with
+     * extra steps, and the escalation is only visible on a step that has gone past its
+     * target.
      *
-     * The last step is answered by somebody with no account, at their personal address,
-     * because by then their sign-in is gone. It says nothing about running late on
-     * purpose — the only permission on such a step is the link sent to that address, so
-     * widening it to an employee would name people who would then be refused.
+     * The leaver's confirmation is answered through a link to their personal address, the
+     * only way a leaver answers anything on their own exit. Sent as the clearances open, it
+     * is also the first proof the address on file still works, while they are still here
+     * to correct it. It says nothing about running late on purpose — the only permission
+     * on such a step is the link, so widening it to an employee would name people who
+     * would then be refused.
      */
     private function exitProcess(): ProcessTemplate
     {
@@ -321,7 +332,11 @@ class MeridianSeeder extends Seeder
 
         $lateItGoesTo = ['kind' => 'role_global', 'role' => 'hr_director'];
 
-        ProcessStep::factory()->of($exit)->at(1, 1)->named('HR clearance')
+        ProcessStep::factory()->of($exit)->at(1, 1)->named('Manager approval')
+            ->offering('approved', 'rejected')->dueIn(48)->escalatingTo($lateItGoesTo)
+            ->state(['assignee_rule' => ['kind' => 'reporting_manager']])->create();
+
+        ProcessStep::factory()->of($exit)->at(2, 2)->named('HR clearance')
             ->asking($this->hrClearanceForm())
             ->heldByTheRole('hr_head')->offering('approved', 'rejected')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
@@ -330,18 +345,18 @@ class MeridianSeeder extends Seeder
         // hold exists for: money is still being argued about, so neither approving nor
         // rejecting is honest yet. Chandni holds it with a figure to recover, the clock
         // keeps running, and she answers it properly once the imprest card turns up.
-        ProcessStep::factory()->of($exit)->at(2, 2)->named('Finance clearance')
+        ProcessStep::factory()->of($exit)->at(3, 2)->named('Finance clearance')
             ->asking($this->financeClearanceForm())
             ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'rejected', 'held')->dueIn(48)
             ->escalatingTo($lateItGoesTo)->create();
 
-        ProcessStep::factory()->of($exit)->at(3, 3)->named('Manager sign-off')
-            ->offering('approved')->dueIn(24)->escalatingTo($lateItGoesTo)
-            ->state(['assignee_rule' => ['kind' => 'reporting_manager']])->create();
-
-        ProcessStep::factory()->of($exit)->at(4, 4)->named('Leaver confirms the handover')
+        ProcessStep::factory()->of($exit)->at(4, 2)->named('Leaver confirms the handover')
             ->asking($this->handoverConfirmationForm())
             ->external()->offering('approved', 'rejected')->dueIn(72)->create();
+
+        ProcessStep::factory()->of($exit)->at(5, 3)->named('HR final check')
+            ->heldByTheRole('hr_head')->offering('approved')->dueIn(24)
+            ->escalatingTo($lateItGoesTo)->create();
 
         $exit->publish();
 
@@ -451,62 +466,83 @@ class MeridianSeeder extends Seeder
     }
 
     /**
-     * Three exits already running, each one's first step belonging to somebody different
-     * so that no single sign-in shows the whole picture.
+     * Three exits already running, each with a real last working day and so both legal
+     * deadlines on it.
      *
-     * Anjali's is opened far enough back that its first step has already blown its
-     * deadline, which is what puts the overdue marking on the queue screen where it can
-     * be seen rather than taken on trust.
+     * Each is past its manager's approval and into its clearances — Rakesh accepted
+     * Anjali's and Deepak's, Chandni accepted Rohit's — and no single sign-in shows the whole
+     * picture. Anjali's was accepted far enough back that her clearances have already blown
+     * their deadline, which is what puts the overdue marking on the queue screen where it
+     * can be seen rather than taken on trust. An exit waiting on its manager is what the
+     * raise screen makes.
+     *
+     * Rohit is on a fixed-term contract that is simply ending, so his is the one exit with
+     * a gratuity deadline despite barely two years' service — the Code waives the years for
+     * exactly that ending. The other three are resignations short of five years, and owe
+     * none.
+     *
+     * The dates count from today, so the deadlines on screen are always ahead whenever the
+     * demo is rebuilt.
      *
      * @param  array<string, User>  $people
      */
     private function casesAlreadyRunning(ProcessTemplate $exit, array $people): void
     {
         $engine = new CaseEngine;
+        $inDays = fn (int $days): string => now()->addDays($days)->toDateString();
 
-        $anjalis = $engine->open($exit, $people['anjali'], $people['chandni']);
+        $anjalis = $engine->open($exit, $people['anjali'], $people['chandni'], $inDays(30), 'resignation');
+        $engine->decide($anjalis, 1, 'approved', $people['rakesh']);
 
         // Backdated after the fact rather than opened in the past, because the engine
-        // stamps the moment a case opens and a step's own clock counts from it. Five days
-        // against a two-day target is what puts a real overdue marker on the queue screen
-        // instead of asking anybody to believe one would appear.
+        // stamps the moment a case opens and its clearances' clocks count from the moment
+        // her manager approved it. Five days against a two-day target is what puts a real
+        // overdue marker on the queue screen instead of asking anybody to believe one would
+        // appear.
         $anjalis->forceFill(['opened_at' => now()->subDays(5)])->save();
-        $engine->open($exit, $people['deepak'], $people['chandni']);
-        $engine->open($exit, $people['rohit'], $people['chandni']);
+        $anjalis->steps()->where('sequence', 1)->sole()->forceFill(['acted_at' => now()->subDays(5)])->save();
 
-        $this->rakeshsExitWaitingOnHisOwnAnswer($engine, $exit, $people);
+        // Rakesh, his manager, has accepted Deepak's, so HR and finance are clearing it.
+        $deepaks = $engine->open($exit, $people['deepak'], $people['chandni'], $inDays(21), 'resignation');
+        $engine->decide($deepaks, 1, 'approved', $people['rakesh']);
+
+        // Chandni, his manager, has accepted Rohit's, so its clearances are open — and
+        // nobody holds HR head over Pune, so his HR clearance falls to the stand-in with a
+        // warning on the case, where the vacant path can be watched.
+        $rohits = $engine->open($exit, $people['rohit'], $people['chandni'], $inDays(14), 'fixed_term_ended');
+        $engine->decide($rohits, 1, 'approved', $people['chandni']);
+
+        $this->rakeshsExitWaitingOnHisOwnAnswer($engine, $exit, $people, $inDays(7));
     }
 
     /**
      * A fourth exit, Rakesh's, already cleared by everybody who works here and waiting on
      * the one person who does not: Rakesh himself, at his personal address, through a link.
+     * HR's final check waits behind it.
      *
-     * Driven forward by actually deciding the three steps as the people who hold them,
-     * rather than by writing rows — so the state it leaves behind is a state the engine
-     * can produce, and the link goes out the way it does for any client: the moment the
-     * step opens.
+     * Driven forward by actually deciding the steps as the people who hold them, rather
+     * than by writing rows — so the state it leaves behind is a state the engine can
+     * produce, and the link goes out the way it does for any client: the moment the
+     * clearances open.
      *
-     * It appears in nobody's queue, which is the point of it: a step answered by somebody
-     * with no account has no resolved set at all, so the whole company can see the exit is
-     * waiting and not one of them can answer it.
+     * Nobody can answer the step it is waiting on, which is the point of it: a step
+     * answered by somebody with no account has no resolved set at all, so the whole company
+     * can see the exit is waiting and not one of them can answer it.
      *
      * @param  array<string, User>  $people
      */
-    private function rakeshsExitWaitingOnHisOwnAnswer(CaseEngine $engine, ProcessTemplate $exit, array $people): void
+    private function rakeshsExitWaitingOnHisOwnAnswer(CaseEngine $engine, ProcessTemplate $exit, array $people, string $lastWorkingDay): void
     {
-        $rakeshs = $engine->open($exit, $people['rakesh'], $people['chandni']);
+        $rakeshs = $engine->open($exit, $people['rakesh'], $people['chandni'], $lastWorkingDay, 'resignation');
+
+        // His manager accepts it, which opens every clearance and sends him the link.
+        $engine->decide($rakeshs, 1, 'approved', $people['chandni']);
 
         // Priya, because Rakesh holds HR head over Shimla himself and can never clear his
-        // own exit. Then finance, then his own manager.
-        //
-        // Each clearance is answered, not merely approved. Until the engine applied a
-        // form's rules these three went through with every box empty, which is a demo
-        // showing two clearances that were never actually given — and the manager's
-        // sign-off asks nothing at all, so it still passes nothing.
-        $engine->decide($rakeshs, 1, 'approved', $people['priya'], ['id_card_returned' => true]);
-        $engine->decide($rakeshs, 2, 'approved', $people['chandni'], ['imprest_card_returned' => true]);
-        // His sign-off sends him the link: the step is his turn the moment it opens.
-        $engine->decide($rakeshs, 3, 'approved', $people['chandni']);
+        // own exit. Then finance. Each clearance is answered, not merely approved — a demo
+        // with the boxes empty would show clearances that were never actually given.
+        $engine->decide($rakeshs, 2, 'approved', $people['priya'], ['id_card_returned' => true]);
+        $engine->decide($rakeshs, 3, 'approved', $people['chandni'], ['imprest_card_returned' => true]);
 
         $this->command?->info('Rakesh has to confirm his own handover, and has no login. His link is in Mailpit, at localhost:8025.');
     }

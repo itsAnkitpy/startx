@@ -29,9 +29,10 @@ use Livewire\Livewire;
 | Chasing a late step: the one scheduled pass, and the button on a case.
 |
 | Run against the demo company seeded at nine on Monday 16 November 2026, India's clock, so
-| every time below is a time somebody at Meridian would read. Deepak's exit opens then, and
-| its HR clearance — Rakesh's and Priya's, two working days — is half gone at nine on
-| Tuesday, three-quarters gone at nine that evening, and due at nine on Wednesday.
+| every time below is a time somebody at Meridian would read. Deepak's exit opens then and
+| Rakesh accepts it at once, so its HR clearance — Rakesh's and Priya's, two working days —
+| is half gone at nine on Tuesday, three-quarters gone at nine that evening, and due at nine
+| on Wednesday. Finance's clearance, Chandni's, runs beside it on the same clock.
 */
 
 beforeEach(function () {
@@ -104,6 +105,10 @@ it('reminds a clearance nobody has opened, twice, then tells whoever is above it
         $exit = meridianExitOf('deepak');
         $number = '#'.$exit->number;
 
+        // Finance clears straight away, so what is left to chase is HR's.
+        (new CaseEngine)->decide($exit, 3, 'approved', meridianColleague('chandni'), ['imprest_card_returned' => true]);
+        chasesThatLeft();
+
         $this->travelTo(onMeridiansClock('2026-11-17 08:59'));
         chaseLateSteps();
         expect(chasesThatLeft($exit))->toBe([]);
@@ -131,18 +136,27 @@ it('reminds a clearance nobody has opened, twice, then tells whoever is above it
         chaseLateSteps();
         expect(chasesThatLeft($exit))->toBe([]);
 
-        expect(CaseStep::query()->where('case_id', $exit->getKey())->where('sequence', 1)->exists())->toBeFalse()
-            ->and(NotificationDelivery::query()->where('case_id', $exit->getKey())->where('step_sequence', 1)->count())->toBe(5);
+        expect(CaseStep::query()->where('case_id', $exit->getKey())->where('sequence', 2)->exists())->toBeFalse()
+            ->and(NotificationDelivery::query()->where('case_id', $exit->getKey())->where('step_sequence', 2)
+                ->where('template_key', '!=', TemplateCatalogue::StepAvailableHolder)->count())->toBe(5);
     });
 });
 
 it('measures a step from when it became available, not from when the case opened', function () {
     TenantContext::run($this->meridian, function () {
-        $exit = meridianExitOf('deepak');
+        // Deepak's seeded exit is withdrawn and he resigns again at nine. Rakesh accepts it
+        // at three in the afternoon, so the clearances' two working days start then.
+        $deepak = meridianColleague('deepak');
+        $chandni = meridianColleague('chandni');
+        (new CaseEngine)->cancel(meridianExitOf('deepak'), $chandni, 'Withdrew the resignation');
 
-        // HR clears it at three on Monday afternoon, so finance's two working days start then.
+        $exit = (new CaseEngine)->open(
+            ProcessTemplate::query()->where('key', 'exit')->where('status', ProcessTemplate::Published)->sole(),
+            $deepak, $chandni, '2026-12-11', 'resignation',
+        );
+
         $this->travelTo(onMeridiansClock('2026-11-16 15:00'));
-        (new CaseEngine)->decide($exit, 1, 'approved', meridianColleague('priya'), ['id_card_returned' => true]);
+        (new CaseEngine)->decide($exit, 1, 'approved', meridianColleague('rakesh'));
         chasesThatLeft();
 
         $this->travelTo(onMeridiansClock('2026-11-17 14:59'));
@@ -151,7 +165,11 @@ it('measures a step from when it became available, not from when the case opened
 
         $this->travelTo(onMeridiansClock('2026-11-17 15:00'));
         chaseLateSteps();
-        expect(chasesThatLeft($exit))->toBe(['chandni@meridian.test — Second ask: Finance clearance on #'.$exit->number]);
+        expect(chasesThatLeft($exit))->toEqualCanonicalizing([
+            'rakesh@meridian.test — Second ask: HR clearance on #'.$exit->number,
+            'priya@meridian.test — Second ask: HR clearance on #'.$exit->number,
+            'chandni@meridian.test — Second ask: Finance clearance on #'.$exit->number,
+        ]);
     });
 });
 
@@ -171,8 +189,9 @@ it('chases whoever is covering for somebody away, says whose work it is, and lea
         chaseLateSteps();
 
         expect(lastChaseTo('rohit@meridian.test'))->toContain("is still open, on Rakesh Menon's behalf while you are covering for them and is due by");
+        // And Chandni for finance, which is hers and nobody is covering.
         expect(collect(chasesThatLeft($exit))->map(fn (string $sent) => strstr($sent, ' — ', true))->all())
-            ->toEqualCanonicalizing(['rohit@meridian.test', 'priya@meridian.test']);
+            ->toEqualCanonicalizing(['rohit@meridian.test', 'priya@meridian.test', 'chandni@meridian.test']);
     });
 });
 
@@ -181,9 +200,9 @@ it('holds a reminder to the next working day at the recipient own office, and se
         $exit = meridianExitOf('deepak');
 
         // Finance is Chandni's, in Pune. Deepak's exit counts against Shimla, which works
-        // on Tuesday; Pune does not.
+        // on Tuesday; Pune does not. HR clears at ten, so finance is what is left.
         $this->travelTo(onMeridiansClock('2026-11-16 10:00'));
-        (new CaseEngine)->decide($exit, 1, 'approved', meridianColleague('priya'), ['id_card_returned' => true]);
+        (new CaseEngine)->decide($exit, 2, 'approved', meridianColleague('priya'), ['id_card_returned' => true]);
         OfficeHoliday::query()->create([
             'office_id' => Office::query()->where('name', 'Pune office')->value('id'),
             'date' => '2026-11-17',
@@ -217,6 +236,8 @@ it('tells whoever is above a step at its deadline even on a day their own office
         $this->travelTo(onMeridiansClock('2026-11-18 09:00'));
         chaseLateSteps();
 
+        // Finance runs out at the same moment, but Chandni holds it and is also whom it
+        // goes to when late, so there is nobody above it to tell.
         expect(chasesThatLeft($exit))->toBe(['chandni@meridian.test — Out of time — HR clearance on #'.$exit->number]);
     });
 });
@@ -228,12 +249,11 @@ it('holds a reminder for somebody with no office against the calendar the case c
         $kavita = User::factory()->named('Kavita Rao')->create(['work_email' => 'kavita@meridian.test']);
         app(Settings::class)->set(AssigneeResolver::StandInSetting, (int) $kavita->getKey());
 
-        // Opened on Thursday morning, so its three-quarter mark is Friday evening and its
-        // deadline Monday morning.
-        ProcessCase::query()->whereKey(meridianExitOf('rohit')->getKey())
-            ->update(['opened_at' => onMeridiansClock('2026-11-12 09:00')->utc()]);
-
+        // Opened and accepted on Thursday morning, so its three-quarter mark is Friday
+        // evening and its deadline Monday morning.
         $rohits = meridianExitOf('rohit');
+        $rohits->update(['opened_at' => onMeridiansClock('2026-11-12 09:00')->utc()]);
+        $rohits->steps()->where('sequence', 1)->sole()->update(['acted_at' => onMeridiansClock('2026-11-12 09:00')->utc()]);
 
         $this->travelTo(onMeridiansClock('2026-11-14 10:00'));
         chaseLateSteps();
@@ -241,7 +261,11 @@ it('holds a reminder for somebody with no office against the calendar the case c
 
         $this->travelTo(onMeridiansClock('2026-11-16 08:00'));
         chaseLateSteps();
-        expect(chasesThatLeft($rohits))->toBe(['kavita@meridian.test — Second ask: HR clearance on #'.$rohits->number]);
+        // Chandni's finance clearance, held the same way to her own office's Monday.
+        expect(chasesThatLeft($rohits))->toEqualCanonicalizing([
+            'kavita@meridian.test — Second ask: HR clearance on #'.$rohits->number,
+            'chandni@meridian.test — Second ask: Finance clearance on #'.$rohits->number,
+        ]);
     });
 });
 
@@ -249,9 +273,10 @@ it('sends one chase, not three, when several fell due while nothing was sending'
     TenantContext::run($this->meridian, function () {
         $exit = meridianExitOf('deepak');
 
+        // One each for HR's two holders and finance's one, not one per stage missed.
         $this->travelTo(onMeridiansClock('2026-11-17 23:00'));
         chaseLateSteps();
-        expect(chasesThatLeft($exit))->toHaveCount(2);
+        expect(chasesThatLeft($exit))->toHaveCount(3);
 
         $this->travelTo(onMeridiansClock('2026-11-17 23:01'));
         chaseLateSteps();
@@ -290,7 +315,7 @@ it('warns about a passed legal deadline on a Sunday, once, by the client own cal
         // is the legal deadline's own day.
         $this->travelTo(onMeridiansClock('2026-11-15 00:30'));
         chaseLateSteps();
-        expect(lastChaseTo('chandni@meridian.test'))->toContain('was due by 14 November 2026 and is not finished. It is waiting on HR clearance.');
+        expect(lastChaseTo('chandni@meridian.test'))->toContain('was due by 14 November 2026 and is not finished. It is waiting on HR clearance, Finance clearance and Leaver confirms the handover.');
         // Chandni raised it; Priya, an administrator, can change settings too.
         expect(chasesThatLeft($exit))->toEqualCanonicalizing([
             'chandni@meridian.test — Past its legal deadline — #'.$exit->number,
@@ -326,10 +351,11 @@ it('counts a step deadline on the client own calendar', function () {
     TenantContext::run($this->meridian, function () {
         // One in the morning on Saturday in India, which is still Friday evening on UTC's
         // calendar. Shimla does not work Saturdays, so the clock starts on Monday.
-        ProcessCase::query()->whereKey(meridianExitOf('deepak')->getKey())
-            ->update(['opened_at' => onMeridiansClock('2026-11-14 01:00')->utc()]);
+        $deepaks = meridianExitOf('deepak');
+        $deepaks->update(['opened_at' => onMeridiansClock('2026-11-14 01:00')->utc()]);
+        $deepaks->steps()->where('sequence', 1)->sole()->update(['acted_at' => onMeridiansClock('2026-11-14 01:00')->utc()]);
 
-        $clearance = (new AvailableSteps)->for(meridianExitOf('deepak'))->sole();
+        $clearance = (new AvailableSteps)->for($deepaks->fresh())->firstWhere(fn ($step) => $step->step->name === 'HR clearance');
 
         expect($clearance->dueAt->equalTo(onMeridiansClock('2026-11-18 00:00')))->toBeTrue();
     });

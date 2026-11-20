@@ -138,11 +138,11 @@ class CaseResource extends Resource
         // with no department must not fall through to her here — the fallback below is for
         // somebody who holds the action *somewhere*, which she does not.
         if ($reachable === []) {
-            return $query->where('initiated_by', $person->getKey());
+            return $query->raisedBy($person);
         }
 
         return $query->where(fn (Builder $cases) => $cases
-            ->where('initiated_by', $person->getKey())
+            ->where(fn (Builder $theirs) => $theirs->raisedBy($person))
             ->orWhereNull('subject_employment_record_id')
             ->orWhereHas(
                 'subjectEmploymentRecord',

@@ -53,7 +53,7 @@ function anjalisExitWithHrsPhotograph(string $called = 'anjali-card.pdf', string
 {
     $anjalis = ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
 
-    (new CaseEngine)->decide($anjalis, 1, 'approved', meridiansStaffCalled('rakesh'), [
+    (new CaseEngine)->decide($anjalis, 2, 'approved', meridiansStaffCalled('rakesh'), [
         'id_card_returned' => '1',
         'id_card_photo' => UploadedFile::fake()->create($called, 40, $type),
     ]);
@@ -75,12 +75,12 @@ it('lets whoever holds a later step open what an earlier one attached', function
             ->assertSee('HR clearance — Photo or scan of the returned card')
             ->assertSee('anjali-card.pdf')
             ->assertSee(
-                'href="/cases/'.$anjalis->getKey().'/documents/1/id_card_photo" target="_blank"',
+                'href="/cases/'.$anjalis->getKey().'/documents/2/id_card_photo" target="_blank"',
                 escape: false,
             );
 
         $opened = $this->actingAs($chandni)
-            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo'));
+            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo'));
 
         $opened->assertOk();
 
@@ -100,7 +100,7 @@ it('still opens a document to whoever attached it, once the case has moved on', 
         // Rakesh's step is done and gone from his queue. The evidence he filed stays
         // readable to him, which is most of the reason for keeping it.
         $this->actingAs(meridiansStaffCalled('rakesh'))
-            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo'))
+            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo'))
             ->assertOk();
     });
 });
@@ -113,7 +113,7 @@ it('refuses a document to anybody with no business with the case', function () {
     TenantContext::run($this->meridian, function () use ($atVertex) {
         $anjalis = anjalisExitWithHrsPhotograph();
 
-        $at = openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo');
+        $at = openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo');
 
         // Deepak works at the same company and holds no step of this exit. An exit
         // clearance document is about a named person and is not company reading.
@@ -129,7 +129,7 @@ it('opens nothing at all to somebody who is not signed in', function () {
         $anjalis = anjalisExitWithHrsPhotograph();
 
         // The ordinary case for an address that has been forwarded or pasted somewhere.
-        $this->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo'))
+        $this->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo'))
             ->assertRedirect();
     });
 });
@@ -151,7 +151,7 @@ it('answers not found for anything on that case that is not a document', functio
 
         // And a case that is not there at all reads the same.
         $this->actingAs($chandni)
-            ->get(openingAtMeridian('cases/99999/documents/1/id_card_photo'))
+            ->get(openingAtMeridian('cases/99999/documents/2/id_card_photo'))
             ->assertNotFound();
     });
 });
@@ -167,7 +167,7 @@ it('hands a Word document over to be saved rather than shown', function () {
         // do nothing. It saves instead, under the name the person gave it rather than the
         // random one it is stored under.
         $this->actingAs(meridiansStaffCalled('chandni'))
-            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo'))
+            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo'))
             ->assertDownload('handover.docx');
     });
 });
@@ -183,7 +183,7 @@ it('reads a document out of the answers, with the words the client asked the que
         expect($found)->toHaveCount(1)
             ->and($found[0]['step'])->toBe('HR clearance')
             ->and($found[0]['label'])->toBe('Photo or scan of the returned card')
-            ->and($found[0]['sequence'])->toBe(1)
+            ->and($found[0]['sequence'])->toBe(2)
             ->and($found[0]['name'])->toBe('anjali-card.pdf');
     });
 });
@@ -205,7 +205,7 @@ it('opens nothing written by hand into a box that asks for words', function () {
         // engine will not write.
         CaseStep::create([
             'case_id' => $anjalis->getKey(),
-            'sequence' => 1,
+            'sequence' => 2,
             'assignee_id' => meridiansStaffCalled('rakesh')->getKey(),
             'outcome' => 'approved',
             'acted_at' => now(),
@@ -218,7 +218,7 @@ it('opens nothing written by hand into a box that asks for words', function () {
         expect((new CaseDocuments)->on($anjalis->refresh()))->toBeEmpty();
 
         $this->actingAs(meridiansStaffCalled('chandni'))
-            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/remarks'))
+            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/remarks'))
             ->assertNotFound();
     });
 });
@@ -231,7 +231,7 @@ it('shows the answer that counts at a step, not one a send-back replaced', funct
         // it. The photograph on it stopped being the answer the moment it was replaced.
         $replaced = CaseStep::create([
             'case_id' => $anjalis->getKey(),
-            'sequence' => 1,
+            'sequence' => 2,
             'assignee_id' => meridiansStaffCalled('rakesh')->getKey(),
             'outcome' => 'approved',
             'acted_at' => now()->subDay(),
@@ -258,7 +258,7 @@ it('shows the answer that counts at a step, not one a send-back replaced', funct
             ->and($found[0]['name'])->toBe('anjali-card.pdf');
 
         $opened = $this->actingAs(meridiansStaffCalled('chandni'))
-            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/1/id_card_photo'));
+            ->get(openingAtMeridian('cases/'.$anjalis->getKey().'/documents/2/id_card_photo'));
 
         $opened->assertOk();
 

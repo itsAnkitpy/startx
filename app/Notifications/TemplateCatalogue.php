@@ -30,16 +30,25 @@ use Illuminate\Support\Collection;
 class TemplateCatalogue
 {
     /**
-     * Sent to the person the case is about. Three of them and only three, settled with
-     * Ankit on 6 September 2026: the opening, any money claimed against them, and the
-     * close. Nothing about the approvals in between, because a departing employee cannot
-     * act on "Finance has your file" and telling them invites an argument.
+     * Sent to the person the case is about. Three of them, settled with Ankit on 6 September
+     * 2026: the opening, any money claimed against them, and the close. Nothing about the
+     * approvals in between, because a departing employee cannot act on "Finance has your
+     * file" and telling them invites an argument.
+     *
+     * **And a fourth since 20 November 2026, the case turned down**, with who turned it down
+     * and why. Module 07 let Deepak raise his own resignation, and one turned down at his
+     * manager's approval had told him it started and never that it stopped. It is the end of
+     * the case rather than an approval in between, which is how Pocket HRMS and Keka treat it
+     * too: Pocket HRMS emails the employee the manager's remarks, and Keka shows the reason on
+     * their profile. It carries no link, because the case's page is not theirs to read.
      */
     public const CaseOpenedSubject = 'case_opened_subject';
 
     public const MoneyClaimedSubject = 'money_claimed_subject';
 
     public const CaseClosedSubject = 'case_closed_subject';
+
+    public const CaseTurnedDownSubject = 'case_turned_down_subject';
 
     /** Sent to whoever raised the case, who today has to go and look for all three. */
     public const CaseMovedInitiator = 'case_moved_initiator';
@@ -159,6 +168,26 @@ class TemplateCatalogue
                     Your {{ process.name }} was completed on {{ case.closed_on }}. Its reference is {{ case.number }}.
 
                     Thank you.
+
+                    {{ company.name }}
+                    TEXT,
+            ],
+
+            self::CaseTurnedDownSubject => [
+                'name' => 'Your case has been turned down',
+                'goes_to' => 'The person the case is about',
+                'sent_when' => 'Somebody turns it down',
+                'bypasses_digest' => true,
+                'tokens' => ['person.name', 'company.name', 'process.name', 'case.number', 'step.answered_by', 'step.reason'],
+                'subject' => 'Your {{ process.name }} at {{ company.name }} has been turned down',
+                'body' => <<<'TEXT'
+                    Dear {{ person.name }},
+
+                    {{ step.answered_by }} has turned down your {{ process.name }}. Its reference is {{ case.number }}.
+
+                    The reason given was: {{ step.reason }}
+
+                    Nothing more will happen on it. If you have any questions, speak to {{ step.answered_by }} or to HR.
 
                     {{ company.name }}
                     TEXT,

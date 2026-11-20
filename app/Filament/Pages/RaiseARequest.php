@@ -2,9 +2,13 @@
 
 namespace App\Filament\Pages;
 
+use App\Authorization\Permission;
+use App\Authorization\PermissionResolver;
 use App\Exceptions\ProcessRefused;
 use App\Filament\Pages\Concerns\DrawsAStepsForm;
+use App\Filament\Resources\Cases\CaseResource;
 use App\Models\FormField;
+use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\User;
@@ -15,8 +19,10 @@ use BackedEnum;
 use Closure;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use UnitEnum;
 
 /**
@@ -40,6 +46,13 @@ use UnitEnum;
  * would leave an empty request in the client's list that nobody raised and nobody can
  * finish, and a second press would leave another. So the two writes share a transaction
  * and a refused request leaves nothing behind.
+ *
+ * **An exit is raised differently, because nobody may answer a step on their own case.**
+ * Deepak resigning could never get past a first step of his own exit, so raising one
+ * answers no step: it opens the case with the four things the law and the leaver need —
+ * who, their last working day, how their employment is ending, and the personal address
+ * everything owed to them goes to once their sign-in has ended. The first step is then
+ * somebody else's, usually their manager's. Vertex's exit has always opened this way.
  */
 class RaiseARequest extends Page
 {
@@ -72,6 +85,24 @@ class RaiseARequest extends Page
      */
     public array $answers = [];
 
+    /** Who is leaving, on a process about an employee, by account id. */
+    public ?int $leaverId = null;
+
+    /** Their last working day, as the date box sends it. Both legal clocks count from it. */
+    public ?string $lastWorkingDay = null;
+
+    /**
+     * How their employment is ending, one of {@see ProcessCase::WaysEmploymentEnds}. Asked
+     * only of somebody raising another person's exit: your own is a resignation.
+     */
+    public ?string $employmentEndedBy = null;
+
+    /** Where everything owed to them goes once their sign-in has ended, to confirm or correct. */
+    public ?string $personalEmail = null;
+
+    /** @var array<int, string>|null */
+    private ?array $leavers = null;
+
     /**
      * What has been read once already while this page draws.
      *
@@ -95,7 +126,9 @@ class RaiseARequest extends Page
      * decision rather than an omission: a process's first step already says whose job it
      * is, so a thirteenth action beside it would be a second answer to the same question
      * and the two would drift. ServiceNow and Jira Service Management both put it the
-     * same way round — the right to raise belongs to the thing being raised.
+     * same way round — the right to raise belongs to the thing being raised. An exit is the
+     * one exception, because its first step is never the raiser's: see
+     * {@see whoseExitTheyMayRaise()}.
      */
     public static function canAccess(): bool
     {
@@ -112,18 +145,59 @@ class RaiseARequest extends Page
     /**
      * The live processes this person may start.
      *
-     * **Nothing about an employee.** A process about one needs to be told which employee,
-     * and an exit needs the leaver's last working day as well because two legal clocks are
-     * counted from it — that is a screen of its own and it belongs with the module that
-     * owns exits. What is left is everything a person can ask for without naming a
-     * colleague: a request about nobody, and a process about somebody who has not joined
-     * yet, whose details the form itself collects.
+     * A process about nobody, or about somebody who has not joined yet, is theirs to start
+     * when its first step names them. A process about an employee is an exit, and is theirs
+     * to start when there is anybody whose exit they may raise — see
+     * {@see whoseExitTheyMayRaise()}.
+     *
+     * ponytail: every process about an employee is treated as an exit, because no other kind
+     * exists. A transfer or a promotion run as a process would need a way of saying it has no
+     * last working day.
      *
      * @return Collection<int, ProcessTemplate>
      */
     public static function whatTheyCanRaise(User $person): Collection
     {
         return static::liveProcesses()->filter(static::whoeverCanStartIt($person))->values();
+    }
+
+    /**
+     * Everybody whose exit this person may raise, as `id => name`, themselves first.
+     *
+     * Their own, as long as they have a job here today. Anybody else's only where they may
+     * change that person's details, because the form lets them correct the leaver's personal
+     * email and anything looser would be a way round that permission. Rakesh, HR head over
+     * Shimla, may raise Deepak's and not Rohit's in Pune; Chandni, over the whole company,
+     * may raise anybody's. The leaver's own manager raising it, as Keka allows, waits until a
+     * client asks.
+     *
+     * Somebody whose exit is already open is still on the list. The engine refuses the second
+     * one in a sentence naming them, which teaches the rule where a missing name would not.
+     *
+     * @return array<int, string>
+     */
+    public static function whoseExitTheyMayRaise(User $person): array
+    {
+        $theirOwn = $person->currentEmployment()->exists()
+            ? [(int) $person->getKey() => 'You ('.$person->name.')']
+            : [];
+
+        $reachable = app(PermissionResolver::class)->reachableUnitIds($person, Permission::UpdatePerson);
+
+        if ($reachable === []) {
+            return $theirOwn;
+        }
+
+        $others = User::query()
+            ->where('active', true)
+            ->whereKeyNot($person->getKey())
+            ->whereHas('currentEmployment', fn (Builder $row) => $reachable === null ? $row : $row->whereIn('org_unit_id', $reachable))
+            ->orderBy('first_name')
+            ->get()
+            ->mapWithKeys(fn (User $other): array => [(int) $other->getKey() => $other->name])
+            ->all();
+
+        return $theirOwn + $others;
     }
 
     /**
@@ -136,7 +210,6 @@ class RaiseARequest extends Page
     {
         return ProcessTemplate::query()
             ->where('status', ProcessTemplate::Published)
-            ->where('subject_kind', '!=', 'employee')
             ->with('steps')
             ->orderBy('name')
             ->get();
@@ -147,13 +220,23 @@ class RaiseARequest extends Page
      * they cannot answer differently — and closing over a single resolver, which is what
      * lets it recognise the same role twice instead of asking again.
      *
+     * An exit asks the cheap half of {@see whoseExitTheyMayRaise()} — a job here, or the
+     * permission anywhere — because the menu asks this on every screen and only needs to know
+     * whether there is anybody, not who.
+     *
      * @return Closure(ProcessTemplate): bool
      */
     private static function whoeverCanStartIt(User $person): Closure
     {
         $assignees = new AssigneeResolver;
+        $mayRaiseAnExit = null;
 
-        return function (ProcessTemplate $process) use ($assignees, $person): bool {
+        return function (ProcessTemplate $process) use ($assignees, $person, &$mayRaiseAnExit): bool {
+            if ($process->subject_kind === 'employee') {
+                return $mayRaiseAnExit ??= $person->currentEmployment()->exists()
+                    || app(PermissionResolver::class)->allows($person, Permission::UpdatePerson);
+            }
+
             $first = $process->steps->first();
 
             if ($first === null) {
@@ -192,6 +275,42 @@ class RaiseARequest extends Page
     public function updatedProcessId(): void
     {
         $this->answers = [];
+        $this->lastWorkingDay = null;
+
+        // Most exits raised are somebody's own resignation, so that is where the form starts.
+        $own = (int) $this->person()->getKey();
+
+        $this->leaverId = $this->isAnExit() && array_key_exists($own, $this->leavers()) ? $own : null;
+        $this->updatedLeaverId();
+    }
+
+    /**
+     * A different leaver brings their own address on file into the box, to be confirmed or
+     * corrected, and clears how the last one's employment was ending.
+     */
+    public function updatedLeaverId(): void
+    {
+        $this->employmentEndedBy = null;
+        $this->personalEmail = $this->leaverId !== null && array_key_exists($this->leaverId, $this->leavers())
+            ? User::query()->whereKey($this->leaverId)->value('personal_email')
+            : null;
+    }
+
+    /** @return array<int, string> */
+    public function leavers(): array
+    {
+        return $this->leavers ??= static::whoseExitTheyMayRaise($this->person());
+    }
+
+    public function isAnExit(): bool
+    {
+        return $this->chosen()?->subject_kind === 'employee';
+    }
+
+    /** Raising your own exit is a resignation, so the screen does not ask how it is ending. */
+    public function isTheirOwn(): bool
+    {
+        return $this->leaverId !== null && $this->leaverId === (int) $this->person()->getKey();
     }
 
     /**
@@ -215,7 +334,8 @@ class RaiseARequest extends Page
     {
         $process = $this->chosen();
 
-        return $process === null
+        // An exit's first step is somebody else's to answer, so its form is not drawn here.
+        return $process === null || $this->isAnExit()
             ? new Collection
             : (new StepForm)->asking($this->firstStepOf($process), $this->answers);
     }
@@ -229,6 +349,12 @@ class RaiseARequest extends Page
 
         if ($process === null) {
             Notification::make()->danger()->title('Choose what you want to raise.')->send();
+
+            return;
+        }
+
+        if ($this->isAnExit()) {
+            $this->raiseAnExit($process);
 
             return;
         }
@@ -264,6 +390,73 @@ class RaiseARequest extends Page
         $this->answers = [];
 
         Notification::make()->success()->title($process->name.' raised.')->send();
+    }
+
+    /**
+     * Open an exit, with the leaver's address confirmed in the same write.
+     *
+     * The address is saved with the case rather than before it, so an exit the engine
+     * refuses — a second one for somebody whose exit is open — leaves their address as it
+     * was. HR raising somebody else's is taken to the exit's own page, because the two
+     * deadlines it now carries are what they need to see next. Deepak raising his own stays
+     * here, because that page is not his to read, and is told where everything about it
+     * will now be sent.
+     */
+    private function raiseAnExit(ProcessTemplate $process): void
+    {
+        $this->personalEmail = trim((string) $this->personalEmail);
+        $theirOwn = $this->isTheirOwn();
+
+        $this->validate([
+            'leaverId' => ['required', Rule::in(array_keys($this->leavers()))],
+            'lastWorkingDay' => ['required', 'date_format:Y-m-d'],
+            'employmentEndedBy' => $theirOwn ? ['nullable'] : ['required', Rule::in(array_keys(ProcessCase::WaysEmploymentEnds))],
+            'personalEmail' => ['required', 'email', 'max:255'],
+        ], [
+            'leaverId.required' => 'Choose who is leaving.',
+            'leaverId.in' => 'You cannot raise an exit for that person.',
+            'lastWorkingDay.required' => 'Give their last working day.',
+            'employmentEndedBy.required' => 'Choose how their employment is ending.',
+            'personalEmail.required' => 'Give a personal email.',
+        ], [
+            'leaverId' => 'who is leaving',
+            'lastWorkingDay' => 'last working day',
+            'employmentEndedBy' => 'how their employment is ending',
+            'personalEmail' => 'personal email',
+        ]);
+
+        $leaver = User::query()->findOrFail($this->leaverId);
+
+        try {
+            $case = DB::transaction(function () use ($process, $leaver, $theirOwn): ProcessCase {
+                $leaver->update(['personal_email' => $this->personalEmail]);
+
+                return (new CaseEngine)->open(
+                    $process,
+                    $leaver,
+                    $this->person(),
+                    $this->lastWorkingDay,
+                    $theirOwn ? 'resignation' : $this->employmentEndedBy,
+                );
+            });
+        } catch (ProcessRefused $refused) {
+            Notification::make()->danger()->title($refused->getMessage())->send();
+
+            return;
+        }
+
+        if ($theirOwn) {
+            Notification::make()->success()->title('Your exit is raised.')
+                ->body('Everything about it from now on is sent to '.$this->personalEmail.'.')->send();
+
+            $this->reset('processId', 'leaverId', 'lastWorkingDay', 'employmentEndedBy', 'personalEmail');
+
+            return;
+        }
+
+        Notification::make()->success()->title('Exit raised for '.$leaver->name.'.')->send();
+
+        $this->redirect(CaseResource::getUrl('view', ['record' => $case]));
     }
 
     private function firstStepOf(ProcessTemplate $process): ProcessStep
