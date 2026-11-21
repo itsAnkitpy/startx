@@ -45,6 +45,7 @@ class StarterRoles
                     Permission::UpdatePerson,
                     Permission::DeactivatePerson,
                     Permission::ChangeExit,
+                    Permission::OverrideHold,
                     Permission::ViewOrgUnit,
                     Permission::ViewRole,
                 ],

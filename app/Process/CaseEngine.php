@@ -182,7 +182,13 @@ final class CaseEngine
      * lists. A turning down is one of those, whoever raised the case, and so is told to
      * them here — unless the answer was their own, through their link.
      *
+     * **A hold closed over somebody tells them**, with who and why (module 07 step 3).
+     * Otherwise Chandni comes back from leave to find her clearance gone from her queue and
+     * learns why from the history. Whoever raised the case is not told a second time when it
+     * is the same person.
+     *
      * @param  string  $answeredBy  the name to give, which for a link is somebody with no account
+     * @param  User|null  $heldBy  whoever was holding a step that was just closed over them
      */
     private function tellWhatTheAnswerMoved(
         ProcessCase $case,
@@ -192,6 +198,7 @@ final class CaseEngine
         ?User $by,
         ?string $reason = null,
         ?ProcessStep $sentBackTo = null,
+        ?User $heldBy = null,
     ): void {
         $waiting = $this->reader->for($case);
 
@@ -208,9 +215,15 @@ final class CaseEngine
             ], $answered->sequence);
         }
 
+        $this->tell($case, TemplateCatalogue::HoldOverriddenHolder, $heldBy, [
+            'step.name' => $answered->name,
+            'step.answered_by' => $answeredBy,
+            'step.reason' => $why,
+        ], $answered->sequence);
+
         $raisedBy = $case->initiatedBy;
 
-        if (! $raisedBy instanceof User || ($by !== null && $raisedBy->is($by)) || $raisedBy->is($case->subject)) {
+        if (! $raisedBy instanceof User || ($by !== null && $raisedBy->is($by)) || $raisedBy->is($case->subject) || $raisedBy->is($heldBy)) {
             return;
         }
 
@@ -611,8 +624,15 @@ final class CaseEngine
      *
      * A held department that simply changes its mind does not come through here — it
      * approves, which is what releasing a hold is.
+     *
+     * **Overriding asks the exit permission itself** (module 07 step 3), over the department
+     * the exit pinned, so no door but the exit's page reaches it and Rakesh overrides holds
+     * on Shimla's exits and not Pune's.
+     *
+     * @param  array<string, mixed>  $payload  what the holder typed on the step's form as they
+     *                                         closed it as disputed; an override answers nothing
      */
-    public function resolveHold(ProcessCase $case, int $sequence, string $outcome, User $by, string $reason): CaseStep
+    public function resolveHold(ProcessCase $case, int $sequence, string $outcome, User $by, string $reason, array $payload = []): CaseStep
     {
         $this->refuseIfTheCaseIsAboutThem($case, $by, 'Ending a hold');
 
@@ -620,29 +640,67 @@ final class CaseEngine
             throw ProcessRefused::notAWayOutOfAHold($outcome);
         }
 
+        // Both ways out pass the step, and they exist because a leaver's settlement cannot
+        // wait. A held hiring approval closed either way would be a hire nobody approved.
+        if ($case->subject_user_id === null) {
+            throw ProcessRefused::aHoldOnlyEndsThisWayOnAnExit();
+        }
+
+        if ($outcome === 'force_closed' && $by->cannot('overrideHold', $case)) {
+            throw ProcessRefused::thatHoldIsNotYoursToOverride();
+        }
+
         if (trim($reason) === '') {
             throw ProcessRefused::needsAReason("Recording [{$outcome}] on a held step");
         }
 
-        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $reason): CaseStep {
+        return DB::transaction(function () use ($case, $sequence, $outcome, $by, $reason, $payload): CaseStep {
             $available = $this->availableStepOrRefuse($case, $sequence);
+            $step = $available->step;
             $attempt = $available->attempt;
 
             if ($attempt === null || $attempt->outcome !== 'held') {
-                throw ProcessRefused::thatStepIsNotOnHold($available->step->name, $outcome);
+                throw ProcessRefused::thatStepIsNotOnHold($step->name, $outcome);
             }
 
+            $theirOwnHold = (int) $attempt->assignee_id === (int) $by->getKey();
+
             // Turning the argument into a disputed settlement line is the holding
-            // department's own decision, so only the person holding it may record it — the
-            // same rule an ordinary action on a claimed step follows. `force_closed` is
-            // deliberately not gated here: it exists precisely for the holder being
-            // unavailable, it keeps them on the row and names whoever overrode it, and the
-            // authority to override belongs to whoever can reach that button. Module 07
-            // builds that screen and owns that check.
-            // ponytail: force_closed reachable by any account holder until module 07 gates it.
-            if ($outcome === 'closed_disputed' && (int) $attempt->assignee_id !== (int) $by->getKey()) {
-                throw ProcessRefused::somebodyElseHasThatStep($available->step->name);
+            // department's own decision, so only the person holding it may record it, and
+            // only while the step is still theirs — the same two checks an approval passes.
+            // Chandni handing finance to Priya takes the card out of her queue; without the
+            // first check, a request sent by hand from her browser would still close it and
+            // rewrite the figure on it. An override is the opposite: somebody else
+            // overruling the department, so never the holder, or "HR overrode this" would be
+            // written over a department that is in fact them.
+            if ($outcome === 'closed_disputed') {
+                $this->refuseUnlessTheStepIsTheirs($available, $by);
+
+                if (! $theirOwnHold) {
+                    throw ProcessRefused::somebodyElseHasThatStep($step->name);
+                }
             }
+
+            if ($outcome === 'force_closed' && $theirOwnHold) {
+                throw ProcessRefused::youAreHoldingItYourself($step->name);
+            }
+
+            // Closing as disputed is the holder's last word on the step, so what they typed
+            // on the card is kept, through the same rules as a hold: Chandni settles the
+            // recovery at 35,000 rather than 40,000 as she closes it, and the figure module
+            // 08 turns into a disputed line is the one she meant. Nothing required is
+            // demanded, because an unfinished clearance is exactly what is being recorded.
+            if ($outcome === 'closed_disputed') {
+                $forms = new StepForm;
+
+                $attempt->payload = $forms->stillAsked($step, array_merge(
+                    (array) $attempt->payload,
+                    $forms->onlyWhatThisStepAsks($step, $payload, false),
+                ));
+            }
+
+            // Read now, for the message below: whoever held it is still on the row.
+            $heldBy = $attempt->assignee;
 
             // The reason and whoever gave it go to the history and nowhere else. A step's
             // payload is what its form collected, and a case reads its own answers back
@@ -653,8 +711,8 @@ final class CaseEngine
             $attempt->save();
 
             $this->record($case, 'step_acted', $by, [
-                'step' => $available->step->name,
-                'sequence' => $available->step->sequence,
+                'step' => $step->name,
+                'sequence' => $step->sequence,
                 'outcome' => $outcome,
                 'reason' => $reason,
                 'held_by' => $attempt->assignee_id,
@@ -662,7 +720,7 @@ final class CaseEngine
 
             $this->closeIfNothingIsOutstanding($case, $by);
 
-            $this->tellWhatTheAnswerMoved($case, $available->step, $outcome, $by->name, $by, $reason);
+            $this->tellWhatTheAnswerMoved($case, $step, $outcome, $by->name, $by, $reason, heldBy: $outcome === 'force_closed' ? $heldBy : null);
 
             return $attempt;
         });
@@ -1085,15 +1143,12 @@ final class CaseEngine
      * three are the signature this product cannot afford to record, arriving without a
      * step to be gated on.
      *
-     * Only this half. *Which* other employees may cancel a case or move that date is the
-     * exit permission, asked by each of those two since module 07 step 2. Cancelling is the
-     * one exception to this rule: the leaver may withdraw their own resignation until
-     * anybody has acted on it, so {@see self::cancel()} does not come here. HR overriding a
-     * hold is deliberately not a candidate for the step it overrides, so the step gate is the
-     * wrong question to ask there.
-     *
-     * ponytail: any other account holder still reaches overriding a hold until module 07
-     * step 3 gates it.
+     * Only this half. *Which* other employees may cancel a case, move that date or override
+     * a hold is a permission over the department the exit pinned, asked by each of the three
+     * since module 07 steps 2 and 3. Cancelling is the one exception to this rule: the leaver
+     * may withdraw their own resignation until anybody has acted on it, so
+     * {@see self::cancel()} does not come here. HR overriding a hold is deliberately not a
+     * candidate for the step it overrides, so the step gate is the wrong question to ask there.
      */
     private function refuseIfTheCaseIsAboutThem(ProcessCase $case, User $by, string $act): void
     {

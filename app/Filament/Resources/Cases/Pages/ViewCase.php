@@ -26,9 +26,9 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Facades\FilamentTimezone;
 
 /**
- * One case, with the whole story of it underneath — and, on somebody's exit, the three
+ * One case, with the whole story of it underneath — and, on somebody's exit, the four
  * things that can be done to it from this screen: change its last working day, withdraw
- * it, and hand over their work.
+ * it, override a clearance on hold, and hand over their work.
  */
 class ViewCase extends ViewRecord
 {
@@ -48,8 +48,106 @@ class ViewCase extends ViewRecord
             $this->chase(),
             $this->changeLastWorkingDay(),
             $this->withdraw(),
+            $this->overrideAHold(),
             $this->handOverTheirWork(),
         ];
+    }
+
+    /**
+     * Close a clearance on hold over the department holding it, because whoever holds it is
+     * away or the argument is holding up a legal settlement (module 07, "A hold is never a
+     * wall").
+     *
+     * Nothing is approved: the step reads as overridden, in this person's name with the
+     * holder's beside it, anything the department recorded stays on it, and the holder is
+     * emailed. A hold this person holds themselves is not offered; they end it from their
+     * own queue.
+     */
+    private function overrideAHold(): Action
+    {
+        return Action::make('overrideHold')
+            ->label('Override the hold')
+            ->icon('heroicon-o-lock-open')
+            ->color('warning')
+            ->visible(fn (): bool => $this->holdsThatCanBeOverridden() !== [])
+            ->modalHeading(fn (): string => 'Override a hold on '.$this->leaver()?->name.'\'s exit')
+            ->modalDescription('The clearance closes without saying the department agreed, so the exit can go on. Their hold, your name and your reason stay on the record, anything they recorded such as an amount to recover stays on it, and whoever was holding it is emailed.')
+            ->modalSubmitActionLabel('Override it')
+            ->schema([
+                Select::make('sequence')
+                    ->label('Which clearance')
+                    ->options(fn (): array => $this->holdsThatCanBeOverridden())
+                    ->default(fn (): ?int => count($this->holdsThatCanBeOverridden()) === 1 ? array_key_first($this->holdsThatCanBeOverridden()) : null)
+                    ->native(false)
+                    ->required()
+                    ->validationMessages([
+                        'required' => 'Choose which clearance to override.',
+                    ]),
+
+                Textarea::make('reason')
+                    ->label('Why you are overriding it')
+                    ->helperText('Whoever was holding it is emailed this reason.')
+                    ->required()
+                    ->maxLength(255)
+                    ->rows(2)
+                    ->validationMessages([
+                        'required' => 'Say why you are overriding it.',
+                    ]),
+            ])
+            ->action(function (array $data, Action $action): void {
+                $case = $this->theCase();
+
+                try {
+                    $overridden = (new CaseEngine)->resolveHold($case, (int) $data['sequence'], 'force_closed', auth()->user(), (string) $data['reason']);
+                } catch (ProcessRefused $refused) {
+                    Notification::make()
+                        ->danger()
+                        ->title('The hold was not overridden')
+                        ->body($refused->getMessage())
+                        ->send();
+
+                    $action->halt();
+
+                    return;
+                }
+
+                // The story below is read off the case's trail, loaded before this line was.
+                $case->refresh();
+
+                Notification::make()
+                    ->success()
+                    ->title('Hold overridden')
+                    ->body($overridden->assignee?->name.' has been emailed.')
+                    ->send();
+            });
+    }
+
+    /**
+     * Each clearance on hold this person may override, named with who is holding it.
+     *
+     * **Private, for the reason {@see self::whatWouldMove()} gives**: a public method on a
+     * page is one the browser may call by name.
+     *
+     * @return array<int, string>
+     */
+    private function holdsThatCanBeOverridden(): array
+    {
+        $case = $this->theCase();
+        $person = auth()->user();
+
+        if ($case->state !== ProcessCase::Open || ! $person instanceof User || $person->cannot('overrideHold', $case)) {
+            return [];
+        }
+
+        // Not remembered for the request, unlike the chase list: the override itself and the
+        // redraw after it are one request, and a remembered list would keep the button there.
+        return (new AvailableSteps)->for($case)
+            ->filter(fn (AvailableStep $waiting): bool => $waiting->attempt?->outcome === 'held'
+                && (int) $waiting->attempt->assignee_id !== (int) $person->getKey())
+            ->mapWithKeys(fn (AvailableStep $waiting): array => [
+                (int) $waiting->step->sequence => $waiting->step->name.' — held by '.$waiting->attempt->assignee?->name,
+            ])
+            ->all();
     }
 
     /**

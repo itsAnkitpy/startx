@@ -350,6 +350,29 @@ class ProcessRefused extends RuntimeException
         return new self('Only somebody who looks after exits for that part of the company can withdraw this exit or change its last working day.');
     }
 
+    public static function thatHoldIsNotYoursToOverride(): self
+    {
+        return new self('Only somebody who looks after exits for that part of the company can override a hold on this exit.');
+    }
+
+    /**
+     * Rakesh holding a hiring approval. Closing it as disputed or overriding it would pass
+     * the approval, and the hire would go ahead with nobody having approved it.
+     */
+    public static function aHoldOnlyEndsThisWayOnAnExit(): self
+    {
+        return new self('A hold can be closed as disputed or overridden only on somebody\'s exit. Approve the step to release the hold.');
+    }
+
+    /**
+     * Chandni holds finance and is an administrator. Overriding her own hold would record
+     * HR overruling a department that is in fact her, so her two ways out are her own.
+     */
+    public static function youAreHoldingItYourself(string $step): self
+    {
+        return new self("You are holding [{$step}] yourself. Approve it to release the hold, or close it as disputed from your queue.");
+    }
+
     /**
      * Deepak withdrawing his own exit once it has gone past his own say-so: his manager has
      * answered, HR has moved the date or handed his work on, or it was never his resignation

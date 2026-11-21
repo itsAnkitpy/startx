@@ -38,9 +38,9 @@ use Illuminate\Support\Facades\DB;
 beforeEach(function () {
     $this->meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
 
-    // Whoever holds the exit team role may withdraw an exit or move its date, which is a
-    // granted action since module 07 step 2.
-    TenantContext::run($this->meridian, fn () => Role::factory()->keyed('exit_team')->withPermissions([Permission::ChangeExit])->create());
+    // Whoever holds the exit team role may withdraw an exit, move its date or override a
+    // hold on it, which are granted actions since module 07 steps 2 and 3.
+    TenantContext::run($this->meridian, fn () => Role::factory()->keyed('exit_team')->withPermissions([Permission::ChangeExit, Permission::OverrideHold])->create());
 });
 
 afterEach(function () {

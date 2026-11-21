@@ -116,6 +116,7 @@ class MyQueue extends Page implements HasTable
         'rejected' => 'Reject',
         'held' => 'Put it on hold',
         'sent_back' => 'Send it back',
+        'closed_disputed' => 'Close as disputed',
     ];
 
     /** What the reason box asks for, in the words of the outcome it belongs to. */
@@ -123,7 +124,11 @@ class MyQueue extends Page implements HasTable
         'rejected' => 'Why is this being rejected?',
         'held' => 'Why is this being held?',
         'sent_back' => 'What has to be corrected?',
+        'closed_disputed' => 'What is still disputed?',
     ];
+
+    /** The outcomes that cannot be recorded without a reason. */
+    private const NeedAReason = ['held', 'sent_back', 'closed_disputed'];
 
     /**
      * The answers a step already carries, put back in the boxes.
@@ -624,10 +629,10 @@ class MyQueue extends Page implements HasTable
             );
         }
 
-        // The engine refuses these two without a reason as well, and its refusal is the
-        // one that counts. This is here so the words land under the box somebody has to
-        // type them into rather than as a sentence across the top of the page.
-        if (in_array($outcome, ['held', 'sent_back'], true)) {
+        // The engine refuses these without a reason as well, and its refusal is the one
+        // that counts. This is here so the words land under the box somebody has to type
+        // them into rather than as a sentence across the top of the page.
+        if (in_array($outcome, self::NeedAReason, true)) {
             $this->validate(
                 ["reasons.{$caseId}.{$sequence}" => ['required', 'string', 'max:'.StepForm::DefaultParagraphLength]],
                 [],
@@ -636,15 +641,26 @@ class MyQueue extends Page implements HasTable
         }
 
         $recorded = $this->run(
-            fn (CaseEngine $engine, $found) => $engine->decide(
-                $found,
-                $sequence,
-                $outcome,
-                $this->person(),
-                $this->answers[$caseId][$sequence] ?? [],
-                $this->reasons[$caseId][$sequence] ?? null,
-                $this->sendBackTo[$caseId][$sequence] ?? null,
-            ),
+            // Closing a hold as disputed is not an answer a step's form offers, so it goes
+            // through the engine's own door for ending a hold, with what was typed.
+            fn (CaseEngine $engine, $found) => $outcome === 'closed_disputed'
+                ? $engine->resolveHold(
+                    $found,
+                    $sequence,
+                    $outcome,
+                    $this->person(),
+                    (string) ($this->reasons[$caseId][$sequence] ?? ''),
+                    $this->answers[$caseId][$sequence] ?? [],
+                )
+                : $engine->decide(
+                    $found,
+                    $sequence,
+                    $outcome,
+                    $this->person(),
+                    $this->answers[$caseId][$sequence] ?? [],
+                    $this->reasons[$caseId][$sequence] ?? null,
+                    $this->sendBackTo[$caseId][$sequence] ?? null,
+                ),
             $caseId,
             'Recorded.',
         );

@@ -117,6 +117,16 @@ final class Permission
     public const ChangeExit = 'change_exit';
 
     /**
+     * Closing a held clearance over the department holding it.
+     *
+     * Its own action rather than part of {@see ChangeExit}, because the plan names it
+     * separately: it overrules a department, where the other changes a date. Asked over the
+     * department the exit pinned, so a branch HR head overrides holds on their own branch's
+     * exits and nobody else's.
+     */
+    public const OverrideHold = 'override_hold';
+
+    /**
      * Rewording the messages this product sends on the client's behalf.
      *
      * Apart from {@see ManageSettings} even though both change what happens on every case
@@ -196,6 +206,10 @@ final class Permission
                     self::ChangeExit => [
                         'label' => "Withdraw somebody's exit, or change its last working day",
                         'description' => 'Done from the exit\'s own page. Changing the date moves both legal deadlines, and everybody working on the exit and the person leaving are told. Somebody may withdraw their own resignation until anybody has acted on it without this.',
+                    ],
+                    self::OverrideHold => [
+                        'label' => 'Override a hold on somebody\'s exit',
+                        'description' => 'Done from the exit\'s own page, for a clearance on hold whose holder is away or whose argument is holding up the settlement. The step closes without saying the department agreed: their name, yours and your reason stay on the record, anything they recorded such as an amount to recover stays on it, and they are emailed.',
                     ],
                     self::ViewStatutoryId => [
                         'label' => "Read somebody's tax and bank numbers",

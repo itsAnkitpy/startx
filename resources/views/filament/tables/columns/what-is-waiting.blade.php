@@ -49,9 +49,9 @@
                 @endif
 
                 {{-- A held step is still open and still this person's, so without this it
-                     reads as a clearance nobody has got round to. The badge is the state;
-                     the buttons below stay as they are, because ending a hold is answering
-                     the step properly. --}}
+                     reads as a clearance nobody has got round to. The badge is the state.
+                     Approving releases the hold; "Close as disputed" below ends it with the
+                     disagreement on the record. --}}
                 @if ($onHold)
                     <x-filament::badge color="warning">On hold</x-filament::badge>
                 @elseif ($mine)
@@ -193,6 +193,20 @@
                     {{ $page->buttonFor($outcome) }}
                 </x-filament::button>
             @endforeach
+
+            {{-- The holder's own way out of a hold that will not be settled: the clearance
+                 closes, the exit goes on, and what they recorded stays as disputed. Only
+                 theirs, so only on their card, and only on an exit: the engine refuses it on
+                 a request about nobody. --}}
+            @if ($onHold && $mine && $case->subject_user_id !== null)
+                <x-filament::button
+                    color="gray"
+                    wire:click="askFor({{ $case->getKey() }}, {{ $step->sequence }}, 'closed_disputed')"
+                    wire:loading.attr="disabled"
+                >
+                    {{ $page->buttonFor('closed_disputed') }}
+                </x-filament::button>
+            @endif
         </div>
     </div>
 
@@ -251,6 +265,12 @@
                      whoever types it is told before they write it. --}}
                 @if ($outcome === 'rejected' && $case->subject_user_id !== null)
                     <p style="font-size: 0.75rem;">The person leaving is emailed this reason.</p>
+                @endif
+
+                {{-- Said before it is pressed, because the plan keeps the amount on the
+                     clearance until module 08 turns it into a settlement line. --}}
+                @if ($outcome === 'closed_disputed')
+                    <p style="font-size: 0.75rem;">The clearance closes and the exit goes on. What you recorded above, such as an amount to recover, stays on it as disputed.</p>
                 @endif
             </x-filament-forms::field-wrapper>
 

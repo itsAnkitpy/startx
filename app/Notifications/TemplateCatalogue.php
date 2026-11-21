@@ -99,6 +99,12 @@ class TemplateCatalogue
 
     public const StepEscalationManager = 'step_escalation_manager';
 
+    /**
+     * Sent to whoever was holding a step when HR overrode the hold, added at module 07 step
+     * 3. Without it the step simply leaves their queue.
+     */
+    public const HoldOverriddenHolder = 'hold_overridden_holder';
+
     /** The two messages about the product itself failing rather than about a step. */
     public const CaseBreachWarning = 'case_breach_warning';
 
@@ -445,6 +451,30 @@ class TemplateCatalogue
                     {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}, was due by {{ step.due_at }} and has not been answered. It is waiting on {{ step.held_by }}.
 
                     You can answer it yourself from here: {{ case.link }}
+
+                    TEXT,
+            ],
+
+            self::HoldOverriddenHolder => [
+                'name' => 'Your hold has been overridden',
+                'goes_to' => 'Whoever was holding the step',
+                'sent_when' => 'Somebody overrides the hold from the exit\'s page',
+                'bypasses_digest' => false,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
+                    'step.name', 'step.answered_by', 'step.reason',
+                ],
+                'subject' => '{{ case.number }} — your hold on {{ step.name }} was overridden',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ step.answered_by }} has overridden your hold on {{ step.name }} on {{ case.number }}, {{ case.what_it_is_about }}, so it no longer stops the exit going ahead. It is recorded as overridden, not as cleared by you.
+
+                    The reason given was: {{ step.reason }}
+
+                    Anything you recorded on it, such as an amount to recover, stays on it.
+
+                    You can read the whole story of it here: {{ case.link }}
 
                     TEXT,
             ],

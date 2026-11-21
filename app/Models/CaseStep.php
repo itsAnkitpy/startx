@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Process\CaseEngine;
 use App\Tenancy\BelongsToTenant;
 use Database\Factories\CaseStepFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -43,8 +44,11 @@ class CaseStep extends Model
     public const PassingOutcomes = ['approved', 'closed_disputed', 'force_closed'];
 
     /**
-     * How a hold ends. Neither is ever offered as a button and neither may appear in a
-     * step's `allowed_outcomes`: both are produced by the two hold-resolution paths.
+     * How a hold ends. Neither may appear in a step's `allowed_outcomes`, and
+     * {@see CaseEngine::decide()} refuses both. Each has its own button, and
+     * both buttons go through {@see CaseEngine::resolveHold()}: "Close as
+     * disputed" on the holder's card in their queue, and "Override the hold" on the exit's
+     * page.
      *
      * They exist rather than reusing `approved` because a record saying Finance approved
      * a clearance Finance refused is worse than no record at all — the money is still

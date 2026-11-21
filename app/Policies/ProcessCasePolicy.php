@@ -100,6 +100,30 @@ class ProcessCasePolicy
     }
 
     /**
+     * Closing a held clearance over the department holding it.
+     *
+     * Over the department the case pinned, like {@see changeExit()}, so Rakesh overrides a
+     * hold on Deepak's exit in Shimla and not on Rohit's in Pune. Never on a case about
+     * themselves. **Only on a case about a person**: the override exists because a hold must
+     * not stop a legal settlement, and a held hiring approval passed over this way would let
+     * a hire go ahead that nobody approved.
+     */
+    public function overrideHold(User $user, ProcessCase $case): bool
+    {
+        if ($case->subject_user_id === null || (int) $case->subject_user_id === (int) $user->getKey()) {
+            return false;
+        }
+
+        $unit = $case->subjectEmploymentRecord?->org_unit_id;
+
+        return $this->permissions->allows(
+            $user,
+            Permission::OverrideHold,
+            $unit === null ? null : OrgUnit::query()->find($unit),
+        );
+    }
+
+    /**
      * Nothing on this screen writes to a case. Deciding a step is the queue's job, and
      * module 12's editor is where a process itself is changed.
      */

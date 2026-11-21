@@ -415,6 +415,14 @@ class CaseHistory
 
         $trail = $acted === null ? [] : (array) $acted->payload;
 
+        // An override is somebody else's act on the holder's row, so the row's name alone
+        // read "Closed over the hold by Chandni Verma", as though finance had ended its own
+        // hold. ServiceNow customers complain of exactly that log (module 07, finding 15).
+        if ($row->outcome === 'force_closed') {
+            $said = "Closed over {$who}'s hold";
+            $who = $acted?->actor?->name ?? 'somebody';
+        }
+
         return "{$said} by {$who} on ".$row->acted_at->timezone(FilamentTimezone::get())->format('j F Y')
             .$this->onWhoseBehalf($trail).'.'
             .($acted === null ? '' : $this->andWhy($case, $trail));

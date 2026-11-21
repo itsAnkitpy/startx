@@ -112,3 +112,47 @@ it('lets Rakesh move Anjali\'s last working day, seeing the new deadline first, 
         ->assertSee('Withdrawn by Rakesh Menon')
         ->assertNoSmoke();
 });
+
+/*
+| Module 07 step 3 in a real browser: Chandni closes her own hold on Deepak's finance
+| clearance as disputed from her queue, and Rakesh overrides her hold on Anjali's from
+| Anjali's exit page.
+*/
+
+it('lets Chandni close her hold as disputed from her queue, and Rakesh override one from the exit page', function () {
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    $anjalis = TenantContext::run($meridian, function (): ProcessCase {
+        $chandni = User::query()->where('work_email', 'chandni@meridian.test')->sole();
+        $engine = new CaseEngine;
+
+        foreach (['Deepak', 'Anjali'] as $leaver) {
+            $exit = ProcessCase::query()->whereRelation('subject', 'first_name', $leaver)->sole();
+
+            $engine->claim($exit, 3, $chandni);
+            $engine->decide($exit->fresh(), 3, 'held', $chandni, ['imprest_card_returned' => false, 'recover_from_them' => 40000], 'Imprest card not returned');
+        }
+
+        return ProcessCase::query()->whereRelation('subject', 'first_name', 'Anjali')->sole();
+    });
+
+    $card = '.fi-ta-record:has-text("about Deepak Iyer")';
+
+    browseAs(personAt(MeridianSeeder::Slug, 'chandni'), '/admin/my-queue')
+        ->click($card.' button:has-text("Close as disputed")')
+        ->assertSee('stays on it as disputed')
+        ->fill($card.' textarea[id^="reason-"]', 'Deepak disputes the figure')
+        // The second "Close as disputed" on the card: the first only opened the reason box.
+        ->click($card.' button:has-text("Close as disputed") >> nth=1')
+        ->assertSee('Recorded.')
+        ->assertNoSmoke();
+
+    browseAs(personAt(MeridianSeeder::Slug, 'rakesh'), '/admin/cases/'.$anjalis->getKey())
+        ->click('Override the hold')
+        ->assertSee('Finance clearance — held by Chandni Verma')
+        ->fill('[id$=".reason"]', 'Chandni is on leave')
+        ->click('Override it')
+        ->assertSee('Hold overridden')
+        ->assertSee("Closed over Chandni Verma's hold by Rakesh Menon")
+        ->assertNoSmoke();
+});
