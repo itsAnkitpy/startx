@@ -2,6 +2,7 @@
 
 use App\Exceptions\ProcessRefused;
 use App\Models\ProcessCase;
+use App\Models\Succession;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\AvailableStep;
@@ -111,6 +112,10 @@ it('keeps HR\'s final check closed while one clearance is still outstanding', fu
 
         // The last clearance in, and only now does the final check open.
         expect(waitingOnTheExit($rakeshs))->toBe(['HR final check']);
+
+        // His work handed over first, because an exit does not finish while it is still on
+        // him (module 07 step 4).
+        Succession::handOver($rakeshs, $priya, leavingFromMeridian('chandni'));
 
         (new CaseEngine)->decide($rakeshs, 5, 'approved', $priya);
 

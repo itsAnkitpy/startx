@@ -4,6 +4,7 @@ use App\Models\ProcessCase;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\CaseEngine;
+use App\Process\StepLink;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
@@ -154,5 +155,50 @@ it('lets Chandni close her hold as disputed from her queue, and Rakesh override 
         ->click('Override it')
         ->assertSee('Hold overridden')
         ->assertSee("Closed over Chandni Verma's hold by Rakesh Menon")
+        ->assertNoSmoke();
+});
+
+/*
+| Module 07 step 4 in a real browser: Rakesh has answered his own link, so Priya's final
+| check is the answer that would finish his exit, and it is refused while his roles and
+| team are still on him. Chandni sees why on the exit's page, hands his work to Priya, and
+| Priya's final check then finishes it.
+*/
+
+it('refuses Priya\'s final check while Rakesh\'s work is on him, and finishes his exit once Chandni hands it over', function () {
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+
+    $rakeshs = TenantContext::run($meridian, function (): ProcessCase {
+        $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Rakesh')->sole();
+
+        (new CaseEngine)->decideThroughALink(basename((new StepLink)->issue($exit, 4)), 'approved');
+
+        return $exit;
+    });
+
+    $card = '.fi-ta-record:has-text("about Rakesh Menon")';
+
+    browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/my-queue')
+        ->click($card.' button:has-text("Approve")')
+        ->assertSee('Rakesh Menon still has 2 roles and 2 people reporting to them')
+        ->assertNoSmoke();
+
+    browseAs(personAt(MeridianSeeder::Slug, 'chandni'), '/admin/cases/'.$rakeshs->getKey())
+        ->assertSee('Waiting on a handover')
+        ->click('Hand over their work')
+        ->click('.fi-fo-field:has-text("Who takes it on") .fi-select-input-btn')
+        ->click('.fi-fo-field:has-text("Who takes it on") [role="option"]:has-text("Priya Nair")')
+        ->click('Hand it over')
+        ->assertSee('Priya Nair has taken the work on')
+        ->assertDontSee('Waiting on a handover')
+        ->assertNoSmoke();
+
+    browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/my-queue')
+        ->click($card.' button:has-text("Approve")')
+        ->assertSee('Recorded.')
+        ->assertNoSmoke();
+
+    browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/cases/'.$rakeshs->getKey())
+        ->assertSee('Finished')
         ->assertNoSmoke();
 });

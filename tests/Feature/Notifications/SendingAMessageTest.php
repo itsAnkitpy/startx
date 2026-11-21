@@ -5,6 +5,7 @@ use App\Models\NotificationTemplate;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Succession;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Notifications\TemplateCatalogue;
@@ -215,6 +216,10 @@ it('writes to the person it is about and to whoever raised it when a case finish
         $token = basename((new StepLink)->issue($rakeshs, 4));
 
         (new CaseEngine)->decideThroughALink($token, 'approved', ['note' => 'All handed over.']);
+
+        // His work handed over first, because an exit does not finish while it is still on
+        // him (module 07 step 4).
+        Succession::handOver($rakeshs, whoIsOnMeridiansStaff('priya'), whoIsOnMeridiansStaff('chandni'));
 
         // His answer was the last clearance, which opens HR's final check, and those
         // messages are checked where whose turn it is is. Cleared before the answer that

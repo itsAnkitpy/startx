@@ -39,8 +39,11 @@ class Role extends Model
     /** @use HasFactory<RoleFactory> */
     use HasFactory;
 
-    /** The one role named in code, by the rule that a client keeps two of them. */
+    /** Named in code by the rule that a client keeps two of them. */
     public const AdministratorKey = 'administrator';
+
+    /** The starter role that grants nothing, which an exit does not wait to hand on. */
+    public const EmployeeKey = 'employee';
 
     /**
      * @return array<string, string>

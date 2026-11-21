@@ -66,7 +66,7 @@ class StarterRoles
                     Permission::ViewOrgUnit,
                 ],
             ],
-            'employee' => [
+            Role::EmployeeKey => [
                 'name' => 'Employee',
                 'description' => 'Their own record and their own requests. Seeing your own details is not a granted action.',
                 'permissions' => [],

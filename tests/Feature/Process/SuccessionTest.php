@@ -409,7 +409,7 @@ it('writes the handover onto the exit\'s own history', function () {
         expect($settled->payload['to']['name'])->toBe('Priya Nair')
             ->and($settled->payload['effective_at'])->toBe('2026-09-20')
             ->and($settled->payload['moved'])
-            ->toEqual(['approvals' => 1, 'roles' => 1, 'reporting_lines' => 2]);
+            ->toEqual(['approvals' => 1, 'roles' => 1, 'reporting_lines' => 2, 'stand_in' => false]);
     });
 });
 

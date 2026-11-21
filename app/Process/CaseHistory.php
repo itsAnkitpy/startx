@@ -83,7 +83,7 @@ class CaseHistory
      * for it five times in one draw: once to decide whether the section is there at all,
      * and once for each figure in it.
      *
-     * @var array<int, array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int}}|null>
+     * @var array<int, array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int, stand_in: bool}}|null>
      */
     private array $handovers = [];
 
@@ -228,7 +228,7 @@ class CaseHistory
      * leaving. Read off the case's own trail rather than from the handover record, so the
      * page says what was done on the day rather than what is true now.
      *
-     * @return array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int}}|null
+     * @return array{to: string, on: string, moved: array{approvals: int, roles: int, reporting_lines: int, stand_in: bool}}|null
      */
     public function handoverSettled(ProcessCase $case): ?array
     {
@@ -255,6 +255,7 @@ class CaseHistory
                 'approvals' => (int) (((array) ($said['moved'] ?? []))['approvals'] ?? 0),
                 'roles' => (int) (((array) ($said['moved'] ?? []))['roles'] ?? 0),
                 'reporting_lines' => (int) (((array) ($said['moved'] ?? []))['reporting_lines'] ?? 0),
+                'stand_in' => (bool) (((array) ($said['moved'] ?? []))['stand_in'] ?? false),
             ],
         ];
     }

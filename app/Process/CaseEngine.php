@@ -372,7 +372,13 @@ final class CaseEngine
             // with no steps for that exact reason; this is the same case arriving through
             // the conditions instead. An exit for somebody who manages nobody and holds
             // no equipment is a real one.
-            $this->closeIfNothingIsOutstanding($case, $by);
+            //
+            // Not through {@see self::closeIfNothingIsOutstanding()}, because the handover is
+            // not asked here: refusing to open an exit would leave no exit page to hand the
+            // work over from.
+            if ($this->reader->for($case)->isEmpty()) {
+                $this->close($case, $by, self::Completed);
+            }
 
             $this->tellWhoseTurnItIs($this->reader->for($case), null, $by);
 
@@ -1326,6 +1332,19 @@ final class CaseEngine
 
         if ($this->reader->for($case)->isNotEmpty()) {
             return;
+        }
+
+        // An exit does not finish while the leaver still has work the handover would move
+        // (module 07 step 4). Here, because every answer that can finish a case comes
+        // through here — the queue, the link, both ways out of a hold — so a request sent
+        // by hand meets the same refusal as the button. Whichever answer would finish it
+        // is refused and nothing of it is kept: at Meridian that is always HR's final
+        // check. It holds the case, never the person; the last working day and both
+        // deadlines are untouched.
+        $stillToMove = Succession::whatStillHasToMove($case);
+
+        if ($stillToMove !== null) {
+            throw ProcessRefused::theirWorkHasNotMovedOn($stillToMove);
         }
 
         $this->close($case, $by, self::Completed);

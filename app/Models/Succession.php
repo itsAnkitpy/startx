@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Exceptions\ProcessRefused;
+use App\Process\AssigneeResolver;
 use App\Process\AvailableSteps;
+use App\Settings\Settings;
 use App\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\SuccessionFactory;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,8 +22,9 @@ use Illuminate\Support\Facades\DB;
  *
  * A cover is somebody away for a fortnight: it expires, it moves a queue and nothing
  * else, and Rakesh comes back to his own work. This is the other thing entirely. It
- * never ends and it moves three things in one go — the approvals Rakesh had opened, the
- * roles he held, and the people who reported to him.
+ * never ends and it moves everything in one go — the approvals Rakesh had opened or put
+ * on hold, the roles he held, the people who reported to him, and the steps nobody holds
+ * where he was the one they fell to.
  *
  * **It is not a very long cover, and the two are kept apart on purpose.** Workday draws
  * the same line in the same words: a reassignment moves ownership of the work, a
@@ -114,16 +118,14 @@ class Succession extends Model
      * on, and because the alternative — storing who each step belongs to — is the thing
      * this whole module exists to avoid. Narrow the open cases first if it is ever felt.
      *
-     * @return array{approvals_waiting: int, direct_reports: int, roles: list<string>}
+     * @return array{approvals_waiting: int, direct_reports: int, roles: list<string>, stand_in: bool}
      */
     public static function whatWouldMove(User $leaver): array
     {
         return [
             'approvals_waiting' => (new AvailableSteps)->waitingOn($leaver)->count(),
-            'direct_reports' => EmploymentRecord::query()
-                ->where('reports_to_id', $leaver->getKey())
-                ->whereNull('effective_to')
-                ->count(),
+            'direct_reports' => self::peopleReportingTo($leaver)->count(),
+            'stand_in' => self::theyPickUpStepsNobodyHolds($leaver),
             'roles' => RoleAssignment::query()
                 ->where('user_id', $leaver->getKey())
                 ->with(['role', 'orgUnit'])
@@ -137,9 +139,75 @@ class Succession extends Model
     }
 
     /**
+     * What a leaver still has that the handover would move, in one sentence, or null when
+     * there is nothing — the question that keeps an exit from finishing (module 07 step 4).
+     *
+     * *"Rakesh Menon still has 2 roles and 2 people reporting to them…"* Asked by the
+     * engine at the moment an exit would finish, and by the exit's page so HR sees it weeks
+     * earlier. It holds the case, never the person: the last working day and both
+     * deadlines are untouched.
+     *
+     * **Exactly what the handover moves, and nothing it does not.** An approval that
+     * reaches Rakesh only through a cover, or by his name on a step, is not counted: no
+     * handover moves those, so counting them would hold his exit for ever once the button
+     * had gone, and once his account is off they fall to the next person anyway. The
+     * approvals that reach him through a role or his team are counted by the role and the
+     * team they come through.
+     *
+     * Counts rather than names, because anybody who can open the exit reads this, and the
+     * roles screen asks for a grant before it shows who holds what. The handover's own
+     * dialog, behind its permission, names them.
+     *
+     * After a handover, anything here reached them since — a role given by mistake, a new
+     * hire set to report to them. Their work moves on once, so this says where to move it
+     * by hand instead of pointing at a button that has gone.
+     */
+    public static function whatStillHasToMove(ProcessCase $exit): ?string
+    {
+        $leaver = $exit->subject;
+
+        if ($exit->statutory_from === null || ! $leaver instanceof User) {
+            return null;
+        }
+
+        // Not the starter Employee role: it grants nothing and a client may give it to
+        // everybody, which would hold every exit for a handover with nothing to hand on.
+        $roles = RoleAssignment::query()
+            ->where('user_id', $leaver->getKey())
+            ->whereRelation('role', 'key', '!=', Role::EmployeeKey)
+            ->count();
+        $reports = self::peopleReportingTo($leaver)->count();
+        $steps = self::stepsStillTheirs($leaver)->count();
+
+        $left = array_values(array_filter([
+            $roles > 0 ? $roles.' '.($roles === 1 ? 'role' : 'roles') : null,
+            $reports > 0 ? $reports.' '.($reports === 1 ? 'person' : 'people').' reporting to them' : null,
+            $steps > 0 ? $steps.' '.($steps === 1 ? 'step' : 'steps').' they have picked up or put on hold' : null,
+            self::theyPickUpStepsNobodyHolds($leaver) ? 'the steps nobody else holds' : null,
+        ]));
+
+        if ($left === []) {
+            return null;
+        }
+
+        $what = collect($left)->join(', ', ' and ');
+        $handedOver = self::query()->where('case_id', $exit->getKey())->first();
+
+        if ($handedOver === null) {
+            return "{$leaver->name} still has {$what}, and it has to move on before this exit can finish. "
+                .'Press "Hand over their work" on this exit\'s page, or ask somebody who can.';
+        }
+
+        return "{$leaver->name}'s work was handed to {$handedOver->successor->name} on {$handedOver->effective_at->format('j F Y')}, "
+            ."and since then {$what} reached them. It has to move on before this exit can finish: roles on the roles screen, "
+            .'the people reporting to them on the people screen, and who picks up a step nobody holds on the settings screen. '
+            .'A step they have picked up is theirs to answer before they go.';
+    }
+
+    /**
      * Hand everything over, in one transaction.
      *
-     * All three moves or none of them. A handover that transferred the approvals and
+     * Every move or none of them. A handover that transferred the approvals and
      * then failed on the reporting lines would leave the client with work sitting on
      * somebody who has gone and an org chart that disagrees with it, and nothing on the
      * record saying which half happened.
@@ -181,12 +249,14 @@ class Succession extends Model
             throw ProcessRefused::nobodyHandsTheWorkToThemselves($successor->name);
         }
 
-        // Somebody's work only moves on once. A second handover finds no claimed steps,
-        // no roles and no direct reports left, so it would change nothing while looking
-        // to whoever pressed confirm exactly like one that worked — which is precisely
-        // what an HR person correcting a wrong successor would do. They are told who
-        // holds the work now and sent to hand it on from there instead.
-        $alreadyMoved = self::query()->where('from_user_id', $leaver->getKey())->first();
+        // Somebody's work only moves on once per exit. A second handover finds no claimed
+        // steps, no roles and no direct reports left, so it would change nothing while
+        // looking to whoever pressed confirm exactly like one that worked — which is
+        // precisely what an HR person correcting a wrong successor would do. They are told
+        // who holds the work now and sent to hand it on from there instead. A later exit
+        // hands over again: Rakesh staying after his first was withdrawn was given his
+        // work back by hand, and it has to move on when he really goes.
+        $alreadyMoved = self::query()->where('case_id', $case->getKey())->first();
 
         if ($alreadyMoved !== null) {
             throw ProcessRefused::theWorkHasAlreadyBeenHandedOn(
@@ -220,6 +290,7 @@ class Succession extends Model
                 'approvals' => self::moveTheStepsHeHadOpened($leaver, $successor, $case, $by),
                 'roles' => self::moveTheRolesHeHeld($leaver, $successor),
                 'reporting_lines' => self::moveThePeopleWhoReportedToHim($leaver, $successor, $case, $by, $from),
+                'stand_in' => self::moveTheStandIn($leaver, $successor),
             ];
 
             // The exit's own history says the handover happened, alongside the line each
@@ -244,8 +315,9 @@ class Succession extends Model
     }
 
     /**
-     * The steps Rakesh had already picked up, handed to Chandni and written into each
-     * step's own case as a transfer.
+     * The steps Rakesh had already picked up or put on hold, handed to Chandni and written
+     * into each step's own case as a transfer. A held step moves with its hold, so Chandni
+     * ends it as finance would have.
      *
      * Into the case the step belongs to, not into the exit — a tribunal reading Anjali's
      * exit next year needs to see there that the clearance changed hands and why, and
@@ -266,11 +338,7 @@ class Succession extends Model
         ProcessCase $because,
         User $by,
     ): int {
-        $claimed = CaseStep::query()
-            ->where('assignee_id', $leaver->getKey())
-            ->whereNull('outcome')
-            ->whereNull('superseded_at')
-            ->get();
+        $claimed = self::stepsStillTheirs($leaver)->get();
 
         foreach ($claimed as $step) {
             $step->update(['assignee_id' => $successor->getKey()]);
@@ -290,6 +358,67 @@ class Succession extends Model
         }
 
         return $claimed->count();
+    }
+
+    /**
+     * The steps on somebody that nobody else can answer while they are on them: picked up
+     * and not yet answered, or put on hold.
+     *
+     * **A hold is included because it is still theirs.** Chandni holding finance on
+     * Deepak's exit with 40,000 to recover owns that clearance until she ends it, and the
+     * queue shows it to nobody else. Left behind, it would sit on her after she had gone,
+     * waiting on nobody, and only an override could end it — which reads as HR overruling
+     * finance rather than finance's successor deciding (module 07 step 4).
+     *
+     * **Only on a case still running.** A step left picked up on Deepak's exit when it was
+     * withdrawn can never be answered, so counting it would hold Rakesh's exit for ever.
+     *
+     * @return Builder<CaseStep>
+     */
+    private static function stepsStillTheirs(User $person): Builder
+    {
+        return CaseStep::query()
+            ->where('assignee_id', $person->getKey())
+            ->where(fn (Builder $open) => $open->whereNull('outcome')->orWhere('outcome', 'held'))
+            ->whereNull('superseded_at')
+            ->whereHas('case', fn (Builder $running) => $running->whereNull('closed_at')->whereNull('cancelled_at'));
+    }
+
+    /**
+     * Who reports to somebody today: the job rows with no end date.
+     *
+     * @return Builder<EmploymentRecord>
+     */
+    private static function peopleReportingTo(User $person): Builder
+    {
+        return EmploymentRecord::query()
+            ->where('reports_to_id', $person->getKey())
+            ->whereNull('effective_to');
+    }
+
+    /** Whether the company's setting for who picks up a step nobody holds names this person. */
+    private static function theyPickUpStepsNobodyHolds(User $person): bool
+    {
+        return (int) app(Settings::class)->get(AssigneeResolver::StandInSetting) === (int) $person->getKey();
+    }
+
+    /**
+     * The company's stand-in for steps nobody holds, moved to the successor when it names
+     * the leaver, so the one person a vacant clearance falls to is not somebody who has
+     * gone. Chandni is Meridian's: Rohit's HR clearance, with nobody holding HR head over
+     * Pune, waits on her. Moved rather than left to be refused at the final check, because
+     * the successor taking over her roles is the obvious one to take this too, and the
+     * settings screen still changes it afterwards.
+     */
+    private static function moveTheStandIn(User $leaver, User $successor): bool
+    {
+        if (! self::theyPickUpStepsNobodyHolds($leaver)) {
+            return false;
+        }
+
+        app(Settings::class)->set(AssigneeResolver::StandInSetting, (int) $successor->getKey());
+
+        return true;
     }
 
     /**
@@ -374,11 +503,7 @@ class Succession extends Model
             ->whereNull('effective_to')
             ->value('reports_to_id');
 
-        $reports = EmploymentRecord::query()
-            ->where('reports_to_id', $leaver->getKey())
-            ->whereNull('effective_to')
-            ->with('user')
-            ->get();
+        $reports = self::peopleReportingTo($leaver)->with('user')->get();
 
         foreach ($reports as $current) {
             // Somebody whose own job row began on or after the handover date has no

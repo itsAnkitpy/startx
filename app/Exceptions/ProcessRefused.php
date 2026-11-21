@@ -544,7 +544,17 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
-     * A second handover asked for on somebody whose work has already moved on.
+     * The answer that would finish an exit, while the leaver still has work the handover
+     * would move. The sentence is the one the exit's page shows, so the two never disagree.
+     */
+    public static function theirWorkHasNotMovedOn(string $whatIsLeft): self
+    {
+        return new self($whatIsLeft);
+    }
+
+    /**
+     * A second handover asked for on somebody whose work has already moved on from this
+     * exit.
      *
      * The first one took the roles, the reporting lines and the open approvals, so a
      * second finds nothing left to move and would record a handover that did nothing.

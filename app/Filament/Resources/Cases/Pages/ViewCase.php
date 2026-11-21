@@ -374,7 +374,9 @@ class ViewCase extends ViewRecord
                     .$handover['moved']['roles'].' '.($handover['moved']['roles'] === 1 ? 'role' : 'roles').', '
                     .$handover['moved']['reporting_lines'].' '.($handover['moved']['reporting_lines'] === 1 ? 'person' : 'people').' reporting to them and '
                     .$handover['moved']['approvals'].' '.($handover['moved']['approvals'] === 1 ? 'approval' : 'approvals').'. '
-                    .'That stays as it is. Give roles and people back by hand on the roles and people screens.';
+                    .($handover['moved']['stand_in'] ? 'They also became the one who picks up a step nobody holds. ' : '')
+                    .'That stays as it is. Give roles and people back by hand on the roles and people screens'
+                    .($handover['moved']['stand_in'] ? ', and who picks up a step nobody holds on the settings screen.' : '.');
             })
             ->visible(fn (): bool => (new CaseHistory)->handoverSettled($this->theCase()) !== null);
     }
@@ -669,6 +671,7 @@ class ViewCase extends ViewRecord
             .' waiting on '.$leaver->name.', '
             .$moving['direct_reports'].' '.($moving['direct_reports'] === 1 ? 'person' : 'people')
             .' reporting to them, and '.$roles.'. '
+            .($moving['stand_in'] ? 'They also become the one who picks up a step nobody holds. ' : '')
             .'It happens in one go and there is no undo. What '.$leaver->name
             .' has already answered stays recorded in their name.';
     }

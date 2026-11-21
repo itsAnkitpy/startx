@@ -4,11 +4,13 @@ namespace App\Filament\Resources\Cases\Schemas;
 
 use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
+use App\Models\Succession;
 use App\Models\User;
 use App\Process\CaseHistory;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
@@ -37,6 +39,17 @@ class WhatHappenedOnIt
 
         return $schema
             ->components([
+                // Weeks before HR's final check, not only when it is refused: the same
+                // sentence the refusal gives, so HR can hand the work over while the
+                // clearances are still running (module 07 step 4).
+                Callout::make('Waiting on a handover')
+                    ->key('waitingOnAHandover')
+                    ->warning()
+                    ->columnSpanFull()
+                    ->description(fn (ProcessCase $record): string => (string) Succession::whatStillHasToMove($record))
+                    ->visible(fn (ProcessCase $record): bool => $record->state === ProcessCase::Open
+                        && Succession::whatStillHasToMove($record) !== null),
+
                 Section::make('What this case is')
                     ->columnSpanFull()
                     ->columns(3)
