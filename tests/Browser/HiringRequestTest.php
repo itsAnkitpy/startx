@@ -61,6 +61,19 @@ it('lets Anjali raise a hiring request that Rakesh approves from his queue, and 
         ->assertNoSmoke();
 });
 
+it('puts the cursor in the reason box a button opens, so it never opens out of sight at the foot of a long card', function () {
+    $card = '.fi-ta-record:has-text("Replacing Deepak Iyer, whose exit is already running.")';
+
+    browseAs(personAt(MeridianSeeder::Slug, 'rakesh'), '/admin/my-queue')
+        ->click($card.' button:has-text("Send it back")')
+        ->wait(0.5)
+        ->assertScript("document.activeElement.id.startsWith('reason-')")
+        // And again when somebody changes their mind about which it is.
+        ->click($card.' button:has-text("Reject")')
+        ->wait(0.5)
+        ->assertScript("document.activeElement.id.startsWith('reason-')");
+});
+
 it('puts the answers back in Anjali\'s boxes when Rakesh sends her request back', function () {
     $card = '.fi-ta-record:has-text("Replacing Deepak Iyer, whose exit is already running.")';
 

@@ -8,6 +8,7 @@ use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Process\AvailableSteps;
+use App\Process\CaseEngine;
 use App\Tenancy\TenantContext;
 use Database\Seeders\MeridianSeeder;
 use Livewire\Livewire;
@@ -425,6 +426,47 @@ it('sends a request back to the person who raised it, with their answers still i
     });
 });
 
+it('keeps the answers in the boxes once a step sent back is picked up and the page opened again', function () {
+    TenantContext::run($this->meridian, function () {
+        $anjali = atMeridianCalled('anjali');
+        $expensive = theHiringRequestCosting(2400000);
+
+        (new CaseEngine)->decide($expensive, 2, 'sent_back', atMeridianCalled('rakesh'), [], 'Above the band for a branch manager.', 1);
+
+        Livewire::actingAs($anjali)->test(MyQueue::class)
+            ->call('pickUp', $expensive->getKey(), 1)
+            ->assertHasNoErrors();
+
+        // Picking it up adds an empty row for the step. Read from that, her request came back
+        // blank and she typed it all again (the code review of 22 November 2026).
+        expect(Livewire::actingAs($anjali)->test(MyQueue::class)->get('answers')[$expensive->getKey()][1]['annual_ctc'] ?? null)
+            ->toEqual(2400000);
+    });
+});
+
+it('shows a step that comes round again after a send-back as nobody\'s yet, on the card and in the filters', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = atMeridianCalled('rakesh');
+        $expensive = theHiringRequestCosting(2400000);
+        $herFirstAnswers = (array) $expensive->liveSteps()->where('sequence', 1)->sole()->payload;
+
+        $engine = new CaseEngine;
+        $engine->decide($expensive, 2, 'sent_back', $rakesh, [], 'Above the band for a branch manager.', 1);
+        $engine->decide($expensive->fresh(), 1, 'approved', atMeridianCalled('anjali'), ['annual_ctc' => 900000] + $herFirstAnswers);
+
+        // His name stays on the row he sent it back from, but nobody has it now, so anybody it
+        // belongs to may pick it up, him included. Read as his, his card said he had picked it
+        // up while the filter for that left it out (the code review of 22 November 2026).
+        Livewire::actingAs($rakesh)->test(MyQueue::class)
+            ->assertDontSee('You picked this up')
+            ->assertSee("pickUp({$expensive->getKey()}, 2)", escape: false)
+            ->filterTable('state', 'untouched')
+            ->assertSee("pickUp({$expensive->getKey()}, 2)", escape: false)
+            ->filterTable('state', 'yours')
+            ->assertDontSee("pickUp({$expensive->getKey()}, 2)", escape: false);
+    });
+});
+
 it('will not send a request back with nothing typed in the box', function () {
     TenantContext::run($this->meridian, function () {
         $rakesh = atMeridianCalled('rakesh');
@@ -477,7 +519,10 @@ it('holds a clearance with a reason, and drops a figure the later answer hides',
             ->set("reasons.{$anjalisExit->getKey()}.3", 'Waiting on the imprest card before anything is recovered.')
             ->call('decide', $anjalisExit->getKey(), 3, 'held')
             ->assertHasNoErrors()
-            ->assertOk();
+            ->assertOk()
+            // Still on her card straight after, not only once she reloads: the hold keeps the
+            // step hers, and the boxes went blank under it (the walk of 22 November 2026).
+            ->assertSet("answers.{$anjalisExit->getKey()}.3.recover_from_them", 12000);
 
         // Her own card says so when she comes back to it. A held step is still open and
         // still hers, so without this it reads as a clearance nobody has got round to —

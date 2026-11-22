@@ -2,8 +2,12 @@
 
 namespace App\Filament\Auth;
 
+use App\Models\User;
+use App\Providers\AppServiceProvider;
 use App\Tenancy\TenantContext;
 use Filament\Auth\Pages\Login as BaseLogin;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use SensitiveParameter;
 
 /**
@@ -60,5 +64,31 @@ class Login extends BaseLogin
             'work_email' => $data['email'],
             'password' => $data['password'],
         ];
+    }
+
+    /**
+     * An account that is switched off is told so, once its own password has been typed.
+     *
+     * Every sign-in looks people up through a query that leaves out an account that is off
+     * ({@see AppServiceProvider::boot()}), so Filament finds nobody and told Priya, the
+     * morning after her last working day, that her right password did not match. She would
+     * try a reset or ring IT. Somebody without the password still reads Filament's own
+     * sentence, so a guesser learns nothing, and this runs inside the same timebox as every
+     * other refusal.
+     */
+    protected function throwFailureValidationException(): never
+    {
+        $person = User::query()
+            ->where('work_email', (string) ($this->data['email'] ?? ''))
+            ->where('active', false)
+            ->first();
+
+        if ($person !== null && Hash::check((string) ($this->data['password'] ?? ''), (string) $person->password)) {
+            throw ValidationException::withMessages([
+                'data.email' => 'Your account is switched off, so you cannot sign in. If you have left, anything still owed to you goes to your personal email. If you have not, ask HR to turn it back on.',
+            ]);
+        }
+
+        parent::throwFailureValidationException();
     }
 }

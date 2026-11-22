@@ -76,7 +76,9 @@ it('shows the person as the case froze them, not as they are now', function () {
         expect($panel['facts']['Designation'])->toBe('Operations Officer')
             ->and($panel['facts']['Department'])->toBe('Shimla branch')
             ->and($panel['facts']['Reports to'])->toBe('Rakesh Menon')
-            ->and($panel['who'])->toContain('Anjali Rao');
+            ->and($panel['who'])->toContain('Anjali Rao')
+            // No last working day on this case, so nothing claims one is today's.
+            ->and($panel['asOf'])->not->toContain('last working day');
 
         // And what she is today, so the test is about the difference rather than about
         // nothing having happened.
@@ -119,7 +121,7 @@ it('puts the details above the form on the queue screen', function () {
         ->assertSee('Shimla office')
         ->assertSee('Rakesh Menon')
         // The claim of the panel, on the panel.
-        ->assertSee('not as they are today')
+        ->assertSee('Job details as they were when this case opened')
         // A fact nobody recorded says so rather than showing a blank.
         ->assertSee('Not recorded'));
 });

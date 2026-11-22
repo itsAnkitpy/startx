@@ -7,13 +7,16 @@ use App\Filament\Pages\MyQueue;
 use App\Filament\Pages\RaiseARequest;
 use App\Filament\Resources\Cases\Pages\ListCases;
 use App\Filament\Resources\Cases\Pages\ViewCase;
+use App\Models\FormField;
 use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
+use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Role;
 use App\Models\Succession;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Process\AvailableSteps;
 use App\Process\CaseEngine;
 use App\Process\CaseHistory;
 use App\Tenancy\TenantContext;
@@ -340,13 +343,11 @@ it('shows what the successor inherits before anybody confirms anything', functio
         $chandni = whoUsesTheCasesScreen('chandni');
         $rakeshsExit = theSeededExitOf('rakesh');
 
-        // Four approvals waiting on him — two hiring requests and the HR clearance on two
-        // colleagues' exits — two people reporting to him, and two roles over the Shimla
-        // branch. **Nobody has opened any of those four**, so a count taken from the rows
-        // people happen to have picked up would have said none, and missed exactly the work
-        // most likely to have been sitting untouched.
+        // Four approvals wait on him and he has started none of them, so none moves as a step:
+        // they follow his two roles over the Shimla branch, and the dialog says so in words
+        // rather than counting them. Two people report to him.
         expect(Succession::whatWouldMove(whoUsesTheCasesScreen('rakesh')))
-            ->toMatchArray(['approvals_waiting' => 4, 'direct_reports' => 2]);
+            ->toMatchArray(['steps_picked_up' => 0, 'direct_reports' => 2]);
 
         $page = Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rakeshsExit->getKey()])
             ->assertOk()
@@ -361,10 +362,75 @@ it('shows what the successor inherits before anybody confirms anything', functio
         // public is one the browser may call by name — which would hand the roles somebody
         // holds to anybody able to open their exit.
         expect($page->instance()->getMountedAction()->getModalDescription())
-            ->toContain('4 approvals waiting on Rakesh Menon')
+            ->toContain('0 steps Rakesh Menon picked up or put on hold')
             ->toContain('2 people reporting to them')
+            ->toContain('Approvals nobody has started yet go with the roles and the team, and any that name Rakesh Menon personally go to their manager once they can no longer sign in.')
             ->toContain('HR head')
             ->toContain('no undo');
+    });
+});
+
+it('counts the steps the handover moves the same before and after the leaver is switched off', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = whoUsesTheCasesScreen('rakesh');
+        $request = ProcessCase::query()
+            ->whereRelation('template', 'key', 'hiring_request')
+            ->whereNull('closed_at')
+            ->firstOrFail();
+
+        // He picks up one of his two hiring approvals. That one moves; the rest follow his roles.
+        (new CaseEngine)->claim($request, 2, $rakesh);
+
+        expect(Succession::whatWouldMove($rakesh)['steps_picked_up'])->toBe(1);
+
+        // The day after his last working day, the usual day to hand over, his sign-in is off.
+        // Counted from his queue, the dialog read 0 then (the review of 22 November 2026).
+        $rakesh->forceFill(['active' => false])->save();
+
+        expect(Succession::whatWouldMove($rakesh->fresh())['steps_picked_up'])->toBe(1);
+    });
+});
+
+it('gives a step the leaver sent back to whoever takes on their role, once it comes round again, without what he typed on it', function () {
+    TenantContext::run($this->meridian, function () {
+        $rakesh = whoUsesTheCasesScreen('rakesh');
+        $chandni = whoUsesTheCasesScreen('chandni');
+        $priya = whoUsesTheCasesScreen('priya');
+
+        $review = ProcessTemplate::factory()->named('branch_review', 'Branch review')->about('employee')->create();
+        ProcessStep::factory()->of($review)->at(1, 1)->named('Draft')
+            ->heldBy('chandni@meridian.test')->offering('approved')->create();
+        ProcessStep::factory()->of($review)->at(2, 2)->named('Branch sign-off')
+            ->heldByTheRole('lob_head')->collecting('recovery', FormField::Number)->offering('approved', 'sent_back')->create();
+        $review->publish();
+
+        // Rakesh sends it back for a correction, and the correction comes forward again.
+        $engine = new CaseEngine;
+        $case = $engine->open($review, whoUsesTheCasesScreen('anjali'), $chandni);
+        $engine->decide($case, 1, 'approved', $chandni);
+        $engine->decide($case->fresh(), 2, 'sent_back', $rakesh, ['recovery' => 40000], 'The figure is wrong', 1);
+        $engine->decide($case->fresh(), 1, 'approved', $chandni);
+
+        // His own figure is in the box for him, as anybody's is on a step that comes back to them.
+        expect(Livewire::actingAs($rakesh)->test(MyQueue::class)->get('answers')[$case->getKey()][2]['recovery'] ?? null)
+            ->toEqual(40000);
+
+        Succession::handOver(theSeededExitOf('rakesh'), $priya, $chandni);
+
+        // Priya now holds his role. The step kept his name from the send-back, and was read as
+        // his alone: it sat in nobody's queue once his role moved (the review of 22 November 2026).
+        expect((new AvailableSteps)->waitingOn($priya)->contains(
+            fn ($waiting): bool => (int) $waiting->case->getKey() === (int) $case->getKey()
+        ))->toBeTrue();
+
+        // And her card opens empty. Filled with his figure, one press of approve filed it as hers
+        // (the code review of 22 November 2026).
+        expect(Livewire::actingAs($priya)->test(MyQueue::class)->get('answers')[$case->getKey()] ?? [])
+            ->not->toHaveKey(2);
+
+        $engine->decide($case->fresh(), 2, 'approved', $priya, ['recovery' => 35000]);
+
+        expect($case->fresh()->closed_at)->not->toBeNull();
     });
 });
 
@@ -557,13 +623,15 @@ it('shows on an exit how the employment ended beside both deadlines, on the righ
         Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rohits->getKey()])
             ->assertOk()
             ->assertSee('Last working day')
-            ->assertSee($rohits->statutory_from->format('M j, Y'))
+            ->assertSee($rohits->statutory_from->format('j F Y'))
+            // One way of writing a date on the page, the one its sentences already use.
+            ->assertDontSee($rohits->statutory_from->format('M j, Y'))
             ->assertSee('End of a fixed-term contract')
             ->assertSee('Settlement due by')
-            ->assertSee($rohits->statutory_due_at->format('M j, Y'))
+            ->assertSee($rohits->statutory_due_at->format('j F Y'))
             ->assertSee('Gratuity due by')
-            ->assertSee($rohits->gratuity_due_at->format('M j, Y'))
-            ->assertDontSee($rohits->statutory_due_at->subDay()->format('M j, Y'));
+            ->assertSee($rohits->gratuity_due_at->format('j F Y'))
+            ->assertDontSee($rohits->statutory_due_at->subDay()->format('j F Y'));
 
         // Anjali is resigning short of five years, and that reads as owing none.
         Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => theSeededExitOf('anjali')->getKey()])

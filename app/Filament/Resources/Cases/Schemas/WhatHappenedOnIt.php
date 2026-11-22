@@ -75,7 +75,7 @@ class WhatHappenedOnIt
                         // unless told otherwise.
                         TextEntry::make('opened_at')
                             ->label('Started')
-                            ->date(timezone: FilamentTimezone::get()),
+                            ->date('j F Y', FilamentTimezone::get()),
 
                         TextEntry::make('initiatedBy.first_name')
                             ->label('Raised by')
@@ -87,7 +87,7 @@ class WhatHappenedOnIt
                         // company behind UTC would see every deadline a day early.
                         TextEntry::make('statutory_from')
                             ->label('Last working day')
-                            ->date()
+                            ->date('j F Y')
                             ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
 
                         // Beside the day it follows from (module 07 step 5).
@@ -103,12 +103,12 @@ class WhatHappenedOnIt
 
                         TextEntry::make('statutory_due_at')
                             ->label('Settlement due by')
-                            ->date()
+                            ->date('j F Y')
                             ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
 
                         TextEntry::make('gratuity_due_at')
                             ->label('Gratuity due by')
-                            ->date()
+                            ->date('j F Y')
                             ->placeholder('Not owed')
                             ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
 
@@ -154,7 +154,7 @@ class WhatHappenedOnIt
                         TextEntry::make('handover_on')
                             ->label('From')
                             ->state(fn (ProcessCase $record): string => $history->handoverSettled($record)['on'] ?? '')
-                            ->date(),
+                            ->date('j F Y'),
 
                         TextEntry::make('handover_roles')
                             ->label('Roles moved')
@@ -257,7 +257,7 @@ class WhatHappenedOnIt
                                 TextEntry::make('created_at')
                                     ->hiddenLabel()
                                     ->state(fn (NotificationDelivery $record) => $record->sent_at ?? $record->created_at)
-                                    ->dateTime(),
+                                    ->dateTime('j F Y, H:i'),
 
                                 TextEntry::make('status')
                                     ->hiddenLabel()

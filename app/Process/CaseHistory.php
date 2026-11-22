@@ -253,6 +253,7 @@ class CaseHistory
             'on' => (string) ($said['effective_at'] ?? ''),
             'moved' => [
                 'approvals' => (int) (((array) ($said['moved'] ?? []))['approvals'] ?? 0),
+                'handed_back' => (int) (((array) ($said['moved'] ?? []))['handed_back'] ?? 0),
                 'roles' => (int) (((array) ($said['moved'] ?? []))['roles'] ?? 0),
                 'reporting_lines' => (int) (((array) ($said['moved'] ?? []))['reporting_lines'] ?? 0),
                 'stand_in' => (bool) (((array) ($said['moved'] ?? []))['stand_in'] ?? false),

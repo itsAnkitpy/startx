@@ -261,7 +261,7 @@ final class Chasing
      */
     private function holdersToday(AvailableStep $step): Collection
     {
-        $pickedUpBy = $step->attempt?->assignee;
+        $pickedUpBy = $step->isPickedUp() ? $step->attempt->assignee : null;
 
         if ($pickedUpBy instanceof User) {
             return collect([$pickedUpBy])->filter(fn (User $person) => (bool) $person->active)->values();

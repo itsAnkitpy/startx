@@ -57,8 +57,8 @@ it('lets Deepak raise his own resignation, and shows its deadlines to his HR hea
 
     browseAs(personAt(MeridianSeeder::Slug, 'rakesh'), '/admin/cases/'.$raised->getKey())
         ->assertSee('Resignation')
-        ->assertSee($lastDay->format('M j, Y'))
-        ->assertSee($lastDay->addDays(4)->format('M j, Y'))
+        ->assertSee($lastDay->format('j F Y'))
+        ->assertSee($lastDay->addDays(4)->format('j F Y'))
         ->assertSee('Not owed')
         ->assertNoSmoke();
 });
@@ -233,7 +233,7 @@ it('switches Rakesh\'s sign-in off once his last working day has ended, and says
         ->fill('[id$="email"]', 'rakesh@meridian.test')
         ->fill('[id$="password"]', MeridianSeeder::Password)
         ->press('[type="submit"]')
-        ->assertSee('These credentials do not match our records')
+        ->assertSee('Your account is switched off, so you cannot sign in.')
         ->assertPathIs('/admin/login')
         ->assertNoSmoke();
 

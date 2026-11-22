@@ -82,7 +82,7 @@ it('refuses Priya\'s final check on Rakesh\'s exit while his work is on him, and
 
         Livewire::actingAs($priya)->test(MyQueue::class)
             ->call('decide', $rakeshs->getKey(), 5, 'approved')
-            ->assertNotified('Rakesh Menon still has 2 roles and 2 people reporting to them, and it has to move on before this exit can finish. Press "Hand over their work" on this exit\'s page, or ask somebody who can.');
+            ->assertNotified('Rakesh Menon still has 2 roles and 2 people reporting to them, and all of it has to be handed over before this exit can finish. Press "Hand over their work" on this exit\'s page, or ask somebody who can.');
 
         // Nothing of the answer was kept, and the person's own dates did not move.
         $rakeshs->refresh();
@@ -129,7 +129,7 @@ it('holds Priya\'s exit while she is one of the two administrators, and finishes
 
         // Administrator over the whole company and HR head over Shimla.
         expect(fn () => $engine->decide($priyas->fresh(), 5, 'approved', $rakesh))
-            ->toThrow(ProcessRefused::class, 'Priya Nair still has 2 roles, and it has to move on');
+            ->toThrow(ProcessRefused::class, 'Priya Nair still has 2 roles, and all of it has to be handed over');
 
         // Rakesh is not an administrator yet, so the role moves to him and the company
         // keeps two.
@@ -232,7 +232,7 @@ it('hands Rakesh\'s work over again on a later exit, after an earlier one was wi
         $second = (new CaseEngine)->open($first->template, $rakesh, $chandni, now()->addDays(20)->toDateString(), 'resignation');
 
         expect(Succession::whatStillHasToMove($second))
-            ->toStartWith('Rakesh Menon still has 1 role, and it has to move on before this exit can finish. Press "Hand over their work"');
+            ->toStartWith('Rakesh Menon still has 1 role, and all of it has to be handed over before this exit can finish. Press "Hand over their work"');
 
         chandniHandsTheirWorkTo($second, $priya);
 
@@ -304,7 +304,7 @@ it('still refuses after the handover when work has reached the leaver since, and
         answerTheLeaversLink($rakeshs->fresh(), 4);
 
         expect(fn () => (new CaseEngine)->decide($rakeshs->fresh(), 5, 'approved', $priya))
-            ->toThrow(ProcessRefused::class, "Rakesh Menon's work was handed to Priya Nair on ".now()->format('j F Y').', and since then 1 role reached them. It has to move on before this exit can finish: roles on the roles screen');
+            ->toThrow(ProcessRefused::class, "Rakesh Menon's work was handed to Priya Nair on ".now()->format('j F Y').', and since then 1 role reached them. That has to move on before this exit can finish: roles on the roles screen');
 
         // And the button is not offered a second time.
         Livewire::actingAs(hereAtMeridian('chandni'))->test(ViewCase::class, ['record' => $rakeshs->getKey()])

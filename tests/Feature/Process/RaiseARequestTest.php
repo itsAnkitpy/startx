@@ -497,6 +497,9 @@ it('raises your own exit as a resignation, and keeps its page from you', functio
             ->assertSet('leaverId', $deepak->getKey())
             ->assertSet('personalEmail', 'deepak@personal.example')
             ->assertSee('Your own exit is recorded as a resignation.')
+            // Spoken to him, and promising only what is sent: every email about his exit.
+            ->assertSee('Everything owed to you is due two working days after this')
+            ->assertSee('Every email to you about your exit is sent here. Check it is one you still use.')
             ->assertDontSee('How their employment is ending')
             // Reaching past the screen to say otherwise changes nothing.
             ->set('employmentEndedBy', 'disablement')

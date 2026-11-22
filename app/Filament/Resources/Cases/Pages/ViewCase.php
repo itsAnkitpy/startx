@@ -373,7 +373,11 @@ class ViewCase extends ViewRecord
                 return $handover['to'].' took it on from '.CarbonImmutable::parse($handover['on'])->format('j F Y').': '
                     .$handover['moved']['roles'].' '.($handover['moved']['roles'] === 1 ? 'role' : 'roles').', '
                     .$handover['moved']['reporting_lines'].' '.($handover['moved']['reporting_lines'] === 1 ? 'person' : 'people').' reporting to them and '
-                    .$handover['moved']['approvals'].' '.($handover['moved']['approvals'] === 1 ? 'approval' : 'approvals').'. '
+                    .$handover['moved']['approvals'].' '.($handover['moved']['approvals'] === 1 ? 'step' : 'steps').' they had picked up or put on hold. '
+                    .($handover['moved']['handed_back'] > 0
+                        ? $handover['moved']['handed_back'].' '.($handover['moved']['handed_back'] === 1 ? 'step' : 'steps')
+                            .' they had picked up while covering for somebody went back to whoever they covered for. '
+                        : '')
                     .($handover['moved']['stand_in'] ? 'They also became the one who picks up a step nobody holds. ' : '')
                     .'That stays as it is. Give roles and people back by hand on the roles and people screens'
                     .($handover['moved']['stand_in'] ? ', and who picks up a step nobody holds on the settings screen.' : '.');
@@ -640,10 +644,10 @@ class ViewCase extends ViewRecord
     /**
      * The sentence above the confirm button: what moves, counted now.
      *
-     * The approvals are counted through the reader that works out whose turn a step is
-     * rather than from the rows people have already opened — most of a branch manager's
-     * waiting approvals are steps nobody has touched, and a count taken from the rows would
-     * show a reassuringly small number and miss exactly the work most likely to breach.
+     * It counts what the handover moves, the steps the leaver picked up or put on hold, read
+     * off the rows, so that figure is the same before and after their sign-in goes off. Approvals
+     * nobody has started are not counted: they follow the roles and the team, and the
+     * sentence says so in words.
      *
      * **Private, and it has to stay private.** Every public method a Filament page declares
      * is one the browser may call by name and read the answer to, so this being public
@@ -667,10 +671,16 @@ class ViewCase extends ViewRecord
             : 'these roles: '.implode(', ', $moving['roles']);
 
         return 'Whoever takes this on inherits '
-            .$moving['approvals_waiting'].' '.($moving['approvals_waiting'] === 1 ? 'approval' : 'approvals')
-            .' waiting on '.$leaver->name.', '
+            .$moving['steps_picked_up'].' '.($moving['steps_picked_up'] === 1 ? 'step' : 'steps')
+            .' '.$leaver->name.' picked up or put on hold, '
             .$moving['direct_reports'].' '.($moving['direct_reports'] === 1 ? 'person' : 'people')
             .' reporting to them, and '.$roles.'. '
+            .($moving['steps_going_back'] > 0
+                ? $moving['steps_going_back'].' '.($moving['steps_going_back'] === 1 ? 'step' : 'steps').' '.$leaver->name
+                    .' picked up while covering for a colleague '.($moving['steps_going_back'] === 1 ? 'goes' : 'go').' back to whoever they were covering for. '
+                : '')
+            .'Approvals nobody has started yet go with the roles and the team, and any that name '.$leaver->name
+            .' personally go to their manager once they can no longer sign in. '
             .($moving['stand_in'] ? 'They also become the one who picks up a step nobody holds. ' : '')
             .'It happens in one go and there is no undo. What '.$leaver->name
             .' has already answered stays recorded in their name.';

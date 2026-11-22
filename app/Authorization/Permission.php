@@ -247,11 +247,11 @@ final class Permission
                     ],
                     self::ManageCover => [
                         'label' => 'Set who covers somebody while they are away',
-                        'description' => 'Naming a stand-in hands one person\'s approvals to another for a fortnight, so this one only counts when it covers your whole company — a grant over a single branch does not give it. Anything the person away has already opened stays with them.',
+                        'description' => 'Naming a stand-in hands one person\'s approvals to another for a fortnight, so this one only counts when it covers your whole company — a grant over a single branch does not give it. Anything the person away has picked up or put on hold stays with them.',
                     ],
                     self::SettleHandover => [
                         'label' => "Settle who takes over a leaver's work",
-                        'description' => 'Done from the leaver\'s own exit. It moves the roles they held, the approvals they had already opened and the people who reported to them onto one other person, and it cannot be undone — so like cover, it only counts when it covers your whole company.',
+                        'description' => 'Done from the leaver\'s own exit. It moves the roles they held, the steps they had picked up or put on hold and the people who reported to them onto one other person, bar any step picked up covering for a colleague, which goes back to that colleague. It cannot be undone — so like cover, it only counts when it covers your whole company.',
                     ],
                     self::ManageSettings => [
                         'label' => 'Change the company settings',

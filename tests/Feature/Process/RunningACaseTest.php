@@ -585,7 +585,7 @@ it('re-does a step that had already been claimed', function () {
 
         $second = engine()->claim($case->fresh(), 1, $manager);
 
-        expect($second->getKey())->not->toBe($case->steps()->where('sequence', 1)->first()->getKey());
+        expect($second->getKey())->not->toBe($case->steps()->where('sequence', 1)->oldest('id')->first()->getKey());
         expect(CaseStep::query()->where('case_id', $case->getKey())->where('sequence', 1)->count())->toBe(2);
     });
 });

@@ -99,8 +99,10 @@ final class SubjectPanel
             ],
             // The whole claim of the panel, said on the panel. Without it a designation
             // read a year after the exit closed looks like today's.
-            'asOf' => 'As they were when this case opened on '
-                .$case->opened_at->timezone(FilamentTimezone::get())->format('j F Y').', not as they are today.',
+            // An exit's two dates are its own and HR can move them, so they are today's.
+            'asOf' => 'Job details as they were when this case opened on '
+                .$case->opened_at->timezone(FilamentTimezone::get())->format('j F Y').'.'
+                .($case->statutory_from === null ? '' : ' The last working day and the legal deadline are as they stand today.'),
         ];
     }
 

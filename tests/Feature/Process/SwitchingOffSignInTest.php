@@ -17,6 +17,7 @@ use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
 use Filament\Facades\Filament;
+use Filament\Schemas\Components\Callout;
 use Illuminate\Support\Facades\Artisan;
 use Livewire\Livewire;
 
@@ -259,6 +260,49 @@ it('gives Deepak\'s finance clearance back to Chandni, hold and all, when Rakesh
 
         expect(meridianExitAbout('rakesh')->state)->toBe(ProcessCase::Closed)
             ->and($held->fresh()->outcome)->toBe('closed_disputed');
+    });
+});
+
+it('gives Chandni back a step Rakesh picked up covering for her when his work is handed over, rather than to his successor', function () {
+    TenantContext::run($this->meridian, function () {
+        $chandni = meridianEmployee('chandni');
+        $rakesh = meridianEmployee('rakesh');
+        $deepaks = meridianExitAbout('deepak');
+
+        Delegation::factory()->covering($chandni, $rakesh)->create();
+        (new CaseEngine)->claim($deepaks, 3, $rakesh);
+
+        expect(Succession::whatWouldMove($rakesh))->toMatchArray(['steps_picked_up' => 0, 'steps_going_back' => 1]);
+
+        $dialog = chandniOpens(meridianExitAbout('rakesh'))
+            ->mountAction('handOverTheirWork')
+            ->instance()->getMountedAction()->getModalDescription();
+
+        expect($dialog)->toContain('1 step Rakesh Menon picked up while covering for a colleague goes back to whoever they were covering for.');
+
+        Succession::handOver(meridianExitAbout('rakesh'), meridianEmployee('priya'), $chandni);
+
+        // Given to Priya, it was hers to answer and she could not: it was never her role or
+        // her cover, and Chandni was told somebody else had it (module 03's handover).
+        $step = CaseStep::query()->where('case_id', $deepaks->getKey())->where('sequence', 3)->sole();
+
+        expect((int) $step->assignee_id)->toBe((int) $chandni->getKey());
+
+        chandniOpens($deepaks)
+            ->assertSee('Why: Rakesh Menon picked it up covering for Chandni Verma, and left the company.');
+
+        // And his own exit says where it went, not only Deepak's: in the warning that the
+        // handover stays as it is, read off the open dialog.
+        chandniOpens(meridianExitAbout('rakesh'))
+            ->mountAction('withdraw')
+            ->assertSchemaComponentExists('handover', checkComponentUsing: fn (Callout $warning): bool => str_contains(
+                (string) $warning->getDescription(),
+                '0 steps they had picked up or put on hold. 1 step they had picked up while covering for somebody went back to whoever they covered for.',
+            ));
+
+        (new CaseEngine)->decide($deepaks->fresh(), 3, 'approved', $chandni, ['imprest_card_returned' => true]);
+
+        expect($step->fresh()->outcome)->toBe('approved');
     });
 });
 

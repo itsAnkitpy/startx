@@ -57,7 +57,7 @@ final class AvailableSteps
     /**
      * Every step across the client company that is this person's turn right now.
      *
-     * The queue screen's whole answer, and the same one the handover preview counts.
+     * The queue screen's whole answer.
      * Open cases are read, each one is asked which of its steps is waiting, and each of
      * those is put through the rule that works out who it belongs to — a step nobody has
      * touched has no row with anybody's name on it, so there is nothing to look up and
@@ -87,7 +87,7 @@ final class AvailableSteps
 
         return $this->forAll($open)
             ->filter(function (AvailableStep $available) use ($resolver, $person): bool {
-                $takenBySomebodyElse = $available->attempt?->assignee_id !== null
+                $takenBySomebodyElse = $available->isPickedUp()
                     && (int) $available->attempt->assignee_id !== (int) $person->getKey();
 
                 if ($takenBySomebodyElse) {
@@ -335,9 +335,8 @@ final class AvailableSteps
     private function withManagersToEscalateTo(Collection $available): Collection
     {
         $holders = $available
-            ->filter(fn (AvailableStep $step) => $step->escalationOwed)
-            ->map(fn (AvailableStep $step) => $step->attempt?->assignee_id)
-            ->filter()
+            ->filter(fn (AvailableStep $step) => $step->escalationOwed && $step->isPickedUp())
+            ->map(fn (AvailableStep $step) => $step->attempt->assignee_id)
             ->unique();
 
         if ($holders->isEmpty()) {
@@ -353,7 +352,7 @@ final class AvailableSteps
             ->keyBy('user_id');
 
         return $available->map(function (AvailableStep $step) use ($above) {
-            if (! $step->escalationOwed || $step->attempt?->assignee_id === null) {
+            if (! $step->escalationOwed || ! $step->isPickedUp()) {
                 return $step;
             }
 

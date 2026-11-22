@@ -1655,9 +1655,9 @@ final class CaseEngine
             ->map(fn (AvailableStep $available) => [
                 'sequence' => (int) $available->step->sequence,
                 'step' => $available->step->name,
-                'held_by' => $available->attempt?->assignee_id === null
-                    ? null
-                    : (int) $available->attempt->assignee_id,
+                'held_by' => $available->isPickedUp()
+                    ? (int) $available->attempt->assignee_id
+                    : null,
             ])
             ->values()
             ->all();

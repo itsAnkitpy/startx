@@ -77,7 +77,11 @@
                                     <x-filament::input type="date" id="exit-last-day" wire:model.live="lastWorkingDay" />
                                 </x-filament::input.wrapper>
                                 <p style="font-size: 0.75rem;">
-                                    Everything owed to them is due two working days after this, counted on their own office's calendar.
+                                    @if ($this->isTheirOwn())
+                                        Everything owed to you is due two working days after this, counted on your own office's calendar.
+                                    @else
+                                        Everything owed to them is due two working days after this, counted on their own office's calendar.
+                                    @endif
                                 </p>
                             </x-filament-forms::field-wrapper>
 
@@ -104,7 +108,13 @@
                                     <x-filament::input type="email" id="exit-personal-email" wire:model.live.blur="personalEmail" />
                                 </x-filament::input.wrapper>
                                 <p style="font-size: 0.75rem;">
-                                    Their relieving letter and settlement are sent here once their sign-in has ended. Check it is one they still use.
+                                    {{-- What the sender does, from the day the exit is raised. Nothing
+                                         sends a letter yet; module 09 does. --}}
+                                    @if ($this->isTheirOwn())
+                                        Every email to you about your exit is sent here. Check it is one you still use.
+                                    @else
+                                        Every email to them about their exit is sent here. Check it is one they still use.
+                                    @endif
                                 </p>
                             </x-filament-forms::field-wrapper>
                         @endif

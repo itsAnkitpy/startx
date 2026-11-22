@@ -45,3 +45,25 @@ it('refuses a leaver at the panel page, with no session created', function () {
         expect(auth()->check())->toBeFalse();
     });
 });
+
+it('tells a switched-off person so once they type their own password, and tells a guesser nothing', function () {
+    $meridian = Tenant::factory()->create(['name' => 'Meridian Logistics', 'slug' => 'meridian']);
+
+    TenantContext::run($meridian, function () {
+        User::factory()->inactive()->create(['work_email' => 'priya@example.test']);
+
+        Livewire::test(Login::class)
+            ->fillForm(['email' => 'priya@example.test', 'password' => 'not-her-password'])
+            ->call('authenticate')
+            ->assertSee(__('filament-panels::auth/pages/login.messages.failed'))
+            ->assertDontSee('switched off');
+
+        Livewire::test(Login::class)
+            ->fillForm(['email' => 'priya@example.test', 'password' => 'password'])
+            ->call('authenticate')
+            ->assertSee('Your account is switched off, so you cannot sign in.')
+            ->assertDontSee(__('filament-panels::auth/pages/login.messages.failed'));
+
+        expect(auth()->check())->toBeFalse();
+    });
+});

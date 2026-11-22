@@ -17,8 +17,8 @@ use Carbon\CarbonImmutable;
  * first group it is when the case opened.
  *
  * `attempt` is the live row, where one exists: somebody has picked the step up, or is
- * holding it, or sent the case back from it and is waiting to act again. Null is the
- * ordinary case for a step nobody has started.
+ * holding it, or sent the case back from it. Null is the ordinary case for a step nobody
+ * has started.
  *
  * The rest is the step's own service clock and what is owed on it. All of it is worked
  * out from `availableSince` and the calendar of the office the case's subject worked in,
@@ -63,4 +63,18 @@ final readonly class AvailableStep
         public ?User $escalateTo = null,
         public ?CarbonImmutable $lastNudgeDueAt = null,
     ) {}
+
+    /**
+     * Whether somebody has this step right now: picked it up, or picked it up and held it.
+     *
+     * A step the case was sent back from keeps the sender's name on its row, but once the
+     * correction comes forward it is everybody's it belongs to again, as the engine already
+     * treats it. Read as the sender's, it showed in their queue alone and chased only them,
+     * so a sender who left took it into nobody's queue (the review of 22 November 2026).
+     */
+    public function isPickedUp(): bool
+    {
+        return $this->attempt?->assignee_id !== null
+            && in_array($this->attempt->outcome, [null, 'held'], true);
+    }
 }

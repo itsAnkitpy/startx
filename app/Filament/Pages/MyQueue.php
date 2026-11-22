@@ -139,10 +139,17 @@ class MyQueue extends Page implements HasTable
      * rejecting it: Anjali corrects the salary on her request instead of raising it again
      * from nothing.
      *
-     * Read from the newest row for each step, so a reopened step finds the row the
-     * send-back replaced. Documents are left out: what is stored for one is a note of
-     * where the file went, and handing that back to a file box would have the step refused
-     * for holding something that is not an upload.
+     * Read from the newest row for each step that has answers on it, so a reopened step
+     * finds the row the send-back replaced, and picking the step up, which adds an empty
+     * row, does not blank them (the code review of 22 November 2026). Documents are left
+     * out: what is stored for one is a note of where the file went, and handing that back
+     * to a file box would have the step refused for holding something that is not an
+     * upload.
+     *
+     * **What somebody typed on a step before sending the case back from it is filled in for
+     * them alone.** The step is everybody's it belongs to once the correction comes forward,
+     * and Priya, taking on Rakesh's role, found his recovery figure in her box, where one
+     * press of approve filed it as hers (the code review of 22 November 2026).
      */
     public function mount(): void
     {
@@ -155,24 +162,39 @@ class MyQueue extends Page implements HasTable
         $rows = CaseStep::query()
             ->whereIn('case_id', $queue->map(fn (AvailableStep $waiting) => $waiting->case->getKey())->unique())
             ->orderByDesc('id')
-            ->get(['id', 'case_id', 'sequence', 'payload']);
+            ->get(['id', 'case_id', 'sequence', 'assignee_id', 'outcome', 'payload']);
 
         foreach ($queue as $waiting) {
-            $given = (array) $rows->first(fn (CaseStep $row): bool => (int) $row->case_id === (int) $waiting->case->getKey()
-                && (int) $row->sequence === (int) $waiting->step->sequence)?->payload;
+            $row = $rows->first(fn (CaseStep $row): bool => (int) $row->case_id === (int) $waiting->case->getKey()
+                && (int) $row->sequence === (int) $waiting->step->sequence
+                && (array) $row->payload !== []);
+
+            if ($row?->outcome === 'sent_back' && (int) $row->assignee_id !== (int) $this->person()->getKey()) {
+                continue;
+            }
+
+            $given = (array) $row?->payload;
 
             if ($given === []) {
                 continue;
             }
 
-            $this->answers[$waiting->case->getKey()][$waiting->step->sequence] = array_diff_key(
-                $given,
-                array_flip((new StepForm)->fields($waiting->step)
-                    ->where('type', FormField::File)
-                    ->pluck('key')
-                    ->all()),
-            );
+            $this->answers[$waiting->case->getKey()][$waiting->step->sequence] = $this->withoutDocuments($waiting->step, $given);
         }
+    }
+
+    /**
+     * What a step carries, without its documents, for the reason {@see self::mount()} gives.
+     *
+     * @param  array<string, mixed>  $given
+     * @return array<string, mixed>
+     */
+    private function withoutDocuments(ProcessStep $step, array $given): array
+    {
+        return array_diff_key($given, array_flip((new StepForm)->fields($step)
+            ->where('type', FormField::File)
+            ->pluck('key')
+            ->all()));
     }
 
     /**
@@ -358,8 +380,8 @@ class MyQueue extends Page implements HasTable
             'late' => $step->escalationOwed,
             'due_soon' => ! $step->escalationOwed && $step->nudgesOwed > 0,
             'on_hold' => $held,
-            'yours' => ! $held && (int) $step->attempt?->assignee_id === (int) $this->person()->getKey(),
-            'untouched' => $step->attempt === null,
+            'yours' => ! $held && $step->isPickedUp() && (int) $step->attempt->assignee_id === (int) $this->person()->getKey(),
+            'untouched' => ! $step->isPickedUp(),
             default => true,
         };
     }
@@ -672,6 +694,17 @@ class MyQueue extends Page implements HasTable
         if ($recorded) {
             unset($this->answers[$caseId][$sequence], $this->reasons[$caseId][$sequence], $this->sendBackTo[$caseId][$sequence]);
             $this->asking = null;
+
+            // A hold keeps the step on this card, so what it now carries goes back in the
+            // boxes. Cleared like the rest, they read blank until a reload, though the figure
+            // was saved (the walk of 22 November 2026).
+            if ($outcome === 'held' && $waiting !== null) {
+                $this->answers[$caseId][$sequence] = $this->withoutDocuments($waiting->step, (array) CaseStep::query()
+                    ->where('case_id', $caseId)
+                    ->where('sequence', $sequence)
+                    ->whereNull('superseded_at')
+                    ->first()?->payload);
+            }
         }
     }
 

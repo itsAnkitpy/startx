@@ -26,7 +26,7 @@ class DelegationForm
             ->components([
                 Select::make('user_id')
                     ->label('Who is away')
-                    ->helperText('Whoever is going away. Their approvals keep reaching them as well, so somebody away but reading their mail is never locked out of their own work — and anything they have already opened stays with them.')
+                    ->helperText('Whoever is going away. Their approvals keep reaching them as well, so somebody away but reading their mail is never locked out of their own work — and anything they have picked up or put on hold stays with them.')
                     ->options(fn (): array => User::everybodyHere())
                     ->searchable()
                     ->required()

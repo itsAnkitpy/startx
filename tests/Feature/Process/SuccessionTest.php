@@ -134,18 +134,6 @@ function theirManagerOn(User $person, string $date): ?string
 | What Priya is about to inherit
 */
 
-it('counts approvals waiting on the leaver that nobody has opened yet', function () {
-    TenantContext::run($this->meridian, function () {
-        $world = rakeshsDeparture();
-
-        // Nobody has touched Anjali's clearance, so there is no row anywhere to count it
-        // from — and it is exactly the work most likely to have been sitting untouched.
-        expect(CaseStep::query()->count())->toBe(0);
-
-        expect(Succession::whatWouldMove($world['rakesh'])['approvals_waiting'])->toBe(1);
-    });
-});
-
 it('shows how many people report to the leaver today, and which roles they hold', function () {
     TenantContext::run($this->meridian, function () {
         $world = rakeshsDeparture();
@@ -157,7 +145,7 @@ it('shows how many people report to the leaver today, and which roles they hold'
 
         expect(Succession::whatWouldMove($world['rakesh']))
             ->toMatchArray([
-                'approvals_waiting' => 1,
+                'steps_picked_up' => 0,
                 'direct_reports' => 2,
                 'roles' => ['HR head — Shimla branch'],
             ]);
@@ -409,7 +397,7 @@ it('writes the handover onto the exit\'s own history', function () {
         expect($settled->payload['to']['name'])->toBe('Priya Nair')
             ->and($settled->payload['effective_at'])->toBe('2026-09-20')
             ->and($settled->payload['moved'])
-            ->toEqual(['approvals' => 1, 'roles' => 1, 'reporting_lines' => 2, 'stand_in' => false]);
+            ->toEqual(['approvals' => 1, 'handed_back' => 0, 'roles' => 1, 'reporting_lines' => 2, 'stand_in' => false]);
     });
 });
 

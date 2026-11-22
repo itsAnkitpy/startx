@@ -76,9 +76,9 @@ it('shows every moment on a case on the reader company clock rather than UTC', f
         Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
             ->assertOk()
             // Filament's own: when each message went out.
-            ->assertSee('Dec 2, 2026 01:30:00')
+            ->assertSee('2 December 2026, 01:30')
             // A moment shown as a day, which Filament would read on UTC's calendar.
-            ->assertSeeInOrder(['Started', 'Dec 2, 2026'])
+            ->assertSeeInOrder(['Started', '2 December 2026'])
             // Our own sentence about each answer.
             ->assertSee('Approved by Priya Nair on 2 December 2026')
             ->assertDontSee('1 December 2026')
@@ -91,7 +91,7 @@ it('shows every moment on a case on the reader company clock rather than UTC', f
 
         // The panel about the person, which the queue screen draws above a decision.
         expect((new SubjectPanel)->of($exit)['asOf'])
-            ->toBe('As they were when this case opened on 2 December 2026, not as they are today.');
+            ->toBe('Job details as they were when this case opened on 2 December 2026. The last working day and the legal deadline are as they stand today.');
     });
 });
 
@@ -156,7 +156,7 @@ it('shows a moment in the reader own time zone ahead of their company one', func
 
         Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
             ->assertOk()
-            ->assertSee('Dec 1, 2026 15:00:00')
+            ->assertSee('1 December 2026, 15:00')
             ->assertSee('Approved by Priya Nair on 1 December 2026');
     });
 });

@@ -15,7 +15,7 @@
     $waiting = $record['waiting'];
     $case = $waiting->case;
     $step = $waiting->step;
-    $mine = $waiting->attempt?->assignee_id === auth()->id();
+    $mine = $waiting->isPickedUp() && $waiting->attempt->assignee_id === auth()->id();
     $onHold = $waiting->attempt?->outcome === 'held';
     $nobodyHolds = $record['nobodyHolds'];
     $escalated = $record['escalated'];
@@ -254,9 +254,16 @@
                      an element selector, so the same class on a textarea matches
                      nothing. --}}
                 <x-filament::input.wrapper :valid="! $errors->has($reason)" class="fi-fo-textarea">
+                    {{-- The cursor goes here, which scrolls it into view: the box opens at the
+                         foot of the card, and on a long one the button pressed seemed to do
+                         nothing (the walk of 22 November 2026). --}}
                     <textarea
                         id="reason-{{ $asked }}"
                         rows="3"
+                        {{-- Keyed on the outcome too, so changing which it is draws a fresh box
+                             and the cursor goes back into it. --}}
+                        wire:key="reason-{{ $page->asking }}"
+                        x-init="$el.focus()"
                         wire:model.live.blur="{{ $reason }}"
                     ></textarea>
                 </x-filament::input.wrapper>

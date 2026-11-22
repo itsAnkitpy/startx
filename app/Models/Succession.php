@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Exceptions\ProcessRefused;
 use App\Process\AssigneeResolver;
-use App\Process\AvailableSteps;
 use App\Settings\Settings;
 use App\Tenancy\BelongsToTenant;
 use Carbon\CarbonImmutable;
@@ -103,27 +102,27 @@ class Succession extends Model
      * exactly the right moment, because it is the one moment the organisation knows it
      * is happening.
      *
-     * **The approvals are counted through the reader that works out whose turn it is,
-     * not from the rows people have already opened.** Most of Rakesh's twelve are steps
-     * he never touched, and a step nobody has touched has no row anywhere — so a count
-     * taken from the rows would show a reassuringly small number and miss exactly the
-     * work that has been sitting untouched, which is the work most likely to breach.
+     * **The steps counted are the ones the handover itself moves**: those the leaver picked
+     * up or put on hold. Approvals nobody has started have no row to move and follow the
+     * roles and the team, which the dialog lists. Counting those through the reader that
+     * works out whose turn it is read 0 on the usual day to hand over, because by then the
+     * leaver's sign-in is off and the reader leaves them out (Ankit's call, 22 November 2026).
+     * A step they picked up covering for a colleague goes back to that colleague instead,
+     * so it is counted apart.
      *
      * **The direct reports are the rows with no end date**, so the figure is who reports
      * to him today rather than everybody who ever did.
      *
-     * ponytail: whose job each waiting step is, is worked out one step at a time, so a
-     * client with a great many open cases pays a handful of reads per open step for this
-     * one screen. Left as it is because it is a once-per-exit answer a person is waiting
-     * on, and because the alternative — storing who each step belongs to — is the thing
-     * this whole module exists to avoid. Narrow the open cases first if it is ever felt.
-     *
-     * @return array{approvals_waiting: int, direct_reports: int, roles: list<string>, stand_in: bool}
+     * @return array{steps_picked_up: int, steps_going_back: int, direct_reports: int, roles: list<string>, stand_in: bool}
      */
     public static function whatWouldMove(User $leaver): array
     {
+        $steps = self::stepsStillTheirs($leaver)->get();
+        $goingBack = $steps->filter(fn (CaseStep $step): bool => self::coveredFor($step, $leaver) !== null)->count();
+
         return [
-            'approvals_waiting' => (new AvailableSteps)->waitingOn($leaver)->count(),
+            'steps_picked_up' => $steps->count() - $goingBack,
+            'steps_going_back' => $goingBack,
             'direct_reports' => self::peopleReportingTo($leaver)->count(),
             'stand_in' => self::theyPickUpStepsNobodyHolds($leaver),
             'roles' => RoleAssignment::query()
@@ -194,12 +193,12 @@ class Succession extends Model
         $handedOver = self::query()->where('case_id', $exit->getKey())->first();
 
         if ($handedOver === null) {
-            return "{$leaver->name} still has {$what}, and it has to move on before this exit can finish. "
+            return "{$leaver->name} still has {$what}, and all of it has to be handed over before this exit can finish. "
                 .'Press "Hand over their work" on this exit\'s page, or ask somebody who can.';
         }
 
         return "{$leaver->name}'s work was handed to {$handedOver->successor->name} on {$handedOver->effective_at->format('j F Y')}, "
-            ."and since then {$what} reached them. It has to move on before this exit can finish: roles on the roles screen, "
+            ."and since then {$what} reached them. That has to move on before this exit can finish: roles on the roles screen, "
             .'the people reporting to them on the people screen, and who picks up a step nobody holds on the settings screen. '
             .'A step they have picked up is theirs to answer before they go, and one they picked up while covering for somebody goes back to that person when their sign-in switches off.';
     }
@@ -286,8 +285,11 @@ class Succession extends Model
             $succession->recorded_by = $by->getKey();
             $succession->save();
 
+            $steps = self::moveTheStepsHeHadOpened($leaver, $successor, $case, $by);
+
             $moved = [
-                'approvals' => self::moveTheStepsHeHadOpened($leaver, $successor, $case, $by),
+                'approvals' => $steps['to_the_successor'],
+                'handed_back' => $steps['handed_back'],
                 'roles' => self::moveTheRolesHeHeld($leaver, $successor),
                 'reporting_lines' => self::moveThePeopleWhoReportedToHim($leaver, $successor, $case, $by, $from),
                 'stand_in' => self::moveTheStandIn($leaver, $successor),
@@ -331,20 +333,33 @@ class Succession extends Model
      * Only the steps he had opened. A step nobody has touched has no row to move, and
      * needs none: whose job it is, is worked out on every read, and once the roles below
      * have moved it is already the successor's.
+     *
+     * **One he picked up covering for a colleague goes back to that colleague**, as it does
+     * when his sign-in switches off. Given to the successor, it sat on somebody who could
+     * not answer it, never their role or their cover, while the colleague was told somebody
+     * else had it (module 03's handover, found 22 November 2026).
+     *
+     * @return array{to_the_successor: int, handed_back: int}
      */
     private static function moveTheStepsHeHadOpened(
         User $leaver,
         User $successor,
         ProcessCase $because,
         User $by,
-    ): int {
-        $claimed = self::stepsStillTheirs($leaver)->get();
+    ): array {
+        $moved = ['to_the_successor' => 0, 'handed_back' => 0];
 
-        foreach ($claimed as $step) {
-            self::moveOneStep($step, $leaver, $successor, $by, "{$leaver->name} left the company", $because);
+        foreach (self::stepsStillTheirs($leaver)->get() as $step) {
+            $colleague = self::coveredFor($step, $leaver);
+
+            self::moveOneStep($step, $leaver, $colleague ?? $successor, $by, $colleague === null
+                ? "{$leaver->name} left the company"
+                : "{$leaver->name} picked it up covering for {$colleague->name}, and left the company", $because);
+
+            $moved[$colleague === null ? 'to_the_successor' : 'handed_back']++;
         }
 
-        return $claimed->count();
+        return $moved;
     }
 
     /**
@@ -369,13 +384,7 @@ class Succession extends Model
         $given = 0;
 
         foreach (self::stepsStillTheirs($leaver)->get() as $step) {
-            $asTheyPickedItUp = collect($step->candidates_at_claim ?? [])
-                ->first(fn (array $candidate): bool => (int) ($candidate['id'] ?? 0) === (int) $leaver->getKey());
-            $coveredFor = $asTheyPickedItUp['covering_for']['id'] ?? null;
-
-            $colleague = $coveredFor === null
-                ? null
-                : User::query()->whereKey($coveredFor)->where('active', true)->first();
+            $colleague = self::coveredFor($step, $leaver);
 
             if ($colleague === null) {
                 continue;
@@ -393,6 +402,20 @@ class Succession extends Model
         }
 
         return $given;
+    }
+
+    /**
+     * The colleague somebody picked a step up covering for, read off the step as they
+     * picked it up, or null where it was theirs in their own right or that colleague cannot
+     * sign in either, which would only move the hole.
+     */
+    private static function coveredFor(CaseStep $step, User $leaver): ?User
+    {
+        $asTheyPickedItUp = collect($step->candidates_at_claim ?? [])
+            ->first(fn (array $candidate): bool => (int) ($candidate['id'] ?? 0) === (int) $leaver->getKey());
+        $coveredFor = $asTheyPickedItUp['covering_for']['id'] ?? null;
+
+        return $coveredFor === null ? null : User::query()->whereKey($coveredFor)->where('active', true)->first();
     }
 
     /**
