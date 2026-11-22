@@ -261,19 +261,78 @@ class CaseHistory
     }
 
     /**
+     * When the leaver's sign-in goes off, or went off, for the exit's page (module 07 step
+     * 5). Nothing on a withdrawn exit or one a colleague turned down, where nobody is
+     * leaving, unless sign-in had already gone off.
+     *
+     * Read off the exit's own history rather than the account alone, because an account can
+     * be off for other reasons and turned back on by hand. A last working day moved later
+     * after it went off says so, since the pass never turns anybody back on.
+     */
+    public function signIn(ProcessCase $case): ?string
+    {
+        if ($case->statutory_from === null || $case->cancelled_at !== null || ! $case->subject instanceof User) {
+            return null;
+        }
+
+        $lastDay = $case->statutory_from->format('j F Y');
+        $wentOff = $case->events->last(fn (CaseEvent $event): bool => $event->type === CaseEngine::SignInSwitchedOffEvent);
+        $wentOffAfter = $wentOff === null ? null : (string) (((array) $wentOff->payload)['last_working_day'] ?? '');
+
+        if ($wentOffAfter === $case->statutory_from->toDateString()) {
+            return "Switched off at the end of {$lastDay}".($case->subject->active ? ', and turned back on since' : '');
+        }
+
+        if ($wentOffAfter !== null && $wentOffAfter < $case->statutory_from->toDateString() && ! $case->subject->active) {
+            return 'Switched off at the end of '.CarbonImmutable::parse($wentOffAfter)->format('j F Y')
+                .", before the last working day moved to {$lastDay}. Turn it back on from the people screen if they are still working.";
+        }
+
+        // Turned down by somebody signed in, so nobody is leaving and the pass never comes:
+        // the rule in CaseEngine::exitsThatMayOweASwitchOff(), read off the loaded history.
+        $turnedDown = $case->events->contains(fn (CaseEvent $event): bool => $event->type === 'case_closed'
+            && (((array) $event->payload)['because'] ?? null) === 'rejected'
+            && $event->actor_id !== null);
+
+        if ($turnedDown) {
+            return null;
+        }
+
+        // HR switched it off by hand before the day, so "switches off once" would be untrue.
+        if (! $case->subject->active) {
+            return 'Already switched off';
+        }
+
+        return "Switches off once {$lastDay} has ended";
+    }
+
+    /**
      * What was changed on the case itself rather than at one of its steps, oldest first: a
-     * moved last working day, a corrected way of leaving, and a withdrawal, each with who,
-     * when and why. Read off the case's own trail, so the page says what was done on the
-     * day.
+     * moved last working day, a corrected way of leaving, a withdrawal, each with who, when
+     * and why, and the leaver's sign-in going off after their last day. Read off the case's
+     * own trail, so the page says what was done on the day.
      *
      * @return list<string>
      */
     public function changesSinceItOpened(ProcessCase $case): array
     {
         return $case->events
-            ->whereIn('type', ['case_amended', 'case_cancelled'])
+            ->whereIn('type', ['case_amended', 'case_cancelled', CaseEngine::SignInSwitchedOffEvent])
             ->map(function (CaseEvent $event): string {
                 $said = (array) $event->payload;
+
+                if ($event->type === CaseEngine::SignInSwitchedOffEvent) {
+                    $handedBack = (int) ($said['handed_back'] ?? 0);
+
+                    return 'Sign-in switched off at the end of the last working day, '
+                        .CarbonImmutable::parse((string) $said['last_working_day'])->format('j F Y').'.'
+                        .match ($handedBack) {
+                            0 => '',
+                            1 => ' 1 step they had picked up while covering for somebody went back to whoever they covered for.',
+                            default => " {$handedBack} steps they had picked up while covering for somebody went back to whoever they covered for.",
+                        };
+                }
+
                 $byAndWhen = ' by '.($event->actor?->name ?? 'somebody').' on '
                     .$event->created_at->timezone(FilamentTimezone::get())->format('j F Y').'.';
                 $why = trim((string) ($said['reason'] ?? '')) === '' ? '' : ' Why: '.$said['reason'];

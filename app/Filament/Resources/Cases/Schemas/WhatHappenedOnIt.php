@@ -90,6 +90,12 @@ class WhatHappenedOnIt
                             ->date()
                             ->visible(fn (ProcessCase $record): bool => $record->statutory_from !== null),
 
+                        // Beside the day it follows from (module 07 step 5).
+                        TextEntry::make('sign_in')
+                            ->label('Sign-in')
+                            ->state(fn (ProcessCase $record): ?string => $history->signIn($record))
+                            ->visible(fn (?string $state): bool => filled($state)),
+
                         TextEntry::make('employment_ended_by')
                             ->label('How their employment ends')
                             ->state(fn (ProcessCase $record): string => ProcessCase::WaysEmploymentEnds[$record->employment_ended_by] ?? 'Not recorded')

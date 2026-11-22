@@ -8,6 +8,8 @@ use App\Process\StepLink;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
 
 /*
 | Module 07 step 1 in a real browser: Deepak resigns from the raise screen and is told
@@ -200,5 +202,43 @@ it('refuses Priya\'s final check while Rakesh\'s work is on him, and finishes hi
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/cases/'.$rakeshs->getKey())
         ->assertSee('Finished')
+        ->assertNoSmoke();
+});
+
+/*
+| Module 07 step 5 in a real browser: Chandni reads on Rakesh's exit when his sign-in
+| switches off. Once his last working day has ended on Meridian's clock the every-minute
+| pass switches it off, Rakesh is refused at the sign-in screen, and Chandni reads on his
+| exit that it went off and when.
+*/
+
+it('switches Rakesh\'s sign-in off once his last working day has ended, and says so on his exit\'s page', function () {
+    $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+    $rakeshs = TenantContext::run($meridian, fn (): ProcessCase => ProcessCase::query()->whereRelation('subject', 'first_name', 'Rakesh')->sole());
+    $lastDay = $rakeshs->statutory_from->format('j F Y');
+
+    browseAs(personAt(MeridianSeeder::Slug, 'chandni'), '/admin/cases/'.$rakeshs->getKey())
+        ->assertSee('Switches off once '.$lastDay.' has ended')
+        ->assertNoSmoke();
+
+    // The morning after, in India.
+    $this->travelTo(CarbonImmutable::parse($rakeshs->statutory_from->toDateString().' 09:00', 'Asia/Kolkata')->addDay());
+    Artisan::call('steps:chase');
+
+    test()->flushSession();
+    Auth::guard()->forgetUser();
+    pest()->browser()->withHost(MeridianSeeder::Slug.'.'.config('tenancy.central_domain'));
+
+    visit('/admin/login')
+        ->fill('[id$="email"]', 'rakesh@meridian.test')
+        ->fill('[id$="password"]', MeridianSeeder::Password)
+        ->press('[type="submit"]')
+        ->assertSee('These credentials do not match our records')
+        ->assertPathIs('/admin/login')
+        ->assertNoSmoke();
+
+    browseAs(personAt(MeridianSeeder::Slug, 'chandni'), '/admin/cases/'.$rakeshs->getKey())
+        ->assertSee('Switched off at the end of '.$lastDay)
+        ->assertSee('Sign-in switched off at the end of the last working day, '.$lastDay.'.')
         ->assertNoSmoke();
 });

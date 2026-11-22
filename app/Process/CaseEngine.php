@@ -18,6 +18,8 @@ use App\Notifications\Sender;
 use App\Notifications\TemplateCatalogue;
 use App\Settings\Settings;
 use Carbon\CarbonImmutable;
+use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +54,9 @@ final class CaseEngine
 
     /** Why a case closed, where it closed because every step of it was answered. */
     private const Completed = 'completed';
+
+    /** What an exit's history calls the leaver's sign-in going off after their last day. */
+    public const SignInSwitchedOffEvent = 'sign_in_switched_off';
 
     /**
      * Section 56(3) of the Code on Social Security, 2020: gratuity is paid within thirty
@@ -976,6 +981,94 @@ final class CaseEngine
                 ->where('case_id', $case->getKey())
                 ->whereIn('type', ['step_acted', 'case_amended', Succession::HandoverSettledEvent])
                 ->exists();
+    }
+
+    /**
+     * One job for each exit whose leaver's sign-in is owed switching off: their last working
+     * day has ended on the company's clock (module 07 step 5). The every-minute pass runs
+     * each in its own write, so one that fails cannot hold up the rest of the company.
+     *
+     * **Whether the exit has finished or not.** An exit waiting on a handover or a held
+     * clearance holds the case, never the person.
+     *
+     * **Once for each last working day.** The line it writes in the exit's history carries
+     * the day it was for, and an exit with that line for its current day is passed over. So
+     * HR turning the account back on is never undone, and a day moved later switches it off
+     * again once the new day ends. No column, because the history already has to say it.
+     *
+     * @return list<Closure(): bool>
+     */
+    public function signInsOwedSwitchingOff(): array
+    {
+        return $this->exitsThatMayOweASwitchOff()
+            ->with('tenant')
+            ->get()
+            ->filter(fn (ProcessCase $exit): bool => $this->theLastWorkingDayHasPassed($exit))
+            ->map(fn (ProcessCase $exit): Closure => fn (): bool => $this->switchOffSignIn($exit))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Every exit whose leaver may still be owed a switch-off, whatever the clock says.
+     *
+     * Never a withdrawn one, nor one somebody at the company turned down: Priya turning
+     * down Deepak's resignation because he is staying must not lock him out on the day he
+     * once meant to leave. One turned down from the leaver's own link still counts, or
+     * Rakesh refusing to confirm his own handover would keep him signed in after he has
+     * gone.
+     *
+     * @return Builder<ProcessCase>
+     */
+    private function exitsThatMayOweASwitchOff(): Builder
+    {
+        return ProcessCase::query()
+            ->whereNotNull('statutory_from')
+            ->whereNotNull('subject_user_id')
+            ->whereNull('cancelled_at')
+            ->whereDoesntHave('events', fn (Builder $turnedDown) => $turnedDown
+                ->where('type', 'case_closed')
+                ->where('payload->because', 'rejected')
+                ->whereNotNull('actor_id'))
+            ->whereDoesntHave('events', fn (Builder $done) => $done
+                ->where('type', self::SignInSwitchedOffEvent)
+                ->whereRaw("(payload->>'last_working_day')::date = cases.statutory_from"));
+    }
+
+    /**
+     * The leaver can no longer sign in, and whatever they picked up while covering goes back
+     * to whoever they covered for — see {@see Succession::giveBackWhatTheyPickedUpCovering()}.
+     * Switching off is the one column every way of signing in already asks, so somebody
+     * signed in at midnight is out on their next click.
+     *
+     * The whole question is asked again under the case's lock, so whatever happened to the
+     * exit in the moment since the pass found it wins: HR moving the day later, a colleague
+     * turning it down, or HR withdrawing it a second before midnight.
+     * Nobody is told. The leaver knows their last day, and HR reads it on the exit's page.
+     */
+    private function switchOffSignIn(ProcessCase $exit): bool
+    {
+        return DB::transaction(function () use ($exit): bool {
+            $this->holdTheCaseStill($exit);
+
+            if (! $this->theLastWorkingDayHasPassed($exit)
+                || ! $this->exitsThatMayOweASwitchOff()->whereKey($exit->getKey())->exists()) {
+                return false;
+            }
+
+            $leaver = $exit->subject;
+            $handedBack = Succession::giveBackWhatTheyPickedUpCovering($leaver, $exit);
+
+            $leaver->active = false;
+            $leaver->save();
+
+            $this->record($exit, self::SignInSwitchedOffEvent, null, [
+                'last_working_day' => $exit->statutory_from->toDateString(),
+                'handed_back' => $handedBack,
+            ]);
+
+            return true;
+        });
     }
 
     /** Whether the last working day is behind us on the company's own calendar. */

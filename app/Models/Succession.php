@@ -201,7 +201,7 @@ class Succession extends Model
         return "{$leaver->name}'s work was handed to {$handedOver->successor->name} on {$handedOver->effective_at->format('j F Y')}, "
             ."and since then {$what} reached them. It has to move on before this exit can finish: roles on the roles screen, "
             .'the people reporting to them on the people screen, and who picks up a step nobody holds on the settings screen. '
-            .'A step they have picked up is theirs to answer before they go.';
+            .'A step they have picked up is theirs to answer before they go, and one they picked up while covering for somebody goes back to that person when their sign-in switches off.';
     }
 
     /**
@@ -341,23 +341,80 @@ class Succession extends Model
         $claimed = self::stepsStillTheirs($leaver)->get();
 
         foreach ($claimed as $step) {
-            $step->update(['assignee_id' => $successor->getKey()]);
-
-            CaseEvent::create([
-                'case_id' => $step->case_id,
-                'actor_id' => $by->getKey(),
-                'type' => self::StepTransferredEvent,
-                'payload' => [
-                    'sequence' => $step->sequence,
-                    'from' => ['id' => (int) $leaver->getKey(), 'name' => $leaver->name],
-                    'to' => ['id' => (int) $successor->getKey(), 'name' => $successor->name],
-                    'because' => "{$leaver->name} left the company",
-                    'settled_in_case' => (int) $because->getKey(),
-                ],
-            ]);
+            self::moveOneStep($step, $leaver, $successor, $by, "{$leaver->name} left the company", $because);
         }
 
         return $claimed->count();
+    }
+
+    /**
+     * The steps somebody picked up or put on hold while covering for a colleague, given
+     * back to that colleague when their sign-in is switched off at the end of their last
+     * working day (module 07 step 5).
+     *
+     * Rakesh covering Chandni's finance approvals picks up Deepak's finance clearance the
+     * day before he goes. Without this nobody can answer it once he cannot sign in: it has
+     * his name on it, so Chandni is refused, and it holds his own exit for ever. Who he
+     * was covering for was written on the step when he picked it up, so nothing new is
+     * stored. A hold goes back with its reason and amount, as the handover moves one.
+     *
+     * Only a cover. A step he picked up in his own right after the handover has nobody to
+     * go back to, and stays on him with his exit's page saying so. Nor to a colleague who
+     * cannot sign in either, which would only move the hole.
+     *
+     * @return int how many went back
+     */
+    public static function giveBackWhatTheyPickedUpCovering(User $leaver, ProcessCase $because): int
+    {
+        $given = 0;
+
+        foreach (self::stepsStillTheirs($leaver)->get() as $step) {
+            $asTheyPickedItUp = collect($step->candidates_at_claim ?? [])
+                ->first(fn (array $candidate): bool => (int) ($candidate['id'] ?? 0) === (int) $leaver->getKey());
+            $coveredFor = $asTheyPickedItUp['covering_for']['id'] ?? null;
+
+            $colleague = $coveredFor === null
+                ? null
+                : User::query()->whereKey($coveredFor)->where('active', true)->first();
+
+            if ($colleague === null) {
+                continue;
+            }
+
+            self::moveOneStep(
+                $step,
+                $leaver,
+                $colleague,
+                null,
+                "{$leaver->name} picked it up covering for {$colleague->name}, and their sign-in was switched off at the end of their last working day",
+                $because,
+            );
+            $given++;
+        }
+
+        return $given;
+    }
+
+    /**
+     * One step changing hands, written into its own case as a transfer so the history says
+     * who had it, who has it now and why.
+     */
+    private static function moveOneStep(CaseStep $step, User $from, User $to, ?User $by, string $why, ProcessCase $settledIn): void
+    {
+        $step->update(['assignee_id' => $to->getKey()]);
+
+        CaseEvent::create([
+            'case_id' => $step->case_id,
+            'actor_id' => $by?->getKey(),
+            'type' => self::StepTransferredEvent,
+            'payload' => [
+                'sequence' => $step->sequence,
+                'from' => ['id' => (int) $from->getKey(), 'name' => $from->name],
+                'to' => ['id' => (int) $to->getKey(), 'name' => $to->name],
+                'because' => $why,
+                'settled_in_case' => (int) $settledIn->getKey(),
+            ],
+        ]);
     }
 
     /**
