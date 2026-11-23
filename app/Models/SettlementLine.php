@@ -52,11 +52,13 @@ class SettlementLine extends Model
      * override, where the holder may never have seen it: Chandni holds finance at 40,000 and
      * leaves, her held work goes to Rakesh, and Priya overrides. The figure is Chandni's, and
      * the history says so in the line that put it on hold.
+     *
+     * @return list<self> the lines written, so the person leaving can be told of each claim
      */
-    public static function fileFor(CaseStep $attempt, ProcessStep $step): void
+    public static function fileFor(CaseStep $attempt, ProcessStep $step): array
     {
         if (! in_array($attempt->outcome, CaseStep::PassingOutcomes, true)) {
-            return;
+            return [];
         }
 
         $enteredBy = $attempt->outcome === 'force_closed'
@@ -69,9 +71,30 @@ class SettlementLine extends Model
                 ->value('actor_id')
             : $attempt->assignee_id;
 
-        foreach (self::owedBy($attempt, $step) as $line) {
-            self::create([...$line, 'entered_by' => $enteredBy]);
-        }
+        return array_map(
+            fn (array $line): self => self::create([...$line, 'entered_by' => $enteredBy]),
+            self::owedBy($attempt, $step),
+        );
+    }
+
+    /**
+     * The claims the person leaving was last told of on this clearance: the recoveries on its
+     * last passed attempt before this one, by question. Empty the first time it passes.
+     *
+     * @return Collection<string, self>
+     */
+    public static function recoveriesBefore(CaseStep $attempt): Collection
+    {
+        return self::query()
+            ->where('case_step_id', CaseStep::query()->select('id')
+                ->where('case_id', $attempt->case_id)
+                ->where('sequence', $attempt->sequence)
+                ->where('id', '<', $attempt->getKey())
+                ->whereIn('outcome', CaseStep::PassingOutcomes)
+                ->latest('id')
+                ->limit(1))
+            ->where('direction', self::Recovery)
+            ->orderBy('id')->get()->keyBy('field_key');
     }
 
     /**

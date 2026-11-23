@@ -6,6 +6,7 @@ use App\Models\FormField;
 use App\Models\ProcessStep;
 use App\Process\StepForm;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Validator;
 
 /**
  * What a screen needs in order to draw a step's own form and check what was typed into
@@ -62,18 +63,22 @@ trait DrawsAStepsForm
      * What was typed, dropped to what was actually answered, and refused under the right
      * box if the client's own rules are not met.
      *
-     * **The empty boxes are dropped from the page first, before anything is checked**,
-     * because the engine drops them too and what is left has to be the same on both sides.
-     * A yes/no left on "Not answered" arrives as an empty string, which Laravel treats as
-     * an answer and the engine does not — so without this the screen lets it through and
-     * the engine refuses it, and the person gets a sentence at the top of the page about a
-     * box with no mark against it.
+     * **What is checked is what was typed with the empty boxes dropped**, because the
+     * engine drops them too and what is left has to be the same on both sides. A yes/no
+     * left on "Not answered" arrives as an empty string, which Laravel treats as an answer
+     * and the engine does not — so without this the screen lets it through and the engine
+     * refuses it, and the person gets a sentence at the top of the page about a box with no
+     * mark against it.
      *
-     * **A step that asks nothing has nothing to check, and asking Livewire to check
-     * nothing is an error rather than a pass:** handed an empty list it goes looking for
-     * rules written on the page itself, finds none, and throws. A manager sign-off and
-     * both hiring approvals are only a decision, so every one of them ended on an error
-     * page the moment anybody pressed the button.
+     * **A copy is checked, never the page**, so a refusal leaves the card exactly as it was
+     * typed. Checked on the page, the dropped boxes stayed dropped after a refusal, and the
+     * next press no longer said one had been emptied: Chandni empties the 40,000 she held,
+     * a payable of 12.345 is refused, she corrects it, and the 40,000 was filed and claimed
+     * from Deepak while her box read empty.
+     *
+     * **A step that asks nothing is not checked at all**, such as a manager sign-off or
+     * either hiring approval, so a refusal still showing on another card stays beside its
+     * box.
      *
      * `$finishingTheStep` is false for a rejection, a hold and a send-back, and it decides
      * only whether a required question is demanded — the engine draws the same line for
@@ -91,12 +96,6 @@ trait DrawsAStepsForm
         $typed = (array) data_get($this, $under, []);
         $given = $forms->answered($typed);
 
-        // Put back on the page before a word of it is checked, and that ordering is the
-        // whole of it rather than tidiness: what Livewire checks is the page's own state,
-        // not what is handed to it, so an empty box still sitting there is a box with
-        // something in it as far as a required question is concerned.
-        data_set($this, $under, $given);
-
         // Rewritten under the property path the inputs are bound to, so a refusal lands
         // beside the box it is about instead of at the top of the page.
         $rules = collect($forms->rules($step, $given, $finishingTheStep))
@@ -104,13 +103,21 @@ trait DrawsAStepsForm
             ->all();
 
         if ($rules !== []) {
-            $this->validate(
+            $checked = [];
+            data_set($checked, $under, $given);
+
+            Validator::make(
+                $checked,
                 $rules,
                 [],
                 collect($forms->labels($step))
                     ->mapWithKeys(fn (string $label, string $key): array => [$under.'.'.$key => $label])
                     ->all(),
-            );
+            )->validate();
+
+            // What Livewire's own check does once it passes, so a refusal from the press
+            // before does not stay under a box that is now right.
+            $this->resetErrorBag();
         }
 
         // Checked, the boxes somebody emptied go back as empty rather than not at all, so the

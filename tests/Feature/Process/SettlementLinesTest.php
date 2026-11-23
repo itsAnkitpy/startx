@@ -2,9 +2,12 @@
 
 use App\Exceptions\ProcessRefused;
 use App\Filament\Pages\MyQueue;
+use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\EmploymentRecord;
+use App\Models\FormDefinition;
 use App\Models\FormField;
+use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -12,14 +15,19 @@ use App\Models\SettlementLine;
 use App\Models\Succession;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Process\CaseEngine;
 use App\Process\StepLink;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
 use Database\Seeders\VertexSeeder;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
 /*
@@ -29,7 +37,8 @@ use Livewire\Livewire;
 | Chandni holds finance on every Meridian exit, and Deepak's is waiting on her. Her form asks
 | what to recover from him and why, and what is payable to him. A figure becomes a line when
 | her clearance passes, by any of the three ways a clearance passes, and an exit cannot
-| finish while a figure filed that way has no line.
+| finish while a figure filed that way has no line. Step 2: Deepak is told of each recovery
+| as its line is written, because his seven days to answer it start then.
 |
 | A refused statement abandons the surrounding transaction in Postgres, which under
 | RefreshDatabase is the test's own, so each expected database refusal has a test to itself.
@@ -49,6 +58,38 @@ function owedAtMeridian(string $first): User
 function deepaksExitAwaitingFinance(): ProcessCase
 {
     return ProcessCase::query()->where('subject_user_id', owedAtMeridian('deepak')->getKey())->sole();
+}
+
+/**
+ * Every claim the person leaving was told of on this exit, oldest first.
+ *
+ * @return Collection<int, NotificationDelivery>
+ */
+function claimsToldOn(ProcessCase $exit): Collection
+{
+    return NotificationDelivery::query()->where('case_id', $exit->getKey())
+        ->whereIn('template_key', [TemplateCatalogue::MoneyClaimedSubject, TemplateCatalogue::MoneyClaimChangedSubject])
+        ->orderBy('id')->get();
+}
+
+/** Finance claims 40,000 from Farah, and HR's final check sends finance back to answer again. */
+function financeSentBackAfterClaiming40000(): ProcessCase
+{
+    $process = ProcessTemplate::factory()->named('exit_claim_sent_back', 'Exit')->about('employee')->create();
+    ProcessStep::factory()->of($process)->at(1, 1)->named('Finance clearance')
+        ->collecting('claim_amount', FormField::Money, SettlementLine::Recovery)
+        ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'held')->create();
+    ProcessStep::factory()->of($process)->at(2, 2)->named('HR final check')
+        ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'sent_back')->create();
+    $process->publish();
+
+    $exit = aLeaverOn($process);
+    $chandni = owedAtMeridian('chandni');
+
+    (new CaseEngine)->decide($exit, 1, 'approved', $chandni, ['claim_amount' => 40000]);
+    (new CaseEngine)->decide($exit->fresh(), 2, 'sent_back', $chandni, [], 'The payable was wrong', 1);
+
+    return $exit->fresh();
 }
 
 /**
@@ -201,6 +242,67 @@ it('clears the figure Chandni held when she empties its box and approves, so not
     });
 });
 
+it('keeps the box Chandni emptied empty when another box on the card is refused first', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = chandniHoldsDeepaksFinanceOver40000();
+        $at = $exit->getKey();
+
+        // The refusal leaves the card as she typed it, so her second press still sends the
+        // box she emptied, and the 40,000 is not filed or claimed from Deepak.
+        Livewire::actingAs(owedAtMeridian('chandni'))->test(MyQueue::class)
+            ->set("answers.{$at}.3.recover_from_them", '')
+            ->set("answers.{$at}.3.pay_to_them", '12.345')
+            ->call('decide', $at, 3, 'approved')
+            ->assertHasErrors(["answers.{$at}.3.pay_to_them"])
+            ->assertSetStrict("answers.{$at}.3.recover_from_them", '')
+            ->set("answers.{$at}.3.pay_to_them", '12.34')
+            ->call('decide', $at, 3, 'approved')
+            ->assertHasNoErrors()
+            ->assertNotified('Recorded.');
+
+        expect(linesOn($exit)->map->only(['direction', 'amount_paise'])->all())
+            ->toEqual([['direction' => 'payable', 'amount_paise' => 1234]])
+            ->and(claimsToldOn($exit))->toBeEmpty();
+    });
+});
+
+it('files a held figure asked only once a document is attached, when the clearance is approved from the queue', function () {
+    Storage::fake('local');
+
+    TenantContext::run($this->meridian, function () {
+        $form = FormDefinition::factory()->create(['name' => 'IT clearance']);
+        FormField::factory()->on($form)->at(1)->asking('damage_report', 'Laptop damage report', FormField::File)->create();
+        FormField::factory()->on($form)->at(2)->asking('damage_amount', 'Amount to recover for the damage', FormField::Money)
+            ->askedWhen('damage_report', 'is_set')->settlingAs(SettlementLine::Recovery)->create();
+        $form->publish();
+
+        $process = ProcessTemplate::factory()->named('it_exit', 'IT exit')->about('employee')->create();
+        ProcessStep::factory()->of($process)->at(1, 1)->named('IT clearance')->asking($form)
+            ->heldBy('chandni@meridian.test')->clearance()->create();
+        $process->publish();
+
+        $exit = aLeaverOn($process);
+        $chandni = owedAtMeridian('chandni');
+
+        (new CaseEngine)->claim($exit, 1, $chandni);
+        (new CaseEngine)->decide($exit->fresh(), 1, 'held', $chandni, [
+            'damage_report' => UploadedFile::fake()->create('report.pdf', 40, 'application/pdf'),
+            'damage_amount' => 15000,
+        ], 'Waiting on the repair quote');
+
+        // The card hands back every answer but the document it already holds.
+        Livewire::actingAs($chandni)->test(MyQueue::class)
+            ->assertSetStrict("answers.{$exit->getKey()}.1.damage_amount", 15000)
+            ->call('decide', $exit->getKey(), 1, 'approved')
+            ->assertHasNoErrors()
+            ->assertNotified('Recorded.');
+
+        expect(linesOn($exit)->map->only(['direction', 'amount_paise'])->all())
+            ->toEqual([['direction' => 'recovery', 'amount_paise' => 1500000]])
+            ->and(claimsToldOn($exit))->toHaveCount(1);
+    });
+});
+
 it('clears a held figure Chandni empties as she closes the clearance as disputed', function () {
     TenantContext::run($this->meridian, function () {
         $exit = chandniHoldsDeepaksFinanceOver40000();
@@ -252,20 +354,10 @@ it('writes the line in the same write as the answer, so a failure undoes both', 
 
 it('keeps the first figure on the attempt a send-back replaced, and counts only the new one', function () {
     TenantContext::run($this->meridian, function () {
-        $process = ProcessTemplate::factory()->named('exit_sent_back', 'Exit')->about('employee')->create();
-        ProcessStep::factory()->of($process)->at(1, 1)->named('Finance clearance')
-            ->collecting('claim_amount', FormField::Money, SettlementLine::Recovery)
-            ->heldByTheRoleAnywhere('finance_head')->offering('approved')->create();
-        ProcessStep::factory()->of($process)->at(2, 2)->named('HR final check')
-            ->heldByTheRoleAnywhere('finance_head')->offering('approved', 'sent_back')->create();
-        $process->publish();
-
-        $exit = aLeaverOn($process);
+        $exit = financeSentBackAfterClaiming40000();
         $chandni = owedAtMeridian('chandni');
 
-        (new CaseEngine)->decide($exit, 1, 'approved', $chandni, ['claim_amount' => 40000]);
-        (new CaseEngine)->decide($exit->fresh(), 2, 'sent_back', $chandni, [], 'The advance was 35,000', 1);
-        (new CaseEngine)->decide($exit->fresh(), 1, 'approved', $chandni, ['claim_amount' => 35000]);
+        (new CaseEngine)->decide($exit, 1, 'approved', $chandni, ['claim_amount' => 35000]);
 
         $attempts = CaseStep::query()->where('case_id', $exit->getKey())->where('sequence', 1)->orderBy('id')->get();
 
@@ -491,4 +583,161 @@ it('shows each client company its own lines and nobody else\'s, with no scope in
 
     expect($seenBy($this->meridian))->toBe([[$this->meridian->getKey(), 4000000]])
         ->and($seenBy($vertex))->toBe([[$vertex->getKey(), 30000]]);
+});
+
+/*
+| Step 2: the leaver is told of each claim
+*/
+
+it('tells Deepak at his own address of the 40,000 claimed against him, dated on his company\'s calendar, and nothing of what he is owed', function () {
+    // Half past one in the morning at Meridian, and still the evening before in UTC.
+    $this->travelTo($at = CarbonImmutable::parse('tomorrow 20:00', 'UTC'));
+
+    TenantContext::run($this->meridian, function () use ($at) {
+        $exit = deepaksExitAwaitingFinance();
+
+        (new CaseEngine)->decide($exit, 3, 'approved', owedAtMeridian('chandni'), [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+            'recovery_reason' => 'advance',
+            'pay_to_them' => 1250.5,
+        ]);
+
+        $told = claimsToldOn($exit)->sole();
+
+        expect($told->recipient_address)->toBe('deepak@personal.example')
+            ->and($told->step_sequence)->toBe(3)
+            ->and($told->status)->toBe(NotificationDelivery::Sent)
+            ->and($told->subject)->toBe('A claim of ₹40,000.00 has been raised against you')
+            ->and($told->body)->toContain('Finance clearance has claimed ₹40,000.00 against you on '.$at->addDay()->format('j F Y').', for this reason: Salary advance');
+    });
+});
+
+it('tells Deepak nothing while finance is held, and of the figure Chandni settled on when she closes it as disputed', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = chandniHoldsDeepaksFinanceOver40000();
+
+        expect(claimsToldOn($exit))->toBeEmpty();
+
+        (new CaseEngine)->resolveHold($exit, 3, 'closed_disputed', owedAtMeridian('chandni'), 'Deepak disputes the figure', [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 35000,
+            'recovery_reason' => 'advance',
+        ]);
+
+        expect(claimsToldOn($exit)->pluck('subject')->all())->toBe(['A claim of ₹35,000.00 has been raised against you']);
+    });
+});
+
+it('tells Deepak of the held figure when Rakesh overrides the hold', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = chandniHoldsDeepaksFinanceOver40000();
+
+        (new CaseEngine)->resolveHold($exit, 3, 'force_closed', owedAtMeridian('rakesh'), 'Chandni is on leave');
+
+        expect(claimsToldOn($exit)->pluck('subject')->all())->toBe(['A claim of ₹40,000.00 has been raised against you']);
+    });
+});
+
+it('tells the leaver of a claim filed through a link', function () {
+    TenantContext::run($this->meridian, function () {
+        $process = ProcessTemplate::factory()->named('leaver_claim', 'Leaver claim')->about('employee')->create();
+        ProcessStep::factory()->of($process)->at(1, 1)->named('Leaver states the claim')
+            ->collecting('claim_amount', FormField::Money, SettlementLine::Recovery)->external()->offering('approved')->create();
+        $process->publish();
+
+        $exit = aLeaverOn($process);
+
+        (new CaseEngine)->decideThroughALink(basename((new StepLink)->issue($exit, 1)), 'approved', ['claim_amount' => 900]);
+
+        expect(claimsToldOn($exit)->map->only(['recipient_address', 'subject'])->all())
+            ->toEqual([['recipient_address' => 'farah@home.test', 'subject' => 'A claim of ₹900.00 has been raised against you']]);
+    });
+});
+
+it('tells Neha of each claim on its own, and reads a claim with no reason as the question it answered', function () {
+    $this->seed(VertexSeeder::class);
+
+    TenantContext::run(Tenant::query()->where('slug', VertexSeeder::Slug)->sole(), function () {
+        $nehas = ProcessCase::query()->sole();
+
+        (new CaseEngine)->decide($nehas, 7, 'approved', User::query()->where('work_email', 'meera@vertex.test')->sole(), [
+            'hr_id_card_returned' => true,
+            'hr_biometric_deactivated' => true,
+            'notice_recovery_amount' => 500,
+            'hr_other_recovery_amount' => 19.99,
+            'hr_other_reason' => 'Uniform',
+            'encashment_payable_amount' => 1.15,
+        ]);
+
+        $told = claimsToldOn($nehas)->pluck('body');
+
+        expect($told)->toHaveCount(2)
+            ->and($told[0])->toContain('HR clearance has claimed ₹500.00 against you')
+            ->toContain('for this reason: Notice period shortfall to recover')
+            ->and($told[1])->toContain('HR clearance has claimed ₹19.99 against you')
+            ->toContain('for this reason: Uniform');
+    });
+});
+
+it('tells the leaver of a claim answered again after a send-back only where it changed', function (?int $again, array $subjects, string $saying) {
+    $this->travelTo(CarbonImmutable::parse('2026-11-24 10:00', 'Asia/Kolkata'));
+
+    TenantContext::run($this->meridian, function () use ($again, $subjects, $saying) {
+        $exit = financeSentBackAfterClaiming40000();
+
+        (new CaseEngine)->decide($exit, 1, 'approved', owedAtMeridian('chandni'), ['claim_amount' => $again]);
+
+        $told = claimsToldOn($exit);
+
+        expect($told->pluck('subject')->all())->toBe($subjects)
+            ->and($told->last()->body)->toContain($saying);
+    });
+})->with([
+    'the same figure' => [40000, ['A claim of ₹40,000.00 has been raised against you'], 'Finance clearance has claimed ₹40,000.00 against you'],
+    'a new figure' => [35000, [
+        'A claim of ₹40,000.00 has been raised against you',
+        'A claim against you has changed from ₹40,000.00 to ₹35,000.00',
+    ], 'Finance clearance has changed its claim against you from ₹40,000.00 to ₹35,000.00 on 24 November 2026. It was raised for this reason: Claim amount'],
+    'no figure' => [null, [
+        'A claim of ₹40,000.00 has been raised against you',
+        'A claim against you has changed from ₹40,000.00 to nothing',
+    ], 'from ₹40,000.00 to nothing on 24 November 2026'],
+]);
+
+it('tells the leaver nothing new while the clearance sent back is on hold', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = financeSentBackAfterClaiming40000();
+        $chandni = owedAtMeridian('chandni');
+
+        (new CaseEngine)->claim($exit, 1, $chandni);
+        (new CaseEngine)->decide($exit->fresh(), 1, 'held', $chandni, [], 'Checking the advance again');
+
+        expect(claimsToldOn($exit))->toHaveCount(1);
+    });
+});
+
+it('tells Deepak nothing when the answer that filed the claim is undone', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = deepaksExitAwaitingFinance();
+
+        // The answer's own history is written after its lines, so this fails with the claim
+        // already owed a message.
+        CaseEvent::created(function (CaseEvent $event): void {
+            if ($event->type === 'step_acted') {
+                throw new RuntimeException('The write failed.');
+            }
+        });
+
+        Mail::mailer()->getSymfonyTransport()->flush();
+
+        expect(fn () => (new CaseEngine)->decide($exit, 3, 'approved', owedAtMeridian('chandni'), [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]))->toThrow(RuntimeException::class, 'The write failed.');
+
+        // Read off the mailer rather than the delivery records, which the undone write takes
+        // with it whether or not the message went.
+        expect(Mail::mailer()->getSymfonyTransport()->messages())->toHaveCount(0);
+    });
 });

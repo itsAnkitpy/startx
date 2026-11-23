@@ -50,6 +50,13 @@ class TemplateCatalogue
 
     public const MoneyClaimedSubject = 'money_claimed_subject';
 
+    /**
+     * And one since module 08 step 2, settled with Ankit on 23 November 2026: a claim changed
+     * or dropped when its clearance is answered again after a send-back. Without it Deepak,
+     * told of 40,000, hears nothing when it goes, and reads 35,000 as a second claim.
+     */
+    public const MoneyClaimChangedSubject = 'money_claim_changed_subject';
+
     public const CaseClosedSubject = 'case_closed_subject';
 
     public const CaseTurnedDownSubject = 'case_turned_down_subject';
@@ -171,6 +178,29 @@ class TemplateCatalogue
                     {{ claim.department }} has claimed {{ claim.amount }} against you on {{ claim.raised_on }}, for this reason: {{ claim.reason }}
 
                     We are telling you now, while it is happening, rather than leaving you to find it on a statement later. It will appear on your final statement as a claim, with the department's name and the date beside it.
+
+                    If you disagree with it, reply to this message or speak to {{ claim.department }}. Disagreeing with a claim does not hold up the rest of your {{ process.name }}, and it does not hold up money you are owed.
+
+                    {{ company.name }}
+                    TEXT,
+            ],
+
+            self::MoneyClaimChangedSubject => [
+                'name' => 'A claim against you has changed',
+                'goes_to' => 'The person the case is about',
+                'sent_when' => 'A department changes or drops a claim it made against them',
+                'bypasses_digest' => true,
+                'tokens' => [
+                    'person.name', 'company.name', 'process.name', 'case.number',
+                    'claim.department', 'claim.was', 'claim.amount', 'claim.reason', 'claim.changed_on',
+                ],
+                'subject' => 'A claim against you has changed from {{ claim.was }} to {{ claim.amount }}',
+                'body' => <<<'TEXT'
+                    Dear {{ person.name }},
+
+                    {{ claim.department }} has changed its claim against you from {{ claim.was }} to {{ claim.amount }} on {{ claim.changed_on }}. It was raised for this reason: {{ claim.reason }}
+
+                    This replaces what we told you before about this claim. Your final statement will show the new figure.
 
                     If you disagree with it, reply to this message or speak to {{ claim.department }}. Disagreeing with a claim does not hold up the rest of your {{ process.name }}, and it does not hold up money you are owed.
 

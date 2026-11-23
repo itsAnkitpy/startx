@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Number;
 
 /**
  * Running a case: opening one, acting on its steps, sending it back, and ending it.
@@ -133,6 +134,71 @@ final class CaseEngine
         }
 
         DB::afterCommit(fn (): mixed => $this->messages->send($case, $key, $person, $values, $stepSequence));
+    }
+
+    /**
+     * Write the lines a clearance owes if it has just passed (module 08), and tell the person
+     * leaving of each claim among them.
+     *
+     * One message for each recovery, at once and never in a daily bundle, because the law
+     * gives Deepak seven days to explain before a claim for damage or loss may come off his
+     * wages, and this message is when those days start. A payable is not a claim and sends
+     * nothing. When it went out is on its delivery record, which is where the statement
+     * reads the date, so nothing is stored on the line. A claim with no reason given reads
+     * as the question it answered, "Notice period shortfall to recover", rather than as
+     * nothing.
+     *
+     * **A clearance answered again after a send-back is told against what it claimed
+     * before**, question by question: the same figure sends nothing, and a figure changed or
+     * dropped sends the changed-claim message instead, so Deepak never reads 35,000 as a
+     * second claim beside the 40,000, or goes on believing a 40,000 that has gone.
+     */
+    private function fileTheSettlement(ProcessCase $case, CaseStep $attempt, ProcessStep $step): void
+    {
+        $now = collect(SettlementLine::fileFor($attempt, $step))
+            ->where('direction', SettlementLine::Recovery)
+            ->keyBy('field_key');
+
+        // A hold or a send-back on the step answered again is not its figure being filed,
+        // and must not read as every claim dropped.
+        if (! in_array($attempt->outcome, CaseStep::PassingOutcomes, true)) {
+            return;
+        }
+
+        $before = SettlementLine::recoveriesBefore($attempt);
+        $rupees = fn (int $paise): string => Number::currency($paise / 100, 'INR', 'en_IN');
+        // The same calendar and the same way of writing a date as every other message: the
+        // recipient's own, else the client's.
+        $today = now()->timezone($case->subject?->timezone ?? $case->tenant->timezone)->format('j F Y');
+
+        foreach ($before->union($now)->keys() as $question) {
+            $was = $before->get($question);
+            $line = $now->get($question);
+
+            if ($was?->amount_paise === $line?->amount_paise) {
+                continue;
+            }
+
+            $latest = $line ?? $was;
+            $claim = [
+                'claim.department' => $step->name,
+                'claim.amount' => $line === null ? 'nothing' : $rupees($line->amount_paise),
+                'claim.reason' => $latest->reason ?? $latest->label,
+            ];
+
+            if ($was === null) {
+                $this->tell($case, TemplateCatalogue::MoneyClaimedSubject, $case->subject, [
+                    ...$claim,
+                    'claim.raised_on' => $today,
+                ], $step->sequence);
+            } else {
+                $this->tell($case, TemplateCatalogue::MoneyClaimChangedSubject, $case->subject, [
+                    ...$claim,
+                    'claim.was' => $rupees($was->amount_paise),
+                    'claim.changed_on' => $today,
+                ], $step->sequence);
+            }
+        }
     }
 
     /**
@@ -488,7 +554,7 @@ final class CaseEngine
             $attempt->payload = (new StepForm)->answeredAgain($step, (array) $attempt->payload, $payload, $outcome === 'approved');
             $attempt->save();
 
-            SettlementLine::fileFor($attempt, $step);
+            $this->fileTheSettlement($case, $attempt, $step);
 
             $this->record($case, 'step_acted', $by, array_filter([
                 'step' => $step->name,
@@ -595,7 +661,7 @@ final class CaseEngine
             );
             $attempt->save();
 
-            SettlementLine::fileFor($attempt, $step);
+            $this->fileTheSettlement($link->case, $attempt, $step);
 
             $this->record($link->case, 'step_acted', null, [
                 'step' => $step->name,
@@ -712,7 +778,7 @@ final class CaseEngine
             $attempt->acted_at = now();
             $attempt->save();
 
-            SettlementLine::fileFor($attempt, $step);
+            $this->fileTheSettlement($case, $attempt, $step);
 
             $this->record($case, 'step_acted', $by, [
                 'step' => $step->name,

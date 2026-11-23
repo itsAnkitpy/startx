@@ -294,15 +294,23 @@ class StepForm
      * held the clearance at 40,000, empties the box and approves, and nothing is owed.
      * Kept, the 40,000 would become a line nobody can change (module 08).
      *
+     * **What is asked is read with what still stands on the step**, not from the new
+     * answers alone. The queue never hands back a document it already holds, so a question
+     * asked only once that document is attached read as not asked, and its answer was
+     * thrown away: IT holds with a damage report attached and 15,000 to recover, approves
+     * from the queue, and the 15,000 never reached the settlement.
+     *
      * @param  array<string, mixed>  $stored
      * @param  array<string, mixed>  $typed
      * @return array<string, mixed>
      */
     public function answeredAgain(ProcessStep $step, array $stored, array $typed, bool $finishingTheStep): array
     {
+        $standing = array_diff_key($stored, $typed);
+
         return $this->stillAsked($step, array_merge(
-            array_diff_key($stored, $typed),
-            $this->onlyWhatThisStepAsks($step, $typed, $finishingTheStep),
+            $standing,
+            $this->onlyWhatThisStepAsks($step, $typed, $finishingTheStep, $standing),
         ));
     }
 
@@ -347,9 +355,10 @@ class StepForm
      * form. Ours is the reason on the case, which the engine already demands for a hold.
      *
      * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $standing  answers already on the step and not sent again, which count towards what is asked
      * @return array<string, mixed>
      */
-    public function onlyWhatThisStepAsks(ProcessStep $step, array $payload, bool $finishingTheStep = true): array
+    public function onlyWhatThisStepAsks(ProcessStep $step, array $payload, bool $finishingTheStep = true, array $standing = []): array
     {
         if ($payload === [] && ! $finishingTheStep) {
             return [];
@@ -365,7 +374,7 @@ class StepForm
         }
 
         $given = $this->answered($payload);
-        $asking = $this->asking($step, $given);
+        $asking = $this->asking($step, [...$standing, ...$given]);
 
         // Hidden here as well as on the screen and in the rules, in the one pass. A
         // question hidden on the screen and still stored is how a figure nobody was
@@ -381,7 +390,7 @@ class StepForm
         // person attached is the file itself at this point, so its size and its kind can
         // be checked. A moment later it is a note of where the file went, which no rule
         // about files can read.
-        $this->refuseUnlessTheAnswersFit($step, $kept, $finishingTheStep);
+        $this->refuseUnlessTheAnswersFit($step, $kept, $finishingTheStep, $standing);
 
         return $this->withDocumentsPutAway($step, $asking, $kept);
     }
@@ -389,23 +398,22 @@ class StepForm
     /**
      * Hold the answers to the client's own rules, and name every problem at once.
      *
-     * `ponytail:` this checks what is being written now, not what is already on a step
-     * that was held and is being approved later — the engine merges the two and only the
-     * new half comes through here. The queue screen clears its boxes when a step is held
-     * and does not fill them back in, so today a held step is answered again in full
-     * anyway. Two things have to come in here together when a screen starts showing a held
-     * step's earlier answers back: the already-stored half, and the hiding — Chandni
-     * holding finance with a recovery figure and then approving it saying the card came
-     * back leaves that figure on the row, where a later step's condition can still read
-     * it. Module 05's step 6 is where the hold screen arrives and owns both.
+     * Which questions are asked is read with what still stands on the step, so a question
+     * shown by a document already attached is checked like any other.
+     *
+     * `ponytail:` only the new answers are checked, never what already stands on a held
+     * step, so a required document attached at the hold has to be attached again to
+     * approve, since the queue never hands one back. Check the standing answers too when a
+     * client trips over it.
      *
      * @param  array<string, mixed>  $kept
+     * @param  array<string, mixed>  $standing
      */
-    private function refuseUnlessTheAnswersFit(ProcessStep $step, array $kept, bool $finishingTheStep): void
+    private function refuseUnlessTheAnswersFit(ProcessStep $step, array $kept, bool $finishingTheStep, array $standing): void
     {
         $validator = Validator::make(
             $kept,
-            $this->rules($step, $kept, $finishingTheStep),
+            $this->rules($step, [...$standing, ...$kept], $finishingTheStep),
             [],
             $this->labels($step),
         );
