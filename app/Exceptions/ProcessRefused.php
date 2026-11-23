@@ -553,6 +553,16 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * The answer that would finish an exit, while a figure a clearance filed never became a
+     * line of the settlement. Nothing the person pressing can fix: the figure was filed some
+     * way that skipped writing its line, and finishing would pay the leaver without it.
+     */
+    public static function aFigureNeverReachedTheSettlement(string $step, string $question): self
+    {
+        return new self("This exit cannot finish: [{$question}] on [{$step}] was filed but never reached the settlement.");
+    }
+
+    /**
      * A second handover asked for on somebody whose work has already moved on from this
      * exit.
      *

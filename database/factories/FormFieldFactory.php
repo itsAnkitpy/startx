@@ -86,6 +86,16 @@ class FormFieldFactory extends Factory
     }
 
     /**
+     * A money question whose answer becomes a line of the settlement when its clearance
+     * passes, a recovery or a payable, with the reason read off another question on the same
+     * form where it asks one.
+     */
+    public function settlingAs(string $direction, ?string $reasonFrom = null): static
+    {
+        return $this->state(['settles_as' => $direction, 'reason_from' => $reasonFrom]);
+    }
+
+    /**
      * Named limits only — `min`, `max`, `max_length`. Never a rule string; see the
      * comment on the column.
      *

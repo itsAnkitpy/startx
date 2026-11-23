@@ -66,16 +66,17 @@ class ProcessStepFactory extends Factory
      *
      * For the shape that comes up over and over: a step whose whole purpose is the figure
      * a later step branches on. A condition can only read an answer some step actually
-     * collects, so the form has to exist before the condition means anything.
+     * collects, so the form has to exist before the condition means anything. Marked as a
+     * recovery or a payable, its answer becomes a line of the settlement when the step passes.
      */
-    public function collecting(string $key, string $type = FormField::Money): static
+    public function collecting(string $key, string $type = FormField::Money, ?string $settlesAs = null): static
     {
-        return $this->state(function () use ($key, $type): array {
+        return $this->state(function () use ($key, $type, $settlesAs): array {
             $form = FormDefinition::factory()->create(['name' => ucfirst(str_replace('_', ' ', $key))]);
 
             FormField::factory()->on($form)
                 ->asking($key, ucfirst(str_replace('_', ' ', $key)), $type)
-                ->create();
+                ->create(['settles_as' => $settlesAs]);
 
             $form->publish();
 

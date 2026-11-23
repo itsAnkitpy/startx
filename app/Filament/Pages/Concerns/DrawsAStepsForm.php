@@ -88,7 +88,8 @@ trait DrawsAStepsForm
     protected function checkedAgainstTheForm(ProcessStep $step, string $under, bool $finishingTheStep): void
     {
         $forms = new StepForm;
-        $given = $forms->answered((array) data_get($this, $under, []));
+        $typed = (array) data_get($this, $under, []);
+        $given = $forms->answered($typed);
 
         // Put back on the page before a word of it is checked, and that ordering is the
         // whole of it rather than tidiness: what Livewire checks is the page's own state,
@@ -111,5 +112,16 @@ trait DrawsAStepsForm
                     ->all(),
             );
         }
+
+        // Checked, the boxes somebody emptied go back as empty rather than not at all, so the
+        // engine takes away what was in them: Chandni empties the 40,000 she held and
+        // approves, and nothing is owed. Never a document, because a card never shows one it
+        // already holds, so its empty box is not one taken away.
+        $emptied = $forms->fields($step)
+            ->where('type', '!=', FormField::File)
+            ->pluck('key')
+            ->intersect(array_keys(array_diff_key($typed, $given)));
+
+        data_set($this, $under, $given + array_fill_keys($emptied->all(), null));
     }
 }

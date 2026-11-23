@@ -12,6 +12,7 @@ use App\Models\OrgUnit;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Role;
+use App\Models\SettlementLine;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Notifications\TemplateCatalogue;
@@ -48,8 +49,11 @@ class VertexSeeder extends Seeder
      * The seven department clearances, as data.
      *
      * A question is `[key, label, type]`, with `required` where the old tool stopped the
-     * clearance without it, and `when` where the question only appears once an earlier
-     * one on the same form has been answered a certain way.
+     * clearance without it, `when` where the question only appears once an earlier
+     * one on the same form has been answered a certain way, and `settles` on a money
+     * question whose answer becomes a settlement line, with `reason` naming the question
+     * that says what it is for. "Net amount after this clearance" has no `settles`: it is a
+     * total typed by hand, and a line of it would count the money twice.
      *
      * **Every key is unique across the whole process, and that is not tidiness.** The
      * engine pools every step's answers when it works out which steps a case still wants,
@@ -66,7 +70,7 @@ class VertexSeeder extends Seeder
             'asks' => [
                 ['key' => 'handover_completed', 'label' => 'Handover completed', 'type' => FormField::Boolean, 'required' => true],
                 ['key' => 'manager_articles_received', 'label' => 'Company articles received back', 'type' => FormField::Boolean],
-                ['key' => 'manager_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money],
+                ['key' => 'manager_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'manager_recovery_reason'],
                 ['key' => 'manager_recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Textarea, 'when' => ['manager_recovery_amount', 'is_set']],
                 ['key' => 'manager_net_amount', 'label' => 'Net amount after this clearance', 'type' => FormField::Money],
                 ['key' => 'manager_remarks', 'label' => 'Anything the manager wants on the record', 'type' => FormField::Textarea],
@@ -79,7 +83,7 @@ class VertexSeeder extends Seeder
                 ['key' => 'assets_handed_back', 'label' => 'Assets handed back', 'type' => FormField::Boolean, 'required' => true],
                 ['key' => 'assets_not_returned_reason', 'label' => 'Why the assets did not come back', 'type' => FormField::Textarea, 'when' => ['assets_handed_back', '=', false]],
                 ['key' => 'admin_articles_received', 'label' => 'Company articles received back', 'type' => FormField::Boolean],
-                ['key' => 'admin_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money],
+                ['key' => 'admin_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'admin_recovery_reason'],
                 ['key' => 'admin_recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Textarea, 'when' => ['admin_recovery_amount', 'is_set']],
                 ['key' => 'admin_remarks', 'label' => 'Anything admin wants on the record', 'type' => FormField::Textarea],
             ],
@@ -88,7 +92,7 @@ class VertexSeeder extends Seeder
             'name' => 'CRM clearance',
             'held_by' => 'crm_head',
             'asks' => [
-                ['key' => 'crm_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money],
+                ['key' => 'crm_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'crm_recovery_reason'],
                 ['key' => 'crm_recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Textarea, 'when' => ['crm_recovery_amount', 'is_set']],
                 ['key' => 'crm_remarks', 'label' => 'Anything CRM wants on the record', 'type' => FormField::Textarea],
             ],
@@ -103,7 +107,7 @@ class VertexSeeder extends Seeder
                 ['key' => 'intranet_reason', 'label' => 'Why the access is still there', 'type' => FormField::Textarea, 'when' => ['intranet_access_removed', '=', false]],
                 ['key' => 'it_assets_handed_back', 'label' => 'IT assets handed back', 'type' => FormField::Boolean, 'required' => true],
                 ['key' => 'it_assets_reason', 'label' => 'Why the IT assets did not come back', 'type' => FormField::Textarea, 'when' => ['it_assets_handed_back', '=', false]],
-                ['key' => 'it_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money],
+                ['key' => 'it_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'it_recovery_reason'],
                 ['key' => 'it_recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Textarea, 'when' => ['it_recovery_amount', 'is_set']],
                 ['key' => 'it_clearance_sheet', 'label' => 'The signed IT clearance sheet', 'type' => FormField::File],
                 ['key' => 'it_remarks', 'label' => 'Anything IT wants on the record', 'type' => FormField::Textarea],
@@ -124,9 +128,9 @@ class VertexSeeder extends Seeder
             'asks' => [
                 ['key' => 'imprest_card_recovered', 'label' => 'Imprest card recovered', 'type' => FormField::Boolean, 'required' => true],
                 ['key' => 'imprest_card_reason', 'label' => 'Why the imprest card did not come back', 'type' => FormField::Textarea, 'when' => ['imprest_card_recovered', '=', false]],
-                ['key' => 'finance_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money],
+                ['key' => 'finance_recovery_amount', 'label' => 'Amount to recover from them', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'finance_recovery_reason'],
                 ['key' => 'finance_recovery_reason', 'label' => 'What the recovery is for', 'type' => FormField::Textarea, 'when' => ['finance_recovery_amount', 'is_set']],
-                ['key' => 'finance_payable_amount', 'label' => 'Amount payable to them', 'type' => FormField::Money],
+                ['key' => 'finance_payable_amount', 'label' => 'Amount payable to them', 'type' => FormField::Money, 'settles' => SettlementLine::Payable, 'reason' => 'finance_payable_reason'],
                 ['key' => 'finance_payable_reason', 'label' => 'What the payment is for', 'type' => FormField::Textarea, 'when' => ['finance_payable_amount', 'is_set']],
                 ['key' => 'finance_net_amount', 'label' => 'Net amount after this clearance', 'type' => FormField::Money],
                 ['key' => 'finance_remarks', 'label' => 'Anything finance wants on the record', 'type' => FormField::Textarea],
@@ -139,14 +143,14 @@ class VertexSeeder extends Seeder
                 ['key' => 'hr_id_card_returned', 'label' => 'ID card returned', 'type' => FormField::Boolean, 'required' => true],
                 ['key' => 'hr_medical_card_returned', 'label' => 'Medical card returned', 'type' => FormField::Boolean],
                 ['key' => 'hr_biometric_deactivated', 'label' => 'Biometric access switched off', 'type' => FormField::Boolean, 'required' => true],
-                ['key' => 'notice_recovery_amount', 'label' => 'Notice period shortfall to recover', 'type' => FormField::Money],
-                ['key' => 'notice_payable_amount', 'label' => 'Notice period payable to them', 'type' => FormField::Money],
-                ['key' => 'encashment_recovery_amount', 'label' => 'Leave encashment to recover', 'type' => FormField::Money],
-                ['key' => 'encashment_payable_amount', 'label' => 'Leave encashment payable to them', 'type' => FormField::Money],
-                ['key' => 'telecom_recovery_amount', 'label' => 'Telephone and data to recover', 'type' => FormField::Money],
-                ['key' => 'telecom_payable_amount', 'label' => 'Telephone and data payable to them', 'type' => FormField::Money],
-                ['key' => 'hr_other_recovery_amount', 'label' => 'Anything else to recover', 'type' => FormField::Money],
-                ['key' => 'hr_other_payable_amount', 'label' => 'Anything else payable to them', 'type' => FormField::Money],
+                ['key' => 'notice_recovery_amount', 'label' => 'Notice period shortfall to recover', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery],
+                ['key' => 'notice_payable_amount', 'label' => 'Notice period payable to them', 'type' => FormField::Money, 'settles' => SettlementLine::Payable],
+                ['key' => 'encashment_recovery_amount', 'label' => 'Leave encashment to recover', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery],
+                ['key' => 'encashment_payable_amount', 'label' => 'Leave encashment payable to them', 'type' => FormField::Money, 'settles' => SettlementLine::Payable],
+                ['key' => 'telecom_recovery_amount', 'label' => 'Telephone and data to recover', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery],
+                ['key' => 'telecom_payable_amount', 'label' => 'Telephone and data payable to them', 'type' => FormField::Money, 'settles' => SettlementLine::Payable],
+                ['key' => 'hr_other_recovery_amount', 'label' => 'Anything else to recover', 'type' => FormField::Money, 'settles' => SettlementLine::Recovery, 'reason' => 'hr_other_reason'],
+                ['key' => 'hr_other_payable_amount', 'label' => 'Anything else payable to them', 'type' => FormField::Money, 'settles' => SettlementLine::Payable],
                 ['key' => 'hr_other_reason', 'label' => 'What the other recovery is for', 'type' => FormField::Textarea, 'when' => ['hr_other_recovery_amount', 'is_set']],
                 ['key' => 'hr_remarks', 'label' => 'Anything HR wants on the record', 'type' => FormField::Textarea],
             ],
@@ -367,6 +371,10 @@ class VertexSeeder extends Seeder
 
             if (isset($question['when'])) {
                 $field = $field->askedWhen(...$question['when']);
+            }
+
+            if (isset($question['settles'])) {
+                $field = $field->settlingAs($question['settles'], $question['reason'] ?? null);
             }
 
             $field->create();

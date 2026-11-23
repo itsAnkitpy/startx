@@ -11,6 +11,7 @@ use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\SettlementLine;
 use App\Models\Succession;
 use App\Models\User;
 use App\Notifications\Chasing;
@@ -472,29 +473,22 @@ final class CaseEngine
                 : null;
 
             $attempt = $this->attemptToWriteOn($available, $by, $candidates);
-            $forms = new StepForm;
 
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
 
-            // Old answers and new put back through what the step is still asking, together.
-            // A step that was held already carries answers, and the new ones can hide one
-            // of them: Chandni holds finance's clearance with a recovery figure on it, then
-            // approves it saying the imprest card came back after all, which takes the
-            // recovery question off the form. Filtering only what she typed this time would
-            // leave the figure on the row, where a later step's condition can still read it.
-            $attempt->payload = $forms->stillAsked($step, array_merge(
-                (array) $attempt->payload,
-                // The form's own rules, applied here and not only on a screen. Whether a
-                // required question is demanded turns on the outcome: approving is the
-                // step's answers being filed, while a rejection, a hold and a send-back
-                // are each a reason it is not finished. Demanding a full form on those
-                // three would make each unreachable in the one case it exists for —
-                // Chandni rejects Rakesh's clearance *because* the figure is wrong, and
-                // she sends it back to have it corrected.
-                $forms->onlyWhatThisStepAsks($step, $payload, $outcome === 'approved'),
-            ));
+            // Old answers and new, through what the step is still asking: see
+            // {@see StepForm::answeredAgain()}. The form's own rules are applied here and
+            // not only on a screen. Whether a required question is demanded turns on the
+            // outcome: approving is the step's answers being filed, while a rejection, a
+            // hold and a send-back are each a reason it is not finished. Demanding a full
+            // form on those three would make each unreachable in the one case it exists
+            // for — Chandni rejects Rakesh's clearance *because* the figure is wrong, and
+            // she sends it back to have it corrected.
+            $attempt->payload = (new StepForm)->answeredAgain($step, (array) $attempt->payload, $payload, $outcome === 'approved');
             $attempt->save();
+
+            SettlementLine::fileFor($attempt, $step);
 
             $this->record($case, 'step_acted', $by, array_filter([
                 'step' => $step->name,
@@ -601,6 +595,8 @@ final class CaseEngine
             );
             $attempt->save();
 
+            SettlementLine::fileFor($attempt, $step);
+
             $this->record($link->case, 'step_acted', null, [
                 'step' => $step->name,
                 'sequence' => $step->sequence,
@@ -702,12 +698,7 @@ final class CaseEngine
             // 08 turns into a disputed line is the one she meant. Nothing required is
             // demanded, because an unfinished clearance is exactly what is being recorded.
             if ($outcome === 'closed_disputed') {
-                $forms = new StepForm;
-
-                $attempt->payload = $forms->stillAsked($step, array_merge(
-                    (array) $attempt->payload,
-                    $forms->onlyWhatThisStepAsks($step, $payload, false),
-                ));
+                $attempt->payload = (new StepForm)->answeredAgain($step, (array) $attempt->payload, $payload, false);
             }
 
             // Read now, for the message below: whoever held it is still on the row.
@@ -720,6 +711,8 @@ final class CaseEngine
             $attempt->outcome = $outcome;
             $attempt->acted_at = now();
             $attempt->save();
+
+            SettlementLine::fileFor($attempt, $step);
 
             $this->record($case, 'step_acted', $by, [
                 'step' => $step->name,
@@ -1438,6 +1431,15 @@ final class CaseEngine
 
         if ($stillToMove !== null) {
             throw ProcessRefused::theirWorkHasNotMovedOn($stillToMove);
+        }
+
+        // Nor while a figure a clearance filed has no line (module 08), which would pay the
+        // leaver without it. Each answer above writes its lines before it gets here, so this
+        // catches a figure filed some other way. A disputed line is a line and does not stop it.
+        $unwritten = SettlementLine::firstNotWrittenOn($case);
+
+        if ($unwritten !== null) {
+            throw ProcessRefused::aFigureNeverReachedTheSettlement(...$unwritten);
         }
 
         $this->close($case, $by, self::Completed);

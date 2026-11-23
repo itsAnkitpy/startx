@@ -20,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'form_definition_id', 'key', 'label', 'type', 'required', 'options',
-    'validation', 'sort_order', 'visible_if',
+    'validation', 'sort_order', 'visible_if', 'settles_as', 'reason_from',
 ])]
 class FormField extends Model
 {

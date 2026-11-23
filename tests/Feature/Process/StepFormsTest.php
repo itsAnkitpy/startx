@@ -162,7 +162,7 @@ it('builds the rules for each kind of question out of the client rows', function
         expect($rules['imprest_returned'])->toBe(['present', 'boolean'])
             // Never negative: a recovery of minus two thousand rupees is a payable, and
             // the settlement statement has its own line for that.
-            ->and($rules['recover'])->toBe(['nullable', 'numeric', 'min:0'])
+            ->and($rules['recover'])->toBe(['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:999999999999.99'])
             ->and($rules['notes'])->toBe(['nullable', 'string', 'max:40'])
             // The date the browser's own date box sends, and nothing looser. Plain `date`
             // accepts "tomorrow", which is one date today and another next week, and

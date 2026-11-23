@@ -281,6 +281,32 @@ class StepForm
     }
 
     /**
+     * What a step already carries with what was just typed laid over it, put back through
+     * what the step is still asking, together.
+     *
+     * A step that was held already carries answers, and the new ones can hide one of them:
+     * Chandni holds finance's clearance with a recovery figure on it, then approves it
+     * saying the imprest card came back after all, which takes the recovery question off
+     * the form. Filtering only what she typed this time would leave the figure on the row,
+     * where a later step's condition can still read it.
+     *
+     * An answer sent empty takes the old one away rather than leaving it standing: Chandni
+     * held the clearance at 40,000, empties the box and approves, and nothing is owed.
+     * Kept, the 40,000 would become a line nobody can change (module 08).
+     *
+     * @param  array<string, mixed>  $stored
+     * @param  array<string, mixed>  $typed
+     * @return array<string, mixed>
+     */
+    public function answeredAgain(ProcessStep $step, array $stored, array $typed, bool $finishingTheStep): array
+    {
+        return $this->stillAsked($step, array_merge(
+            array_diff_key($stored, $typed),
+            $this->onlyWhatThisStepAsks($step, $typed, $finishingTheStep),
+        ));
+    }
+
+    /**
      * Refuse an answer to a question this step does not ask, and keep only what was
      * actually answered.
      *
@@ -556,8 +582,12 @@ class StepForm
             FormField::Textarea => ['string', 'max:'.$this->length($limits, self::DefaultParagraphLength)],
             FormField::Number => ['numeric', ...$this->range($limits)],
             // Never negative. A recovery of minus two thousand rupees is a payable, and
-            // the settlement statement has a separate line for that.
-            FormField::Money => ['numeric', 'min:0', ...$this->range($limits)],
+            // the settlement statement has a separate line for that. At most two decimal
+            // places, because 1234.567 cannot become whole paise without rounding a figure
+            // somebody typed. And never above a lakh crore: far past any settlement, and short
+            // of where turning rupees into paise starts losing paise, so a figure typed with
+            // digits too many is refused under its box instead of filed as some other number.
+            FormField::Money => ['numeric', 'decimal:0,2', 'min:0', 'max:999999999999.99', ...$this->range($limits)],
             // The date the browser's own date box sends, and nothing looser. `date` on
             // its own accepts "tomorrow", which is a date today and a different one next
             // week — and these are read off a closed case years later.

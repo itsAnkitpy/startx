@@ -13,6 +13,7 @@ use App\Models\OrgUnit;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
 use App\Models\Role;
+use App\Models\SettlementLine;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Notifications\TemplateCatalogue;
@@ -402,9 +403,10 @@ class MeridianSeeder extends Seeder
      * What finance asks. Chandni holds this step for the whole company, so this is the
      * form on the card she opens — the imprest card back, what is owed each way, and why.
      *
-     * Both money questions are `money` rather than `number` on purpose: module 08 turns a
-     * money question on a clearance step into a line of the settlement statement, and a
-     * plain number cannot become one because nothing says whether it is rupees or laptops.
+     * Both money questions are `money` rather than `number` on purpose, and each says which
+     * way its money goes: module 08 turns each answer into a line of the settlement when the
+     * clearance passes, and a plain number cannot become one because nothing says whether it
+     * is rupees or laptops.
      *
      * Two of the five are asked only in some cases, which is what the whole hiding rule is
      * for and is why they are on the demo. Nobody is asked how much to recover until they
@@ -421,7 +423,8 @@ class MeridianSeeder extends Seeder
 
         FormField::factory()->on($form)->at(2)
             ->asking('recover_from_them', 'Amount to recover from them', FormField::Money)
-            ->askedWhen('imprest_card_returned', '=', false)->create();
+            ->askedWhen('imprest_card_returned', '=', false)
+            ->settlingAs(SettlementLine::Recovery, 'recovery_reason')->create();
 
         FormField::factory()->on($form)->at(3)
             ->asking('recovery_reason', 'What the recovery is for', FormField::Select)
@@ -434,7 +437,8 @@ class MeridianSeeder extends Seeder
             ])->create();
 
         FormField::factory()->on($form)->at(4)
-            ->asking('pay_to_them', 'Amount payable to them', FormField::Money)->create();
+            ->asking('pay_to_them', 'Amount payable to them', FormField::Money)
+            ->settlingAs(SettlementLine::Payable)->create();
 
         FormField::factory()->on($form)->at(5)
             ->asking('remarks', 'Anything finance wants on the record', FormField::Textarea)->create();
