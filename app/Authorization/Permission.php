@@ -151,6 +151,15 @@ final class Permission
     public const ManageNotificationTemplate = 'manage_notification_template';
 
     /**
+     * Writing the letters a leaver is given, and the letterhead, signature and footer they are
+     * printed with.
+     *
+     * Apart from {@see ManageNotificationTemplate} (Ankit, 25 November 2026): a letter goes out
+     * over the signatory's signature, and every client ticked that one for emails.
+     */
+    public const WriteLetters = 'write_letters';
+
+    /**
      * The same actions, in the words a client reads on the roles screen, grouped by the
      * thing each one is about.
      *
@@ -274,6 +283,10 @@ final class Permission
                     self::ManageNotificationTemplate => [
                         'label' => 'Reword the messages sent in your name',
                         'description' => 'The emails your staff and your leavers receive. You change the subject line and the wording; you cannot add a message, remove one, or stop one being sent. Whoever holds this writes what a departing employee is told about money claimed against them, so it is worth keeping in the same hands as the settings above rather than wider.',
+                    ],
+                    self::WriteLetters => [
+                        'label' => 'Write the letters sent in your name',
+                        'description' => 'The relieving and experience letters a leaver is given, and the letterhead, signature and footer they are printed with. A letter goes out over the signature uploaded here, so whoever holds this writes words that appear above it. The same letters go to a leaver in every branch, so this one only counts when it covers your whole company.',
                     ],
                 ],
             ],

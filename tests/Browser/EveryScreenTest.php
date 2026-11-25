@@ -21,7 +21,8 @@ use Database\Seeders\VertexSeeder;
 | here rather than drawing an error page nobody reads.
 |
 | The list is the panel's own routes, taken from `php artisan route:list --path=admin`
-| on 18 November 2026. A screen added later has to be added here. "Raise a request" is
+| on 18 November 2026, and the letters screen added by module 09 step 2. A screen added later
+| has to be added here. "Raise a request" is
 | on it since module 07 step 1: anybody with a job may raise their own exit, so both
 | administrators can open it.
 */
@@ -46,6 +47,7 @@ function everyScreenAt(string $company): array
         '/admin/cases',
         '/admin/cases/'.ProcessCase::query()->min('id'),
         '/admin/company-settings',
+        '/admin/letters',
         '/admin/org-units',
         '/admin/designations',
         '/admin/offices',

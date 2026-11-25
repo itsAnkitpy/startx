@@ -24,6 +24,9 @@ class IssuedDocument extends Model
 
     public const RelievingLetter = 'relieving_letter';
 
+    /** Written on the letters screen from step 2; issued from step 3, which lets the database take it. */
+    public const ExperienceLetter = 'experience_letter';
+
     /**
      * @return array<string, string>
      */

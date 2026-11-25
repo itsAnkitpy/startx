@@ -68,6 +68,16 @@ function asRead(string $page): string
     return html_entity_decode(strip_tags($page), ENT_QUOTES | ENT_HTML5);
 }
 
+/**
+ * Neha's relieving letter as the page handed to dompdf.
+ *
+ * @param  array<string, string|null>  $around
+ */
+function relievingPage(ProcessCase $case, string $wording, array $around = []): string
+{
+    return (new Letter)->page((new Letter)->tokensFor($case), $wording, $around);
+}
+
 function aPngLetterhead(): string
 {
     return UploadedFile::fake()->image('letterhead.png', 1200, 200)->getContent();
@@ -81,7 +91,7 @@ it('fills Meera\'s wording with Neha\'s details from her exit', function () {
         $exit = nehasOpenExit();
         $record = $exit->subjectEmploymentRecord;
 
-        expect(asRead((new Letter)->page($exit, meerasRelievingWording(), null)))
+        expect(asRead(relievingPage($exit, meerasRelievingWording())))
             ->toContain('26 November 2026')
             ->toContain('This is to certify that Neha Deshpande, employee code '.$record->employee_code
                 .', worked with Vertex Foods as Quality Executive from '.$record->joining_date->format('j F Y')
@@ -95,7 +105,7 @@ it('stores the PDF on the documents disk and records its SHA-256, the case and w
         $exit = nehasOpenExit();
         $meera = whoIsAtVertex('meera');
 
-        $issued = (new Letter)->issue($exit, meerasRelievingWording(), aPngLetterhead(), $meera);
+        $issued = (new Letter)->issue($exit, meerasRelievingWording(), ['letterhead' => aPngLetterhead()], $meera);
         $stored = Storage::disk(config('startx.documents_disk'))->get($issued->path);
 
         expect($stored)->toStartWith('%PDF-')
@@ -116,7 +126,7 @@ it('names the company by its registered name when it has one', function () {
     $this->vertex->update(['legal_name' => 'Vertex Foods Private Limited']);
 
     TenantContext::run($this->vertex, function () {
-        expect(asRead((new Letter)->page(nehasOpenExit(), meerasRelievingWording(), null)))
+        expect(asRead(relievingPage(nehasOpenExit(), meerasRelievingWording())))
             ->toContain('worked with Vertex Foods Private Limited as Quality Executive');
     });
 });
@@ -126,7 +136,7 @@ it('refuses a letter too long for the cleaner rather than storing it cut short o
         // Past the cleaner's limit, where its cut would land inside a ₹ and leave nothing.
         $wording = '<p>'.str_repeat('₹', 200000).'</p>';
 
-        expect(fn () => (new Letter)->issue(nehasOpenExit(), $wording, null, whoIsAtVertex('meera')))
+        expect(fn () => (new Letter)->issue(nehasOpenExit(), $wording, [], whoIsAtVertex('meera')))
             ->toThrow(InvalidArgumentException::class, 'A letter longer than 500000 bytes is refused, not cut short.')
             ->and(Storage::disk(config('startx.documents_disk'))->allFiles())->toBe([])
             ->and(IssuedDocument::query()->count())->toBe(0);
@@ -137,7 +147,7 @@ it('prints a token the letter does not have as nothing, rather than failing or r
     TenantContext::run($this->vertex, function () {
         $wording = '<p>Salary: ['.token('person.salary', 'Salary').'] Password: ['.token('subject.password', 'Password').']</p>';
 
-        expect(asRead((new Letter)->page(nehasOpenExit(), $wording, null)))
+        expect(asRead(relievingPage(nehasOpenExit(), $wording)))
             ->toContain('Salary: [] Password: []');
     });
 });
@@ -146,7 +156,7 @@ it('prints a name that is markup as the characters of the name', function () {
     TenantContext::run($this->vertex, function () {
         whoIsAtVertex('neha')->update(['first_name' => '<img src=x onerror=alert(1)><b>Neha</b>']);
 
-        $page = (new Letter)->page(nehasOpenExit()->fresh(), meerasRelievingWording(), null);
+        $page = relievingPage(nehasOpenExit()->fresh(), meerasRelievingWording());
 
         expect($page)->not->toContain('<img')->not->toContain('<b>')
             ->and(asRead($page))->toContain('certify that <img src=x onerror=alert(1)><b>Neha</b> Deshpande, employee code');
@@ -158,7 +168,7 @@ it('keeps template and PHP syntax Meera typed as the text she typed', function (
         // How the editor stores what she typed: the brackets escaped, as text.
         $typed = '<p>{{ 1 + 1 }} | {!! 6 * 6 !!} | &lt;?php echo 7 * 7; ?&gt; | @php echo 8 * 8; @endphp | {{ $case->subject->password }}</p>';
 
-        expect(asRead((new Letter)->page(nehasOpenExit(), $typed, null)))
+        expect(asRead(relievingPage(nehasOpenExit(), $typed)))
             ->toContain('{{ 1 + 1 }} | {!! 6 * 6 !!} | <?php echo 7 * 7; ?> | @php echo 8 * 8; @endphp | {{ $case->subject->password }}')
             ->not->toContain('36')->not->toContain('49')->not->toContain('64');
     });
@@ -166,7 +176,7 @@ it('keeps template and PHP syntax Meera typed as the text she typed', function (
 
 it('runs nothing sent as raw PHP instead of through the editor', function () {
     TenantContext::run($this->vertex, function () {
-        $page = (new Letter)->page(nehasOpenExit(), '<p>Before <?php echo 7 * 7; ?> after</p>', null);
+        $page = relievingPage(nehasOpenExit(), '<p>Before <?php echo 7 * 7; ?> after</p>');
 
         expect($page)->not->toContain('<?php')->not->toContain('49')
             ->and(asRead($page))->toContain('Before');
@@ -175,7 +185,7 @@ it('runs nothing sent as raw PHP instead of through the editor', function () {
 
 it('hands dompdf none of an image, a style, a stylesheet, an SVG or a font pointing at a file', function (string $hostile) {
     TenantContext::run($this->vertex, function () use ($hostile) {
-        $page = (new Letter)->page(nehasOpenExit(), '<p>Dear Neha,</p>'.$hostile, null);
+        $page = relievingPage(nehasOpenExit(), '<p>Dear Neha,</p>'.$hostile);
 
         expect($page)
             ->not->toContain('passwd')->not->toContain('.env')->not->toContain('url(')
@@ -202,16 +212,16 @@ it('hands dompdf none of an image, a style, a stylesheet, an SVG or a font point
 
 it('places a PNG letterhead inside the page itself, so dompdf opens no file for it', function () {
     TenantContext::run($this->vertex, function () {
-        expect((new Letter)->page(nehasOpenExit(), meerasRelievingWording(), aPngLetterhead()))
+        expect(relievingPage(nehasOpenExit(), meerasRelievingWording(), ['letterhead' => aPngLetterhead()]))
             ->toContain('<img class="letterhead" src="data:image/png;base64,');
     });
 });
 
 it('refuses a letterhead that is not a PNG or a JPEG', function () {
     TenantContext::run($this->vertex, function () {
-        (new Letter)->page(nehasOpenExit(), meerasRelievingWording(), '<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>');
+        relievingPage(nehasOpenExit(), meerasRelievingWording(), ['letterhead' => '<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>']);
     });
-})->throws(InvalidArgumentException::class, 'A letterhead is a PNG or a JPEG.');
+})->throws(InvalidArgumentException::class, 'A letter\'s picture is a PNG or a JPEG.');
 
 it('keeps the letter Neha was given byte for byte when Meera\'s wording changes and the letter is issued again', function () {
     TenantContext::run($this->vertex, function () {
@@ -219,10 +229,10 @@ it('keeps the letter Neha was given byte for byte when Meera\'s wording changes 
         $meera = whoIsAtVertex('meera');
         $disk = Storage::disk(config('startx.documents_disk'));
 
-        $first = (new Letter)->issue($exit, meerasRelievingWording(), null, $meera);
+        $first = (new Letter)->issue($exit, meerasRelievingWording(), [], $meera);
         $given = $disk->get($first->path);
 
-        $again = (new Letter)->issue($exit, meerasRelievingWording('We wish her well.'), null, $meera);
+        $again = (new Letter)->issue($exit, meerasRelievingWording('We wish her well.'), [], $meera);
 
         expect($again->path)->not->toBe($first->path)
             ->and($disk->get($first->path))->toBe($given)
@@ -259,7 +269,7 @@ it('has dompdf refuse a file anywhere in the project, and draw an image handed o
 
 it('refuses a change to what an issued letter\'s row says at the database', function () {
     TenantContext::run($this->vertex, function () {
-        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), null, whoIsAtVertex('meera'));
+        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), [], whoIsAtVertex('meera'));
 
         DB::table('issued_documents')->update(['sha256' => str_repeat('0', 64)]);
     });
@@ -267,7 +277,7 @@ it('refuses a change to what an issued letter\'s row says at the database', func
 
 it('refuses a removal of an issued letter\'s row at the database', function () {
     TenantContext::run($this->vertex, function () {
-        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), null, whoIsAtVertex('meera'));
+        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), [], whoIsAtVertex('meera'));
 
         DB::table('issued_documents')->delete();
     });
