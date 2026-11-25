@@ -283,15 +283,15 @@ class VertexSeeder extends Seeder
         $starter = StarterRoles::definitions();
 
         // A clearance holder needs to see the person whose exit they are clearing, and
-        // nothing more. That is the finance approver's list, and it is what the six
-        // department roles take.
-        $clearing = $starter['finance_approver']['permissions'];
+        // nothing more, not the money. That is the manager's list, and it is what the
+        // department roles take. Finance takes the finance approver's, which adds the money.
+        $clearing = $starter['manager']['permissions'];
 
         $roles = [
             'hr_head' => ['HR head', $starter['hr_head']['permissions'], ['meera']],
             'admin_services' => ['Admin services', $clearing, ['meera']],
             'booking_admin' => ['Booking desk', $clearing, ['meera']],
-            'finance_head' => ['Finance head', $clearing, ['sanjay']],
+            'finance_head' => ['Finance head', $starter['finance_approver']['permissions'], ['sanjay']],
             'crm_head' => ['CRM head', $clearing, ['sanjay']],
             'it_support' => ['IT support', $clearing, ['farhan']],
 

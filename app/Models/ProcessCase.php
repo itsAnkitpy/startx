@@ -283,6 +283,15 @@ class ProcessCase extends Model
     }
 
     /**
+     * Every amount a clearance filed on this case (module 08), oldest first, replaced attempts'
+     * included: the statement counts only those of attempts nothing has replaced.
+     */
+    public function settlementLines(): HasMany
+    {
+        return $this->hasMany(SettlementLine::class, 'case_id')->with('enteredBy')->orderBy('id');
+    }
+
+    /**
      * Every message this product has sent about this case, newest first.
      *
      * Newest first because of what somebody actually opens this list for: a case that has

@@ -5,6 +5,7 @@ namespace App\Notifications;
 use App\Models\NotificationDelivery;
 use App\Models\NotificationTemplate;
 use App\Models\ProcessCase;
+use App\Models\SettlementLine;
 use App\Models\User;
 use App\Process\CaseHistory;
 use Illuminate\Mail\Message;
@@ -45,6 +46,7 @@ final class Sender
      * @param  User|array{name: string, email: string}  $to  somebody here, or somebody with no account
      * @param  array<string, string|int|float|null>  $values  facts this message needs beyond the case's own
      * @param  User|null  $chasedBy  whoever pressed the chase button, where a person sent it rather than the product
+     * @param  SettlementLine|null  $claim  the amount a claim email tells the person leaving of
      */
     public function send(
         ProcessCase $case,
@@ -53,6 +55,7 @@ final class Sender
         array $values = [],
         ?int $stepSequence = null,
         ?User $chasedBy = null,
+        ?SettlementLine $claim = null,
     ): ?NotificationDelivery {
         $template = NotificationTemplate::query()->where('key', $key)->first();
 
@@ -86,6 +89,7 @@ final class Sender
             $stepSequence,
             $chasedBy,
             $waits,
+            $claim,
         );
     }
 
@@ -158,6 +162,7 @@ final class Sender
         ?int $stepSequence,
         ?User $chasedBy = null,
         bool $waits = false,
+        ?SettlementLine $claim = null,
     ): ?NotificationDelivery {
         // Cut to what the record holds. A client's subject line may be the full 255 on its
         // own, and the facts put into it can only make it longer — a refused record would be
@@ -180,6 +185,7 @@ final class Sender
         $delivery = NotificationDelivery::create([
             'case_id' => $case?->getKey(),
             'step_sequence' => $stepSequence,
+            'settlement_line_id' => $claim?->getKey(),
             'recipient_user_id' => $person['user']?->getKey(),
             'recipient_address' => $person['email'],
             'triggered_by' => $chasedBy?->getKey(),

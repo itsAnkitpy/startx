@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @see TemplateCatalogue for what each message is called and what sends it
  */
 #[Fillable([
-    'case_id', 'step_sequence', 'recipient_user_id', 'recipient_address', 'triggered_by',
+    'case_id', 'step_sequence', 'settlement_line_id', 'recipient_user_id', 'recipient_address', 'triggered_by',
     'template_key', 'channel', 'subject', 'body', 'status',
 ])]
 class NotificationDelivery extends Model

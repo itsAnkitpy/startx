@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Cases\Schemas;
 
 use App\Models\NotificationDelivery;
 use App\Models\ProcessCase;
+use App\Models\SettlementLine;
 use App\Models\Succession;
 use App\Models\User;
 use App\Process\CaseHistory;
@@ -11,6 +12,7 @@ use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Callout;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
@@ -204,6 +206,56 @@ class WhatHappenedOnIt
                             ]),
                     ]),
 
+                // Module 08's statement. Shown only to whoever may see the money on this
+                // exit, not to everybody who can open it: a department clearing it reads
+                // no amount anywhere else on the page (Ankit, 25 November 2026).
+                Section::make('Settlement')
+                    ->columnSpanFull()
+                    ->description('Every amount a clearance has claimed from the person leaving or owes them. The net of claims is what the departments raised, not what is paid: payroll applies the wages, the statutory deductions and the limit on what may be deducted.')
+                    // On every exit, and wherever money was filed: a figure is never hidden
+                    // because the case it is on has no last working day.
+                    ->visible(fn (ProcessCase $record): bool => ($record->statutory_from !== null || $record->settlementLines->isNotEmpty())
+                        && (auth()->user()?->can('viewSettlement', $record) ?? false))
+                    ->schema([
+                        TextEntry::make('nothing_filed')
+                            ->hiddenLabel()
+                            ->color('gray')
+                            // Money filed and none of it counted can only be a send-back,
+                            // the one thing that takes an answer off the statement, while
+                            // the claim email below still says it was claimed.
+                            ->state(fn (ProcessCase $record): string => $record->settlementLines->isEmpty()
+                                ? 'No clearance has claimed or owed any money yet.'
+                                : 'Nothing counts yet. Money was filed, but the clearance was sent back, and only what it files when it is answered again will count.')
+                            ->visible(fn (ProcessCase $record): bool => SettlementLine::onTheStatementOf($record) === []),
+
+                        self::amounts('claimed', SettlementLine::Recovery, 'Claimed from'),
+                        self::amounts('owed', SettlementLine::Payable, 'Owed to'),
+
+                        Group::make([
+                            TextEntry::make('claimed_total')
+                                ->label(fn (ProcessCase $record): string => 'Claimed from '.$record->subject?->name)
+                                ->state(fn (ProcessCase $record): string => SettlementLine::inRupees(self::total(SettlementLine::onTheStatementOf($record), SettlementLine::Recovery))),
+
+                            TextEntry::make('owed_total')
+                                ->label(fn (ProcessCase $record): string => 'Owed to '.$record->subject?->name)
+                                ->state(fn (ProcessCase $record): string => SettlementLine::inRupees(self::total(SettlementLine::onTheStatementOf($record), SettlementLine::Payable))),
+
+                            TextEntry::make('net_of_claims')
+                                ->label('Net of claims')
+                                ->weight(FontWeight::Medium)
+                                ->state(fn (ProcessCase $record): string => self::netOfClaims($record)),
+                        ])
+                            ->columns(3)
+                            ->visible(fn (ProcessCase $record): bool => SettlementLine::onTheStatementOf($record) !== []),
+
+                        // Referenced, never worked out: computing it is payroll's statutory
+                        // surface, not ours. A plain date, so not given the reader's clock.
+                        TextEntry::make('gratuity')
+                            ->label('Gratuity')
+                            ->state(fn (ProcessCase $record): string => 'Due by '.$record->gratuity_due_at?->format('j F Y').'. Payroll works it out and pays it, so it is not in the net of claims.')
+                            ->visible(fn (ProcessCase $record): bool => $record->gratuity_due_at !== null),
+                    ]),
+
                 Section::make('What we sent about this case')
                     ->columnSpanFull()
                     ->description('Every message this product has sent about this case, newest first. "Sent" means our mail server accepted the message — it is not proof that anybody read it.')
@@ -282,6 +334,115 @@ class WhatHappenedOnIt
                     ]),
 
             ]);
+    }
+
+    /**
+     * One side of the statement: what the clearances claimed from the person leaving, or what
+     * they owe them. Only a claim says when the leaver was told, since only a claim starts
+     * their seven days to explain.
+     */
+    private static function amounts(string $name, string $direction, string $heading): RepeatableEntry
+    {
+        $claims = $direction === SettlementLine::Recovery;
+
+        return RepeatableEntry::make($name)
+            ->label(fn (ProcessCase $record): string => $heading.' '.$record->subject?->name)
+            ->state(fn (ProcessCase $record): array => self::laidOutAmounts($record, $direction))
+            ->visible(fn (?array $state): bool => filled($state))
+            ->table([
+                TableColumn::make('Clearance'),
+                TableColumn::make('Asked as'),
+                TableColumn::make('Reason'),
+                TableColumn::make('Amount'),
+                TableColumn::make('Filed'),
+                TableColumn::make('Disputed'),
+                ...($claims ? [TableColumn::make('Leaver told')] : []),
+            ])
+            ->schema([
+                TextEntry::make('clearance')->hiddenLabel()->weight(FontWeight::Medium),
+                TextEntry::make('question')->hiddenLabel(),
+                TextEntry::make('reason')->hiddenLabel()->placeholder(''),
+                TextEntry::make('amount')->hiddenLabel(),
+                TextEntry::make('filed')->hiddenLabel()->color('gray'),
+                TextEntry::make('disputed')->hiddenLabel()->badge()->color('warning')->placeholder(''),
+                ...($claims ? [TextEntry::make('told')->hiddenLabel()] : []),
+            ]);
+    }
+
+    /**
+     * @return list<array{clearance: string, question: string, reason: ?string, amount: string, filed: string, disputed: ?string, told: ?string}>
+     */
+    private static function laidOutAmounts(ProcessCase $case, string $direction): array
+    {
+        $clock = FilamentTimezone::get();
+
+        return collect(SettlementLine::onTheStatementOf($case))
+            ->where('line.direction', $direction)
+            ->map(fn (array $row): array => [
+                'clearance' => $row['clearance'],
+                'question' => $row['line']->label,
+                'reason' => $row['line']->reason,
+                'amount' => SettlementLine::inRupees($row['line']->amount_paise),
+                // Somebody with no account answers through a link, and their row names them.
+                'filed' => ($row['line']->enteredBy?->name ?? ($row['attempt']->external_assignee['name'] ?? 'Somebody').' through a link')
+                    .' on '.$row['filed_at']->timezone($clock)->format('j F Y'),
+                'disputed' => $row['disputed'] ? 'Disputed' : null,
+                'told' => $direction === SettlementLine::Recovery ? self::whenTold($row['told'], $clock) : null,
+            ])
+            ->values()->all();
+    }
+
+    /**
+     * The day the claim email went, which starts the leaver's seven days to explain, and never
+     * the day the amount was filed: a mail server that was down sends it a day late. A claim
+     * email not sent yet says how it stands instead.
+     */
+    private static function whenTold(?NotificationDelivery $email, string $clock): string
+    {
+        if ($email === null) {
+            return 'No email sent';
+        }
+
+        return $email->status === NotificationDelivery::Sent
+            ? $email->sent_at->timezone($clock)->format('j F Y')
+            : $email->howItWent();
+    }
+
+    /**
+     * In paise, a disputed amount counted like any other.
+     *
+     * @param  array<array{line: SettlementLine}>  $rows  the statement's rows, or some of them
+     */
+    private static function total(array $rows, string $direction): int
+    {
+        return collect($rows)->where('line.direction', $direction)->sum('line.amount_paise');
+    }
+
+    /**
+     * What the clearances claimed less what they owe, in words that say who owes whom, never
+     * a minus sign (Ankit, 23 November 2026). A disputed amount counts, and is said: the net is
+     * what the departments raised, and leaving it out would settle the argument on a screen
+     * nobody argued it on.
+     */
+    private static function netOfClaims(ProcessCase $case): string
+    {
+        $rows = SettlementLine::onTheStatementOf($case);
+        $disputedRows = array_filter($rows, fn (array $row): bool => $row['disputed']);
+        $net = self::total($rows, SettlementLine::Recovery) - self::total($rows, SettlementLine::Payable);
+        $name = $case->subject?->name;
+
+        $said = match (true) {
+            $net > 0 => SettlementLine::inRupees($net).' to recover from '.$name,
+            $net < 0 => SettlementLine::inRupees(-$net).' owed to '.$name,
+            default => 'Nothing either way',
+        };
+
+        $disputed = array_filter([
+            ($claimed = self::total($disputedRows, SettlementLine::Recovery)) > 0 ? SettlementLine::inRupees($claimed).' claimed' : null,
+            ($owed = self::total($disputedRows, SettlementLine::Payable)) > 0 ? SettlementLine::inRupees($owed).' owed' : null,
+        ]);
+
+        return $said.($disputed === [] ? '' : ', including '.implode(' and ', $disputed).' under dispute');
     }
 
     /**

@@ -46,6 +46,7 @@ class StarterRoles
                     Permission::DeactivatePerson,
                     Permission::ChangeExit,
                     Permission::OverrideHold,
+                    Permission::ViewSettlement,
                     Permission::ViewOrgUnit,
                     Permission::ViewRole,
                 ],
@@ -55,6 +56,7 @@ class StarterRoles
                 'description' => 'Approves money on a settlement — recoveries and payables.',
                 'permissions' => [
                     Permission::ViewPerson,
+                    Permission::ViewSettlement,
                     Permission::ViewOrgUnit,
                 ],
             ],

@@ -127,6 +127,16 @@ final class Permission
     public const OverrideHold = 'override_hold';
 
     /**
+     * Reading the settlement on somebody's exit: every amount a clearance claimed from them
+     * or owes them, the reason typed for each and the net.
+     *
+     * Apart from {@see ViewPerson} for the reason {@see ViewStatutoryId} is: Farhan clearing
+     * IT on Neha's exit may see her, and has no business reading what finance claimed from
+     * her. Asked over the department the exit pinned, like reading it.
+     */
+    public const ViewSettlement = 'view_settlement';
+
+    /**
      * Rewording the messages this product sends on the client's behalf.
      *
      * Apart from {@see ManageSettings} even though both change what happens on every case
@@ -210,6 +220,10 @@ final class Permission
                     self::OverrideHold => [
                         'label' => 'Override a hold on somebody\'s exit',
                         'description' => 'Done from the exit\'s own page, for a clearance on hold whose holder is away or whose argument is holding up the settlement. The step closes without saying the department agreed: their name, yours and your reason stay on the record, anything they recorded such as an amount to recover stays on it, and they are emailed.',
+                    ],
+                    self::ViewSettlement => [
+                        'label' => "See the money on somebody's exit",
+                        'description' => 'The Settlement section on the exit\'s own page: every amount a clearance has claimed from the person leaving or owes them, the reason typed for each, who filed it, and the net of claims. Kept apart from seeing the person, so a department clearing an exit can open its page without reading the money. Raising an exit does not give it. Only on exits in the parts of the company their own grant covers.',
                     ],
                     self::ViewStatutoryId => [
                         'label' => "Read somebody's tax and bank numbers",

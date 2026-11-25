@@ -124,6 +124,26 @@ class ProcessCasePolicy
     }
 
     /**
+     * Reading the settlement on an exit's page: every amount claimed or owed, the reason
+     * typed for each and the net.
+     *
+     * Over the department the case pinned, the same question {@see view()} asks, so a grant
+     * over Pune does not show Deepak's money in Shimla. **Starting the case does not give
+     * it**, as it gives the page: whoever raised Deepak's exit reads where it stands, not
+     * what finance claimed from him.
+     */
+    public function viewSettlement(User $user, ProcessCase $case): bool
+    {
+        $unit = $case->subjectEmploymentRecord?->org_unit_id;
+
+        return $this->permissions->allows(
+            $user,
+            Permission::ViewSettlement,
+            $unit === null ? null : OrgUnit::query()->find($unit),
+        );
+    }
+
+    /**
      * Nothing on this screen writes to a case. Deciding a step is the queue's job, and
      * module 12's editor is where a process itself is changed.
      */

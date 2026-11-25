@@ -1,20 +1,26 @@
 <?php
 
+use App\Authorization\Permission;
+use App\Authorization\PermissionResolver;
 use App\Exceptions\ProcessRefused;
 use App\Filament\Pages\MyQueue;
+use App\Filament\Resources\Cases\Pages\ViewCase;
 use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
 use App\Models\FormField;
 use App\Models\NotificationDelivery;
+use App\Models\OrgUnit;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
+use App\Models\Role;
 use App\Models\SettlementLine;
 use App\Models\Succession;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Notifications\Sender;
 use App\Notifications\TemplateCatalogue;
 use App\Process\CaseEngine;
 use App\Process\StepLink;
@@ -24,11 +30,16 @@ use Database\Seeders\MeridianSeeder;
 use Database\Seeders\VertexSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Symfony\Component\Mailer\Envelope;
+use Symfony\Component\Mailer\Exception\TransportException;
+use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mime\RawMessage;
 
 /*
 | Module 08 step 1: every recovery and payable a clearance files becomes a line nobody can
@@ -38,7 +49,8 @@ use Livewire\Livewire;
 | what to recover from him and why, and what is payable to him. A figure becomes a line when
 | her clearance passes, by any of the three ways a clearance passes, and an exit cannot
 | finish while a figure filed that way has no line. Step 2: Deepak is told of each recovery
-| as its line is written, because his seven days to answer it start then.
+| as its line is written, because his seven days to answer it start then. Step 3: the exit's
+| page shows the statement, with the day each email told him and the net of claims.
 |
 | A refused statement abandons the surrounding transaction in Postgres, which under
 | RefreshDatabase is the test's own, so each expected database refusal has a test to itself.
@@ -400,7 +412,9 @@ it('refuses a removal of a line at the database', function () {
 })->throws(QueryException::class, 'settlement_lines is add-only');
 
 it('refuses to empty the lines table wholesale', function () {
-    DB::statement('truncate settlement_lines');
+    // A plain truncate is refused first because each claim email names its line, so this is
+    // the one form that reaches the table's own refusal.
+    DB::statement('truncate settlement_lines cascade');
 })->throws(QueryException::class, 'settlement_lines is add-only');
 
 /*
@@ -739,5 +753,377 @@ it('tells Deepak nothing when the answer that filed the claim is undone', functi
         // Read off the mailer rather than the delivery records, which the undone write takes
         // with it whether or not the message went.
         expect(Mail::mailer()->getSymfonyTransport()->messages())->toHaveCount(0);
+    });
+});
+
+/*
+| The statement on the exit's page (step 3)
+*/
+
+/**
+ * What the statement counts on this exit: each figure, whether it is disputed and the day
+ * the email about it went, if it has.
+ *
+ * @return list<array{paise: int, disputed: bool, told: ?string}>
+ */
+function onTheStatementOf(ProcessCase $exit): array
+{
+    return array_map(fn (array $row): array => [
+        'paise' => $row['line']->amount_paise,
+        'disputed' => $row['disputed'],
+        'told' => $row['told']?->sent_at?->timezone('Asia/Kolkata')->format('j F Y'),
+    ], SettlementLine::onTheStatementOf($exit->fresh()));
+}
+
+it('works out the net of claims on Deepak\'s exit the way it was worked out by hand, in words that say who owes whom', function (float $recover, float $pay, string $net) {
+    TenantContext::run($this->meridian, function () use ($recover, $pay, $net) {
+        $exit = deepaksExitAwaitingFinance();
+        $chandni = owedAtMeridian('chandni');
+
+        (new CaseEngine)->decide($exit, 3, 'approved', $chandni, [
+            'imprest_card_returned' => false,
+            'recover_from_them' => $recover,
+            'recovery_reason' => 'advance',
+            'pay_to_them' => $pay,
+        ]);
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertOk()
+            ->assertSee('Net of claims')
+            ->assertSee($net)
+            ->assertDontSee('under dispute')
+            // The rupee formatter writes a minus as a plain hyphen.
+            ->assertDontSee('-₹')
+            ->assertDontSee('−');
+    });
+})->with([
+    'more claimed than owed' => [40000.50, 12345.67, '₹27,654.83 to recover from Deepak Iyer'],
+    'more owed than claimed' => [1234.56, 9999.99, '₹8,765.43 owed to Deepak Iyer'],
+    'the two the same' => [12000.01, 12000.01, 'Nothing either way'],
+]);
+
+it('lists Neha\'s amounts clearance by clearance, each total and the net worked out by hand, and leaves out the net Vertex types', function () {
+    $this->seed(VertexSeeder::class);
+
+    TenantContext::run(Tenant::query()->where('slug', VertexSeeder::Slug)->sole(), function () {
+        $nehas = ProcessCase::query()->sole();
+        $meera = User::query()->where('work_email', 'meera@vertex.test')->sole();
+
+        // HR answers before finance, and finance still comes first: it is the earlier clearance.
+        (new CaseEngine)->decide($nehas, 7, 'approved', $meera, [
+            'hr_id_card_returned' => true,
+            'hr_biometric_deactivated' => true,
+            'notice_recovery_amount' => 500,
+            'hr_other_recovery_amount' => 19.99,
+            'hr_other_reason' => 'Uniform',
+            'encashment_payable_amount' => 1234.56,
+        ]);
+        (new CaseEngine)->decide($nehas->fresh(), 6, 'approved', User::query()->where('work_email', 'sanjay@vertex.test')->sole(), [
+            'imprest_card_recovered' => true,
+            'finance_recovery_amount' => 2000.10,
+            'finance_recovery_reason' => 'Salary advance',
+            'finance_payable_amount' => 15000.75,
+            'finance_payable_reason' => 'Bonus',
+            'finance_net_amount' => 99999,
+        ]);
+
+        // By hand: claimed 500 + 19.99 + 2,000.10 = 2,520.09; owed 1,234.56 + 15,000.75 =
+        // 16,235.31; so 13,715.22 is owed to Neha. Counting the 99,999 would make it 116,234.31.
+        Livewire::actingAs($meera)->test(ViewCase::class, ['record' => $nehas->getKey()])
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Every amount a clearance has claimed',
+                'Claimed from Neha Deshpande',
+                'Finance clearance', 'Amount to recover from them', 'Salary advance', '₹2,000.10', 'Sanjay Kulkarni on',
+                'HR clearance', 'Notice period shortfall to recover', '₹500.00',
+                'HR clearance', 'Anything else to recover', 'Uniform', '₹19.99', 'Meera Joshi on',
+                'Owed to Neha Deshpande',
+                'Finance clearance', 'Amount payable to them', 'Bonus', '₹15,000.75',
+                'HR clearance', 'Leave encashment payable to them', '₹1,234.56',
+                'Claimed from Neha Deshpande', '₹2,520.09',
+                'Owed to Neha Deshpande', '₹16,235.31',
+                'Net of claims', '₹13,715.22 owed to Neha Deshpande',
+                'What we sent about this case',
+            ])
+            ->assertDontSee('₹99,999.00');
+    });
+});
+
+it('marks a figure disputed when finance is closed as disputed or overridden, and counts it in the net, saying so', function (string $outcome, string $by, string $filed) {
+    // Held on the 20th and settled on the 24th: closing it is Chandni filing it, while an
+    // override files the figure she typed when she held it.
+    $this->travelTo(CarbonImmutable::parse('2026-11-20 10:00', 'Asia/Kolkata'));
+
+    TenantContext::run($this->meridian, function () use ($outcome, $by, $filed) {
+        $exit = chandniHoldsDeepaksFinanceOver40000();
+
+        $this->travelTo(CarbonImmutable::parse('2026-11-24 10:00', 'Asia/Kolkata'));
+        (new CaseEngine)->resolveHold($exit, 3, $outcome, owedAtMeridian($by), 'Deepak says he repaid it');
+
+        expect(onTheStatementOf($exit))->toEqual([['paise' => 4000000, 'disputed' => true, 'told' => '24 November 2026']]);
+
+        Livewire::actingAs(owedAtMeridian('chandni'))->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertOk()
+            // The mark sits in the row, after who filed it and before the totals. Read as the
+            // badge, since every row also carries the word as its cell's screen-reader label.
+            // From the statement's own heading, since the history also says "by Chandni Verma on".
+            ->assertSeeInOrder(['Claimed from Deepak Iyer', 'Chandni Verma on '.$filed, 'fi-badge fi-size-sm fi-color fi-color-warning', 'Net of claims'], false)
+            ->assertSee('₹40,000.00 to recover from Deepak Iyer, including ₹40,000.00 claimed under dispute');
+    });
+})->with([
+    'closed as disputed' => ['closed_disputed', 'chandni', '24 November 2026'],
+    'overridden' => ['force_closed', 'rakesh', '20 November 2026'],
+]);
+
+it('marks nothing disputed on a figure finance approved', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-11-24 10:00', 'Asia/Kolkata'));
+
+    TenantContext::run($this->meridian, function () {
+        $exit = deepaksExitAwaitingFinance();
+        $chandni = owedAtMeridian('chandni');
+
+        (new CaseEngine)->decide($exit, 3, 'approved', $chandni, [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]);
+
+        expect(onTheStatementOf($exit))->toEqual([['paise' => 4000000, 'disputed' => false, 'told' => '24 November 2026']]);
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSee('₹40,000.00 to recover from Deepak Iyer')
+            ->assertDontSee('under dispute')
+            ->assertDontSeeHtml('fi-badge fi-size-sm fi-color fi-color-warning');
+    });
+});
+
+it('says Deepak was told on the day the email went, not the day the figure was filed, and that it has not gone while it has not', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-11-24 10:00', 'Asia/Kolkata'));
+
+    TenantContext::run($this->meridian, function () {
+        $exit = deepaksExitAwaitingFinance();
+        $chandni = owedAtMeridian('chandni');
+
+        // The mail server is down when Chandni approves.
+        Mail::mailer()->setSymfonyTransport(new class extends ArrayTransport
+        {
+            public function send(RawMessage $message, ?Envelope $envelope = null): ?SentMessage
+            {
+                throw new TransportException('Connection refused.');
+            }
+        });
+
+        (new CaseEngine)->decide($exit, 3, 'approved', $chandni, [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]);
+
+        expect(onTheStatementOf($exit))->toEqual([['paise' => 4000000, 'disputed' => false, 'told' => null]]);
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSeeInOrder(['Chandni Verma on 24 November 2026', 'Not sent yet — trying again', 'Net of claims']);
+
+        // It goes the next day.
+        $this->travelTo(CarbonImmutable::parse('2026-11-25 09:00', 'Asia/Kolkata'));
+        Mail::mailer()->setSymfonyTransport(new ArrayTransport);
+        (new Sender)->handOver(claimsToldOn($exit)->sole());
+
+        expect(onTheStatementOf($exit))->toEqual([['paise' => 4000000, 'disputed' => false, 'told' => '25 November 2026']]);
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSeeInOrder(['Chandni Verma on 24 November 2026', '25 November 2026', 'Net of claims']);
+    });
+});
+
+it('shows the figure finance filed again after a send-back, told on the first email\'s day when it is the same and the changed email\'s day when not', function (int $again, string $told) {
+    $this->travelTo(CarbonImmutable::parse('2026-11-24 10:00', 'Asia/Kolkata'));
+
+    TenantContext::run($this->meridian, function () use ($again, $told) {
+        $exit = financeSentBackAfterClaiming40000();
+
+        // Sent back, the 40,000 is off the statement until finance answers again, and the
+        // page says why rather than that nothing was ever claimed.
+        expect(onTheStatementOf($exit))->toBe([]);
+
+        Livewire::actingAs(owedAtMeridian('chandni'))->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSee('Nothing counts yet. Money was filed, but the clearance was sent back, and only what it files when it is answered again will count.')
+            ->assertDontSee('No clearance has claimed or owed any money yet.');
+
+        $this->travelTo(CarbonImmutable::parse('2026-11-26 10:00', 'Asia/Kolkata'));
+        (new CaseEngine)->decide($exit, 1, 'approved', owedAtMeridian('chandni'), ['claim_amount' => $again]);
+
+        expect(onTheStatementOf($exit))->toEqual([['paise' => $again * 100, 'disputed' => false, 'told' => $told]]);
+
+        Livewire::actingAs(owedAtMeridian('chandni'))->test(ViewCase::class, ['record' => $exit->getKey()])
+            // From the statement's own heading, since the history also says "by Chandni Verma on".
+            ->assertSeeInOrder(['Claimed from Farah Khan', 'Chandni Verma on 26 November 2026', $told, 'Net of claims']);
+    });
+})->with([
+    'the same figure' => [40000, '24 November 2026'],
+    'a new figure' => [35000, '26 November 2026'],
+]);
+
+it('says on an exit with nothing filed that nothing is claimed or owed yet, shows gratuity only where it is owed, and shows no statement on a hiring request', function () {
+    TenantContext::run($this->meridian, function () {
+        $chandni = owedAtMeridian('chandni');
+
+        // Deepak's is a resignation short of five years, so no gratuity.
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => deepaksExitAwaitingFinance()->getKey()])
+            ->assertSee('No clearance has claimed or owed any money yet.')
+            ->assertDontSee('Nothing counts yet')
+            ->assertDontSee('Net of claims')
+            ->assertDontSee('Payroll works it out');
+
+        // Rohit's fixed-term contract is ending, so his is owed one.
+        $rohits = ProcessCase::query()->where('subject_user_id', owedAtMeridian('rohit')->getKey())->sole();
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $rohits->getKey()])
+            ->assertSee('Due by '.$rohits->gratuity_due_at->format('j F Y').'. Payroll works it out and pays it, so it is not in the net of claims.');
+
+        $hiring = ProcessCase::query()->whereNull('subject_user_id')->firstOrFail();
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $hiring->getKey()])
+            ->assertOk()
+            ->assertDontSee('Every amount a clearance has claimed');
+    });
+});
+
+it('shuts Meridian\'s statement to Vertex, whose head of people types its address', function () {
+    $this->seed(VertexSeeder::class);
+
+    $deepaks = TenantContext::run($this->meridian, function (): ProcessCase {
+        $exit = deepaksExitAwaitingFinance();
+
+        (new CaseEngine)->decide($exit, 3, 'approved', owedAtMeridian('chandni'), [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]);
+
+        return $exit;
+    });
+
+    $meera = TenantContext::run(
+        Tenant::query()->where('slug', VertexSeeder::Slug)->sole(),
+        fn (): User => User::query()->where('work_email', 'meera@vertex.test')->sole(),
+    );
+
+    $this->actingAs($meera)
+        ->get('http://vertex.localhost/admin/cases/'.$deepaks->getKey())
+        ->assertNotFound();
+});
+
+it('shows Neha\'s money to Sanjay and Meera, and none of it to Farhan, who clears IT on her exit', function () {
+    $this->seed(VertexSeeder::class);
+
+    TenantContext::run(Tenant::query()->where('slug', VertexSeeder::Slug)->sole(), function () {
+        $nehas = ProcessCase::query()->sole();
+
+        (new CaseEngine)->decide($nehas, 6, 'approved', User::query()->where('work_email', 'sanjay@vertex.test')->sole(), [
+            'imprest_card_recovered' => true,
+            'finance_recovery_amount' => 2000.10,
+            'finance_recovery_reason' => 'Salary advance',
+        ]);
+
+        // Farhan may see Neha, so her exit's page opens for him. Nothing on it is her money.
+        Livewire::actingAs(User::query()->where('work_email', 'farhan@vertex.test')->sole())
+            ->test(ViewCase::class, ['record' => $nehas->getKey()])
+            ->assertOk()
+            ->assertSee('What we sent about this case')
+            ->assertDontSee('Every amount a clearance has claimed')
+            ->assertDontSee('₹2,000.10')
+            ->assertDontSee('Salary advance')
+            ->assertDontSee('Net of claims');
+
+        foreach (['sanjay', 'meera'] as $first) {
+            Livewire::actingAs(User::query()->where('work_email', $first.'@vertex.test')->sole())
+                ->test(ViewCase::class, ['record' => $nehas->getKey()])
+                ->assertSeeInOrder(['Every amount a clearance has claimed', 'Salary advance', '₹2,000.10', 'Net of claims']);
+        }
+    });
+});
+
+it('keeps Deepak\'s money from somebody given it over Pune alone, and shows it once their grant covers Shimla', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = deepaksExitAwaitingFinance();
+
+        (new CaseEngine)->decide($exit, 3, 'approved', owedAtMeridian('chandni'), [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]);
+
+        $anjali = owedAtMeridian('anjali');
+        $shimla = OrgUnit::query()->where('name', 'Shimla branch')->sole();
+        $grant = fn (Role $role, OrgUnit $unit) => $role->assignments()->create([
+            'user_id' => $anjali->getKey(),
+            'org_unit_id' => $unit->getKey(),
+            'includes_descendants' => false,
+        ]);
+        $money = Role::factory()->keyed('payroll_desk')->withPermissions([Permission::ViewSettlement])->create();
+
+        $grant(Role::factory()->keyed('people_desk')->withPermissions([Permission::ViewPerson])->create(), $shimla);
+        $grant($money, OrgUnit::query()->where('name', 'Pune branch')->sole());
+        app(PermissionResolver::class)->forget();
+
+        Livewire::actingAs($anjali)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertOk()
+            ->assertDontSee('Every amount a clearance has claimed')
+            ->assertDontSee('₹40,000.00');
+
+        $grant($money, $shimla);
+        app(PermissionResolver::class)->forget();
+
+        Livewire::actingAs($anjali)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSeeInOrder(['Every amount a clearance has claimed', '₹40,000.00']);
+    });
+});
+
+it('gives existing administrators, HR heads and finance approvers the money, and no other role', function () {
+    TenantContext::run($this->meridian, function () {
+        Role::query()->get()->each(fn (Role $role) => $role->permissions()->where('permission', Permission::ViewSettlement)->delete());
+
+        // Meridian's finance role has its own name. A client set up through the platform
+        // starts with this one.
+        Role::factory()->keyed('finance_approver', 'Finance Approver')->create();
+    });
+
+    (require database_path('migrations/2026_11_25_074001_grant_seeing_the_money_on_an_exit.php'))->up();
+
+    TenantContext::run($this->meridian, function () {
+        expect(Role::query()->whereHas('permissions', fn ($query) => $query->where('permission', Permission::ViewSettlement))->pluck('key')->all())
+            ->toEqualCanonicalizing([Role::AdministratorKey, 'hr_head', 'finance_approver']);
+    });
+});
+
+it('refuses at the database a claim email naming a figure on another exit', function () {
+    TenantContext::run($this->meridian, function () {
+        $deepaks = deepaksExitAwaitingFinance();
+
+        (new CaseEngine)->decide($deepaks, 3, 'approved', owedAtMeridian('chandni'), [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+        ]);
+
+        // Deepak's claim email moved onto Anjali's exit, still naming his figure.
+        claimsToldOn($deepaks)->sole()->update([
+            'case_id' => ProcessCase::query()->where('subject_user_id', owedAtMeridian('anjali')->getKey())->sole()->getKey(),
+        ]);
+    });
+})->throws(QueryException::class, 'notification_deliveries_claim_is_on_its_case');
+
+it('names both sides in the net when a disputed clearance both claimed and owed', function () {
+    TenantContext::run($this->meridian, function () {
+        $exit = deepaksExitAwaitingFinance();
+        $chandni = owedAtMeridian('chandni');
+
+        (new CaseEngine)->claim($exit, 3, $chandni);
+        (new CaseEngine)->decide($exit->fresh(), 3, 'held', $chandni, [
+            'imprest_card_returned' => false,
+            'recover_from_them' => 40000,
+            'recovery_reason' => 'advance',
+            'pay_to_them' => 12000,
+        ], 'Deepak disputes the advance');
+        (new CaseEngine)->resolveHold($exit->fresh(), 3, 'closed_disputed', $chandni, 'Deepak says he repaid it');
+
+        Livewire::actingAs($chandni)->test(ViewCase::class, ['record' => $exit->getKey()])
+            ->assertSee('₹28,000.00 to recover from Deepak Iyer, including ₹40,000.00 claimed and ₹12,000.00 owed under dispute');
     });
 });

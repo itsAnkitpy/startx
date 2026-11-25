@@ -4,9 +4,12 @@ namespace App\Models;
 
 use App\Process\StepForm;
 use App\Tenancy\BelongsToTenant;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Number;
 
 /**
  * One recovery from a leaver, or one amount payable to them, as a clearance filed it.
@@ -39,6 +42,76 @@ class SettlementLine extends Model
             'amount_paise' => 'integer',
             'created_at' => 'datetime',
         ];
+    }
+
+    /** Whoever filed the figure. Null when it came through a link from somebody with no account. */
+    public function enteredBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'entered_by');
+    }
+
+    /** Paise as rupees, the way every message and the statement write them: "₹40,000.00". */
+    public static function inRupees(int $paise): string
+    {
+        return Number::currency($paise / 100, 'INR', 'en_IN');
+    }
+
+    /**
+     * The settlement statement on an exit's page: every line filed by an attempt nothing has
+     * replaced, in the order of the clearances that filed them, each with whether it is
+     * disputed and, for a claim, the email that told the person leaving of it.
+     *
+     * Nothing here is stored, so whatever totals the page adds up from these can never
+     * disagree with them. A line is disputed when its clearance was closed as disputed or
+     * overridden, the two ways a hold ends, since in both the department's figure stood
+     * unresolved.
+     *
+     * The email for a claim is the latest one about that question on that clearance, whichever
+     * attempt's line it named. A figure filed again unchanged after a send-back sends nothing,
+     * so Deepak was told of it by the first email; a changed one by the claim-changed email.
+     *
+     * The day it was filed is the day its line was written, except on an override, where the
+     * line is in the name of whoever put the clearance on hold, as {@see self::fileFor()} reads
+     * it, and so carries the day they did: Chandni held 40,000 on the 20th and Rakesh's
+     * override on the 28th is not her filing anything.
+     *
+     * Read from what the case has loaded rather than queried, because the page reads it once
+     * for every entry it draws, and its list of emails sent and its history have loaded them
+     * already.
+     *
+     * @return list<array{line: self, attempt: CaseStep, clearance: string, filed_at: CarbonInterface, disputed: bool, told: ?NotificationDelivery}>
+     */
+    public static function onTheStatementOf(ProcessCase $case): array
+    {
+        $live = $case->liveSteps->keyBy('id');
+        $questionOf = $case->settlementLines->pluck('field_key', 'id');
+
+        $told = $case->messagesSent
+            ->whereNotNull('settlement_line_id')
+            ->sortBy('id')
+            ->keyBy(fn (NotificationDelivery $email): string => $email->step_sequence.'/'.$questionOf[$email->settlement_line_id]);
+
+        return $case->settlementLines
+            ->filter(fn (self $line): bool => $live->has($line->case_step_id))
+            ->sortBy(fn (self $line): array => [$live[$line->case_step_id]->sequence, $line->getKey()])
+            ->map(function (self $line) use ($case, $live, $told): array {
+                $attempt = $live[$line->case_step_id];
+                $held = $attempt->outcome === 'force_closed'
+                    ? $case->events->last(fn (CaseEvent $event): bool => $event->type === 'step_acted'
+                        && ($event->payload['sequence'] ?? null) === $attempt->sequence
+                        && ($event->payload['outcome'] ?? null) === 'held')
+                    : null;
+
+                return [
+                    'line' => $line,
+                    'attempt' => $attempt,
+                    'clearance' => $case->template->steps->firstWhere('sequence', $attempt->sequence)->name,
+                    'filed_at' => $held->created_at ?? $line->created_at,
+                    'disputed' => in_array($attempt->outcome, CaseStep::HoldResolutions, true),
+                    'told' => $line->direction === self::Recovery ? $told->get($attempt->sequence.'/'.$line->field_key) : null,
+                ];
+            })
+            ->values()->all();
     }
 
     /**

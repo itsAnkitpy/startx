@@ -24,7 +24,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Number;
 
 /**
  * Running a case: opening one, acting on its steps, sending it back, and ending it.
@@ -126,14 +125,15 @@ final class CaseEngine
      * engine's own inside it, and drops it if any of that write is undone.
      *
      * @param  array<string, string>  $values
+     * @param  SettlementLine|null  $claim  the amount a claim message tells the person leaving of
      */
-    private function tell(ProcessCase $case, string $key, ?User $person, array $values = [], ?int $stepSequence = null): void
+    private function tell(ProcessCase $case, string $key, ?User $person, array $values = [], ?int $stepSequence = null, ?SettlementLine $claim = null): void
     {
         if (! $person instanceof User) {
             return;
         }
 
-        DB::afterCommit(fn (): mixed => $this->messages->send($case, $key, $person, $values, $stepSequence));
+        DB::afterCommit(fn (): mixed => $this->messages->send($case, $key, $person, $values, $stepSequence, claim: $claim));
     }
 
     /**
@@ -143,8 +143,8 @@ final class CaseEngine
      * One message for each recovery, at once and never in a daily bundle, because the law
      * gives Deepak seven days to explain before a claim for damage or loss may come off his
      * wages, and this message is when those days start. A payable is not a claim and sends
-     * nothing. When it went out is on its delivery record, which is where the statement
-     * reads the date, so nothing is stored on the line. A claim with no reason given reads
+     * nothing. When it went out is on its delivery record, which names the amount it told
+     * of and is where the statement reads the date. A claim with no reason given reads
      * as the question it answered, "Notice period shortfall to recover", rather than as
      * nothing.
      *
@@ -166,7 +166,6 @@ final class CaseEngine
         }
 
         $before = SettlementLine::recoveriesBefore($attempt);
-        $rupees = fn (int $paise): string => Number::currency($paise / 100, 'INR', 'en_IN');
         // The same calendar and the same way of writing a date as every other message: the
         // recipient's own, else the client's.
         $today = now()->timezone($case->subject?->timezone ?? $case->tenant->timezone)->format('j F Y');
@@ -182,7 +181,7 @@ final class CaseEngine
             $latest = $line ?? $was;
             $claim = [
                 'claim.department' => $step->name,
-                'claim.amount' => $line === null ? 'nothing' : $rupees($line->amount_paise),
+                'claim.amount' => $line === null ? 'nothing' : SettlementLine::inRupees($line->amount_paise),
                 'claim.reason' => $latest->reason ?? $latest->label,
             ];
 
@@ -190,13 +189,13 @@ final class CaseEngine
                 $this->tell($case, TemplateCatalogue::MoneyClaimedSubject, $case->subject, [
                     ...$claim,
                     'claim.raised_on' => $today,
-                ], $step->sequence);
+                ], $step->sequence, $latest);
             } else {
                 $this->tell($case, TemplateCatalogue::MoneyClaimChangedSubject, $case->subject, [
                     ...$claim,
-                    'claim.was' => $rupees($was->amount_paise),
+                    'claim.was' => SettlementLine::inRupees($was->amount_paise),
                     'claim.changed_on' => $today,
-                ], $step->sequence);
+                ], $step->sequence, $latest);
             }
         }
     }

@@ -190,6 +190,7 @@ it('writes the ticked actions onto the role and takes the unticked ones off', fu
         Livewire::actingAs(whoWorksForMeridian('chandni'))->test(EditRole::class, ['record' => $hrHead->getKey()])
             ->assertOk()
             ->assertSee('See the people at the company')
+            ->assertSee("See the money on somebody's exit")
             // Four headings, grouped by the thing each action is about, which is how the
             // comparable products put a permission list in front of a customer.
             ->assertSee('Departments and branches')
