@@ -2,6 +2,8 @@
 
 namespace App\Notifications;
 
+use App\Process\Letter;
+
 /**
  * Putting a value in place of a named token, and nothing else at all.
  *
@@ -24,8 +26,10 @@ namespace App\Notifications;
  * become the company. And the replacement is returned from a callback rather than written
  * as a pattern, so a value containing `$1` or `\0` is text and not a backreference.
  *
- * Module 09 adds the repeating block a settlement table needs and the condition a letter
- * needs, on top of this rather than instead of it.
+ * **Letters are not filled here.** A letter is HTML on its way to a PDF engine, and this
+ * escapes nothing, which is right only because an email is plain text. Filament's own
+ * renderer fills a letter instead, through {@see Letter}. No loop and no
+ * condition was ever needed: the one loop was the settlement table, which is our own page.
  */
 final class Wording
 {
