@@ -6,6 +6,7 @@ use App\Filament\Pages\MyQueue;
 use App\Filament\Resources\Cases\Pages\ViewCase;
 use App\Models\CaseStep;
 use App\Models\Delegation;
+use App\Models\IssuedDocument;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
 use App\Models\ProcessTemplate;
@@ -23,19 +24,21 @@ use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
 use Filament\Schemas\Components\Callout;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
 /*
 | Module 07 step 4: nobody leaves with work still on them.
 |
-| HR's final check cannot be answered while the leaver still holds a role, has anybody
-| reporting to them, has a step picked up or on hold, or is the one a step nobody holds
-| falls to — the four things "Hand over their work" moves. It holds the case, never the
-| person.
+| The answer that would finish an exit is refused while the leaver still holds a role, has
+| anybody reporting to them, has a step picked up or on hold, or is the one a step nobody
+| holds falls to — the four things "Hand over their work" moves. It holds the case, never
+| the person. At Meridian that answer is the leaver's letters, after HR's final check
+| (module 09 step 3).
 |
 | Rakesh's seeded exit is cleared by everybody who works here and waits on his own link.
 | He holds HR head and line-of-business head over Shimla, and Deepak and Anjali report to
-| him, so once he answers it, Priya's final check is the one that would finish it.
+| him, so once he answers it and Priya's final check is done, his letters would finish it.
 */
 
 beforeEach(function () {
@@ -72,8 +75,9 @@ function chandniHandsTheirWorkTo(ProcessCase $exit, User $successor): void
         ->assertHasNoActionErrors();
 }
 
-it('refuses Priya\'s final check on Rakesh\'s exit while his work is on him, and lets it finish once it is handed over', function () {
+it('refuses Rakesh\'s letters while his work is on him, and lets his exit finish once it is handed over', function () {
     TenantContext::run($this->meridian, function () {
+        Storage::fake(config('startx.documents_disk'));
         $rakeshs = theOpenExitOf('rakesh');
         $priya = hereAtMeridian('priya');
         $before = $rakeshs->only(['statutory_from', 'statutory_due_at', 'gratuity_due_at']);
@@ -82,18 +86,25 @@ it('refuses Priya\'s final check on Rakesh\'s exit while his work is on him, and
 
         Livewire::actingAs($priya)->test(MyQueue::class)
             ->call('decide', $rakeshs->getKey(), 5, 'approved')
+            ->assertNotified('Recorded.');
+
+        $this->travelTo(CarbonImmutable::parse($rakeshs->statutory_from->toDateString().' 10:00', $this->meridian->timezone));
+
+        Livewire::actingAs($priya)->test(MyQueue::class)
+            ->call('decide', $rakeshs->getKey(), 6, 'approved')
             ->assertNotified('Rakesh Menon still has 2 roles and 2 people reporting to them, and all of it has to be handed over before this exit can finish. Press "Hand over their work" on this exit\'s page, or ask somebody who can.');
 
-        // Nothing of the answer was kept, and the person's own dates did not move.
+        // Nothing of the answer was kept, no letter went, and the person's own dates did not move.
         $rakeshs->refresh();
         expect($rakeshs->state)->toBe(ProcessCase::Open)
-            ->and(CaseStep::query()->where('case_id', $rakeshs->getKey())->where('sequence', 5)->whereNotNull('outcome')->exists())->toBeFalse()
+            ->and(CaseStep::query()->where('case_id', $rakeshs->getKey())->where('sequence', 6)->whereNotNull('outcome')->exists())->toBeFalse()
+            ->and(IssuedDocument::query()->count())->toBe(0)
             ->and($rakeshs->only(['statutory_from', 'statutory_due_at', 'gratuity_due_at']))->toEqual($before);
 
         chandniHandsTheirWorkTo($rakeshs, $priya);
 
         Livewire::actingAs($priya)->test(MyQueue::class)
-            ->call('decide', $rakeshs->getKey(), 5, 'approved')
+            ->call('decide', $rakeshs->getKey(), 6, 'approved')
             ->assertNotified('Recorded.');
 
         expect($rakeshs->fresh()->state)->toBe(ProcessCase::Closed);
@@ -109,6 +120,7 @@ it('finishes an exit with nothing to hand over as it does today', function () {
         $engine->decide($deepaks->fresh(), 3, 'approved', hereAtMeridian('chandni'), ['imprest_card_returned' => true]);
         answerTheLeaversLink($deepaks->fresh(), 4);
         $engine->decide($deepaks->fresh(), 5, 'approved', hereAtMeridian('rakesh'));
+        issueTheLettersOn($deepaks, 6, hereAtMeridian('rakesh'));
 
         expect($deepaks->fresh()->state)->toBe(ProcessCase::Closed)
             ->and(Succession::query()->count())->toBe(0);
@@ -128,14 +140,16 @@ it('holds Priya\'s exit while she is one of the two administrators, and finishes
         answerTheLeaversLink($priyas->fresh(), 4);
 
         // Administrator over the whole company and HR head over Shimla.
-        expect(fn () => $engine->decide($priyas->fresh(), 5, 'approved', $rakesh))
+        $engine->decide($priyas->fresh(), 5, 'approved', $rakesh);
+
+        expect(fn () => issueTheLettersOn($priyas, 6, $rakesh))
             ->toThrow(ProcessRefused::class, 'Priya Nair still has 2 roles, and all of it has to be handed over');
 
         // Rakesh is not an administrator yet, so the role moves to him and the company
         // keeps two.
         chandniHandsTheirWorkTo($priyas, $rakesh);
 
-        $engine->decide($priyas->fresh(), 5, 'approved', $rakesh);
+        issueTheLettersOn($priyas, 6, $rakesh);
 
         expect($priyas->fresh()->state)->toBe(ProcessCase::Closed)
             ->and(AdministratorFloor::count())->toBe(2)
@@ -259,6 +273,7 @@ it('does not hold Rakesh\'s exit for a step he picked up on an exit that was the
 
         answerTheLeaversLink($rakeshs->fresh(), 4);
         (new CaseEngine)->decide($rakeshs->fresh(), 5, 'approved', hereAtMeridian('priya'));
+        issueTheLettersOn($rakeshs, 6, hereAtMeridian('priya'));
 
         expect($rakeshs->fresh()->state)->toBe(ProcessCase::Closed);
     });
@@ -281,6 +296,7 @@ it('finishes an exit for somebody whose only role is the starter Employee role, 
         $engine->decide($deepaks->fresh(), 3, 'approved', hereAtMeridian('chandni'), ['imprest_card_returned' => true]);
         answerTheLeaversLink($deepaks->fresh(), 4);
         $engine->decide($deepaks->fresh(), 5, 'approved', hereAtMeridian('rakesh'));
+        issueTheLettersOn($deepaks, 6, hereAtMeridian('rakesh'));
 
         expect($deepaks->fresh()->state)->toBe(ProcessCase::Closed);
     });
@@ -302,8 +318,10 @@ it('still refuses after the handover when work has reached the leaver since, and
         ]);
 
         answerTheLeaversLink($rakeshs->fresh(), 4);
+        (new CaseEngine)->decide($rakeshs->fresh(), 5, 'approved', $priya);
 
-        expect(fn () => (new CaseEngine)->decide($rakeshs->fresh(), 5, 'approved', $priya))
+        // The date it was handed over is read before the letters move the clock to his last day.
+        expect(fn () => issueTheLettersOn($rakeshs, 6, $priya))
             ->toThrow(ProcessRefused::class, "Rakesh Menon's work was handed to Priya Nair on ".now()->format('j F Y').', and since then 1 role reached them. That has to move on before this exit can finish: roles on the roles screen');
 
         // And the button is not offered a second time.
@@ -319,7 +337,7 @@ it('refuses the answer that would finish an exit through the leaver\'s link and 
         $engine = new CaseEngine;
 
         // An exit whose last answer can arrive through a link or a hold, which Meridian's
-        // own cannot, because its last step is HR's final check alone.
+        // own cannot, because its last step is the leaver's letters alone.
         $exit = ProcessTemplate::factory()->named('short_exit', 'Short exit')->about('employee')->create();
         ProcessStep::factory()->of($exit)->at(1, 1)->named('Finance clearance')->heldBy('chandni@meridian.test')->offering('approved', 'held')->create();
         ProcessStep::factory()->of($exit)->at(2, 1)->named('Leaver confirms')->external()->offering('approved')->create();

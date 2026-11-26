@@ -221,13 +221,14 @@ it('writes to the person it is about and to whoever raised it when a case finish
         // him (module 07 step 4).
         Succession::handOver($rakeshs, whoIsOnMeridiansStaff('priya'), whoIsOnMeridiansStaff('chandni'));
 
-        // His answer was the last clearance, which opens HR's final check, and those
-        // messages are checked where whose turn it is is. Cleared before the answer that
-        // finishes the exit.
+        // His answer was the last clearance, which opens HR's final check, and HR's final
+        // check opens his letters. Those messages are checked where whose turn it is is.
+        // Cleared before the answer that finishes the exit, which is his letters going out.
+        (new CaseEngine)->decide($rakeshs, 5, 'approved', whoIsOnMeridiansStaff('priya'));
         Mail::mailer()->getSymfonyTransport()->flush();
         NotificationDelivery::query()->where('case_id', $rakeshs->getKey())->delete();
 
-        (new CaseEngine)->decide($rakeshs, 5, 'approved', whoIsOnMeridiansStaff('priya'));
+        issueTheLettersOn($rakeshs, 6, whoIsOnMeridiansStaff('priya'));
 
         expect($rakeshs->fresh()->closed_at)->not->toBeNull();
 

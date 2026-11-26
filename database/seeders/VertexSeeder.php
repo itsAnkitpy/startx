@@ -7,6 +7,7 @@ use App\Models\Designation;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
 use App\Models\FormField;
+use App\Models\IssuedDocument;
 use App\Models\Office;
 use App\Models\OrgUnit;
 use App\Models\ProcessStep;
@@ -316,7 +317,8 @@ class VertexSeeder extends Seeder
 
     /**
      * Vertex's exit: seven department clearances, all in one group, so every department
-     * clears at the same time rather than queueing behind each other. That is how the old
+     * clears at the same time rather than queueing behind each other, and then the
+     * leaver's letters. That is how the old
      * tool ran them — each department had its own pending list and none of them waited on
      * another — and it is the shape Meridian's one-at-a-time exit cannot show.
      *
@@ -341,6 +343,12 @@ class VertexSeeder extends Seeder
                 : $step->heldByTheRoleAnywhere($clearance['held_by'])
             )->create();
         }
+
+        // Then Meera issues Neha's letters, from her last working day, as at Meridian.
+        ProcessStep::factory()->of($exit)->at(++$sequence, 2)->named('Issue the leaver\'s letters')
+            ->heldByTheRoleAnywhere('hr_head')->offering('approved')
+            ->issuing(IssuedDocument::RelievingLetter, IssuedDocument::ExperienceLetter, IssuedDocument::SettlementStatement)
+            ->create();
 
         $exit->publish();
 

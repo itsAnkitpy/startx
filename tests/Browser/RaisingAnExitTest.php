@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\MeridianSeeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 /*
 | Module 07 step 1 in a real browser: Deepak resigns from the raise screen and is told
@@ -161,27 +162,32 @@ it('lets Chandni close her hold as disputed from her queue, and Rakesh override 
 });
 
 /*
-| Module 07 step 4 in a real browser: Rakesh has answered his own link, so Priya's final
-| check is the answer that would finish his exit, and it is refused while his roles and
-| team are still on him. Chandni sees why on the exit's page, hands his work to Priya, and
-| Priya's final check then finishes it.
+| Module 07 step 4 in a real browser: Rakesh has answered his own link and Priya's final
+| check is done, so on his last working day his letters are the answer that would finish his
+| exit (module 09 step 3), and they are refused while his roles and team are still on him.
+| Chandni sees why on the exit's page, hands his work to Priya, and Priya's press then issues
+| his letters and finishes it.
 */
 
-it('refuses Priya\'s final check while Rakesh\'s work is on him, and finishes his exit once Chandni hands it over', function () {
+it('refuses Rakesh\'s letters while his work is on him, and finishes his exit once Chandni hands it over', function () {
     $meridian = Tenant::query()->where('slug', MeridianSeeder::Slug)->sole();
+    Storage::fake(config('startx.documents_disk'));
 
     $rakeshs = TenantContext::run($meridian, function (): ProcessCase {
         $exit = ProcessCase::query()->whereRelation('subject', 'first_name', 'Rakesh')->sole();
 
         (new CaseEngine)->decideThroughALink(basename((new StepLink)->issue($exit, 4)), 'approved');
+        (new CaseEngine)->decide($exit->fresh(), 5, 'approved', User::query()->where('work_email', 'priya@meridian.test')->sole());
 
         return $exit;
     });
 
+    $this->travelTo(CarbonImmutable::parse($rakeshs->statutory_from->toDateString().' 10:00', 'Asia/Kolkata'));
+
     $card = '.fi-ta-record:has-text("about Rakesh Menon")';
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/my-queue')
-        ->click($card.' button:has-text("Approve")')
+        ->click($card.' button:has-text("Issue the letters")')
         ->assertSee('Rakesh Menon still has 2 roles and 2 people reporting to them')
         ->assertNoSmoke();
 
@@ -196,12 +202,14 @@ it('refuses Priya\'s final check while Rakesh\'s work is on him, and finishes hi
         ->assertNoSmoke();
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/my-queue')
-        ->click($card.' button:has-text("Approve")')
+        ->click($card.' button:has-text("Issue the letters")')
         ->assertSee('Recorded.')
         ->assertNoSmoke();
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/cases/'.$rakeshs->getKey())
         ->assertSee('Finished')
+        ->assertSee('Documents issued')
+        ->assertSee('Settlement statement')
         ->assertNoSmoke();
 });
 

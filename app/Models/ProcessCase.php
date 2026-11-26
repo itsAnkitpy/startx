@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Tenancy\BelongsToTenant;
 use App\Tenancy\TenantScope;
+use Carbon\CarbonImmutable;
 use Database\Factories\ProcessCaseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -305,5 +306,24 @@ class ProcessCase extends Model
     public function messagesSent(): HasMany
     {
         return $this->hasMany(NotificationDelivery::class, 'case_id')->with('recipient', 'triggeredBy')->latest('id');
+    }
+
+    /** Every document issued on this case (module 09), in the order it was issued. */
+    public function issuedDocuments(): HasMany
+    {
+        return $this->hasMany(IssuedDocument::class, 'case_id')->with('issuedBy')->orderBy('id');
+    }
+
+    /**
+     * The last working day while it is still ahead on the company's own calendar, when the
+     * leaver's letters may not be issued yet: a relieving letter handed over before the day
+     * it relieves them from closes the exit, and a closed exit's day can no longer be moved.
+     */
+    public function lastWorkingDayStillAhead(): ?CarbonImmutable
+    {
+        return $this->statutory_from !== null
+            && CarbonImmutable::now($this->tenant->timezone)->toDateString() < $this->statutory_from->toDateString()
+                ? $this->statutory_from
+                : null;
     }
 }

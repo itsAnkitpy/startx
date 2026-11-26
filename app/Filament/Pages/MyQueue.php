@@ -755,9 +755,13 @@ class MyQueue extends Page implements HasTable
         return (new CaseEngine)->whereItCanGoBackTo($waiting);
     }
 
-    /** What a button for one outcome says. */
-    public function buttonFor(string $outcome): string
+    /** What a button for one outcome says, and on an exit's letters step what approving does. */
+    public function buttonFor(string $outcome, ?ProcessStep $step = null): string
     {
+        if ($outcome === 'approved' && $step !== null && $step->issues() !== []) {
+            return 'Issue the letters';
+        }
+
         return self::Buttons[$outcome] ?? ucfirst(str_replace('_', ' ', $outcome));
     }
 

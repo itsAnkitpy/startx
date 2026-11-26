@@ -105,7 +105,7 @@ it('stores the PDF on the documents disk and records its SHA-256, the case and w
         $exit = nehasOpenExit();
         $meera = whoIsAtVertex('meera');
 
-        $issued = (new Letter)->issue($exit, meerasRelievingWording(), ['letterhead' => aPngLetterhead()], $meera);
+        $issued = (new Letter)->issue($exit, IssuedDocument::RelievingLetter, relievingPage($exit, meerasRelievingWording(), ['letterhead' => aPngLetterhead()]), $meera);
         $stored = Storage::disk(config('startx.documents_disk'))->get($issued->path);
 
         expect($stored)->toStartWith('%PDF-')
@@ -136,7 +136,7 @@ it('refuses a letter too long for the cleaner rather than storing it cut short o
         // Past the cleaner's limit, where its cut would land inside a ₹ and leave nothing.
         $wording = '<p>'.str_repeat('₹', 200000).'</p>';
 
-        expect(fn () => (new Letter)->issue(nehasOpenExit(), $wording, [], whoIsAtVertex('meera')))
+        expect(fn () => (new Letter)->issue(nehasOpenExit(), IssuedDocument::RelievingLetter, relievingPage(nehasOpenExit(), $wording), whoIsAtVertex('meera')))
             ->toThrow(InvalidArgumentException::class, 'A letter longer than 500000 bytes is refused, not cut short.')
             ->and(Storage::disk(config('startx.documents_disk'))->allFiles())->toBe([])
             ->and(IssuedDocument::query()->count())->toBe(0);
@@ -229,10 +229,10 @@ it('keeps the letter Neha was given byte for byte when Meera\'s wording changes 
         $meera = whoIsAtVertex('meera');
         $disk = Storage::disk(config('startx.documents_disk'));
 
-        $first = (new Letter)->issue($exit, meerasRelievingWording(), [], $meera);
+        $first = (new Letter)->issue($exit, IssuedDocument::RelievingLetter, relievingPage($exit, meerasRelievingWording()), $meera);
         $given = $disk->get($first->path);
 
-        $again = (new Letter)->issue($exit, meerasRelievingWording('We wish her well.'), [], $meera);
+        $again = (new Letter)->issue($exit, IssuedDocument::RelievingLetter, relievingPage($exit, meerasRelievingWording('We wish her well.')), $meera);
 
         expect($again->path)->not->toBe($first->path)
             ->and($disk->get($first->path))->toBe($given)
@@ -269,7 +269,7 @@ it('has dompdf refuse a file anywhere in the project, and draw an image handed o
 
 it('refuses a change to what an issued letter\'s row says at the database', function () {
     TenantContext::run($this->vertex, function () {
-        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), [], whoIsAtVertex('meera'));
+        (new Letter)->issue(nehasOpenExit(), IssuedDocument::RelievingLetter, relievingPage(nehasOpenExit(), meerasRelievingWording()), whoIsAtVertex('meera'));
 
         DB::table('issued_documents')->update(['sha256' => str_repeat('0', 64)]);
     });
@@ -277,7 +277,7 @@ it('refuses a change to what an issued letter\'s row says at the database', func
 
 it('refuses a removal of an issued letter\'s row at the database', function () {
     TenantContext::run($this->vertex, function () {
-        (new Letter)->issue(nehasOpenExit(), meerasRelievingWording(), [], whoIsAtVertex('meera'));
+        (new Letter)->issue(nehasOpenExit(), IssuedDocument::RelievingLetter, relievingPage(nehasOpenExit(), meerasRelievingWording()), whoIsAtVertex('meera'));
 
         DB::table('issued_documents')->delete();
     });

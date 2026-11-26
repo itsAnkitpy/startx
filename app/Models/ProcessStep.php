@@ -78,6 +78,17 @@ class ProcessStep extends Model
     }
 
     /**
+     * The documents this step issues when it is approved, as its completion actions list
+     * them: `[{"issue": "relieving_letter"}, …]`. Empty on every step but an exit's letters.
+     *
+     * @return list<string> each one of {@see IssuedDocument}'s kinds
+     */
+    public function issues(): array
+    {
+        return array_values(array_filter(array_column((array) $this->on_complete, 'issue')));
+    }
+
+    /**
      * What this step asks. Null is the default and means it asks nothing — a manager
      * sign-off that is only a decision needs no form.
      */

@@ -227,7 +227,10 @@ it('gives Deepak\'s finance clearance back to Chandni, hold and all, when Rakesh
 
         $engine->decideThroughALink(basename((new StepLink)->issue($rakeshs, 4)), 'approved');
 
-        expect(fn () => (new CaseEngine)->decide($rakeshs->fresh(), 5, 'approved', $priya))
+        // Priya's final check is done, and his letters, on his last working day, are refused.
+        $engine->decide($rakeshs->fresh(), 5, 'approved', $priya);
+
+        expect(fn () => issueTheLettersOn($rakeshs, 6, $priya))
             ->toThrow(ProcessRefused::class, 'since then 1 step they have picked up or put on hold reached them');
     });
 
@@ -250,9 +253,9 @@ it('gives Deepak\'s finance clearance back to Chandni, hold and all, when Rakesh
         chandniOpens(meridianExitAbout('rakesh'))
             ->assertSee('Sign-in switched off at the end of the last working day, 23 November 2026. 1 step they had picked up while covering for somebody went back to whoever they covered for.');
 
-        // Nothing of Rakesh's is left, so Priya's final check finishes his exit, and Chandni
-        // ends the hold as finance would have.
-        (new CaseEngine)->decide(meridianExitAbout('rakesh'), 5, 'approved', meridianEmployee('priya'));
+        // Nothing of Rakesh's is left, so his letters finish his exit, and Chandni ends the
+        // hold as finance would have.
+        issueTheLettersOn(meridianExitAbout('rakesh'), 6, meridianEmployee('priya'));
         (new CaseEngine)->resolveHold($deepaks, 3, 'closed_disputed', $chandni, 'Deepak disputes the figure', [
             'imprest_card_returned' => false,
             'recover_from_them' => 40000,

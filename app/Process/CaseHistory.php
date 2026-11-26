@@ -138,7 +138,7 @@ class CaseHistory
                     return [
                         'sequence' => $step->sequence,
                         'name' => $step->name,
-                        'said' => $this->whatWasDone($case, $row)
+                        'said' => $this->whatWasDone($case, $row, $step)
                             .($backWithThem ? ' Waiting on somebody to answer it again.' : ''),
                         'tone' => $row->acted_at === null || $backWithThem ? 'waiting' : 'done',
                         'earlier' => $this->earlierPassesAt($case, $step, $row->acted_at !== null),
@@ -452,7 +452,7 @@ class CaseHistory
     }
 
     /** Who did what, and when, in the words somebody reading the case a year later needs. */
-    private function whatWasDone(ProcessCase $case, CaseStep $row): string
+    private function whatWasDone(ProcessCase $case, CaseStep $row, ProcessStep $step): string
     {
         $who = $row->assignee?->name
             ?? ((array) $row->external_assignee)['name']
@@ -468,7 +468,10 @@ class CaseHistory
                 : "Picked up by {$who}, not yet answered.";
         }
 
-        $said = self::Said[$row->outcome] ?? $row->outcome;
+        // Approving an exit's letters step is the letters going out, and reads as that.
+        $said = $row->outcome === 'approved' && $step->issues() !== []
+            ? 'Issued'
+            : self::Said[$row->outcome] ?? $row->outcome;
 
         $acted = $case->events
             ->where('type', 'step_acted')

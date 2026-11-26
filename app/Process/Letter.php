@@ -2,8 +2,10 @@
 
 namespace App\Process;
 
+use App\Exceptions\ProcessRefused;
 use App\Models\IssuedDocument;
 use App\Models\ProcessCase;
+use App\Models\SettlementLine;
 use App\Models\Tenant;
 use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -12,14 +14,14 @@ use finfo;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use RuntimeException;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Tiptap\Editor;
 
 /**
  * A leaver's letter, relieving or experience: the client's wording with the leaver's details
- * in it, drawn as a PDF and kept exactly as it was drawn.
+ * in it, drawn as a PDF and kept exactly as it was drawn. The settlement statement is drawn
+ * and kept the same way, from our own page rather than a client's wording.
  *
  * **Everything between the client's editor and the PDF engine is a security boundary.** The
  * engine reads any file or image the HTML names, and the wording is HTML a client
@@ -171,8 +173,50 @@ final class Letter
             throw new InvalidArgumentException('A letter longer than '.self::LongestWording.' bytes is refused, not cut short.');
         }
 
+        return $this->onThePage($this->cleaner()->sanitize($filled), $around);
+    }
+
+    /**
+     * The settlement statement as the page handed to the PDF engine: our own page, never a
+     * client's wording, from the rows and the words the exit's page shows (P2), so the two
+     * cannot disagree. Every value is escaped by the view.
+     *
+     * @param  array{letterhead?: string|null, footer?: string|null, signature?: string|null, signed_by?: string, signed_as?: string}  $around
+     */
+    public function statementPage(ProcessCase $case, array $around = []): string
+    {
+        $rows = SettlementLine::onTheStatementOf($case);
+        $side = fn (string $direction): array => collect($rows)
+            ->where('line.direction', $direction)
+            ->map(fn (array $row): array => [
+                'clearance' => $row['clearance'],
+                // As the claim email names it: the reason typed, else the question answered.
+                'for' => $row['line']->reason ?? $row['line']->label,
+                'amount' => SettlementLine::inRupees($row['line']->amount_paise),
+                'disputed' => $row['disputed'],
+            ])
+            ->values()->all();
+
+        return $this->onThePage(view('statement', [
+            'tokens' => $this->tokensFor($case),
+            'claimed' => $side(SettlementLine::Recovery),
+            'owed' => $side(SettlementLine::Payable),
+            'claimedTotal' => SettlementLine::inRupees(SettlementLine::total($rows, SettlementLine::Recovery)),
+            'owedTotal' => SettlementLine::inRupees(SettlementLine::total($rows, SettlementLine::Payable)),
+            'net' => SettlementLine::netOfClaims($case),
+            'gratuityDue' => $case->gratuity_due_at?->format('j F Y'),
+        ])->render(), $around);
+    }
+
+    /**
+     * Our page around a body that is already safe: the cleaned wording, or our own statement.
+     *
+     * @param  array{letterhead?: string|null, footer?: string|null, signature?: string|null, signed_by?: string, signed_as?: string}  $around
+     */
+    private function onThePage(string $body, array $around): string
+    {
         return view('letter', [
-            'body' => $this->cleaner()->sanitize($filled),
+            'body' => $body,
             'letterhead' => $this->asAnImage($around['letterhead'] ?? null),
             'footer' => $this->asAnImage($around['footer'] ?? null),
             'signature' => $this->asAnImage($around['signature'] ?? null),
@@ -182,27 +226,29 @@ final class Letter
     }
 
     /**
-     * Draw the letter, put the PDF on the documents disk, and record it with its SHA-256.
+     * Draw a page as a PDF, put it on the documents disk, and record it with its SHA-256.
      *
-     * ponytail: a row refused after the file is written leaves the file behind with nothing
-     * naming it. Sweep such files if they are ever found; nothing reads them.
+     * ponytail: a row refused after the file is written, or undone with the rest of the
+     * answer that issued it, leaves the file behind with nothing naming it. Sweep such files
+     * if they are ever found; nothing reads them.
      *
-     * @param  array{letterhead?: string|null, footer?: string|null, signature?: string|null, signed_by?: string, signed_as?: string}  $around
+     * @param  string  $kind  one of {@see IssuedDocument}'s kinds
+     * @param  string  $page  from {@see self::page()} or {@see self::statementPage()}
      */
-    public function issue(ProcessCase $case, string $wording, array $around, User $by): IssuedDocument
+    public function issue(ProcessCase $case, string $kind, string $page, User $by): IssuedDocument
     {
-        $pdf = $this->pdf($this->page($this->tokensFor($case), $wording, $around));
+        $pdf = $this->pdf($page);
 
         $disk = (string) config('startx.documents_disk');
         $path = 'issued-documents/'.$case->tenant_id.'/'.Str::random(40).'.pdf';
 
         if (! Storage::disk($disk)->put($path, $pdf)) {
-            throw new RuntimeException("The relieving letter for case {$case->getKey()} could not be stored.");
+            throw ProcessRefused::aDocumentCouldNotBeStored(strtolower(IssuedDocument::nameOf($kind)));
         }
 
         return IssuedDocument::create([
             'case_id' => $case->getKey(),
-            'kind' => IssuedDocument::RelievingLetter,
+            'kind' => $kind,
             'disk' => $disk,
             'path' => $path,
             'sha256' => hash('sha256', $pdf),

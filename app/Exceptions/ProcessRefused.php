@@ -623,6 +623,51 @@ class ProcessRefused extends RuntimeException
     }
 
     /**
+     * Letters issued to a leaver with no personal address on record (module 09 step 3), in
+     * the words of the refusal above where they apply: the letters reach a leaver only by a
+     * link to that address, and the work one ends with the account.
+     */
+    public static function thereIsNowhereToSendTheLetters(string $step, string $about): self
+    {
+        return new self(
+            "[{$step}] cannot be done: there is no personal email address recorded for {$about} "
+            .'to send the letters to.'
+        );
+    }
+
+    /**
+     * Letters issued before the last working day. A relieving letter says the leaver is
+     * relieved from that day, and issuing it closes the exit, after which the day cannot be
+     * moved if they stay on longer (Ankit, 26 November 2026).
+     */
+    public static function notBeforeTheLastWorkingDay(string $about, string $day): self
+    {
+        return new self("{$about}'s letters can be issued from {$day}, the last working day.");
+    }
+
+    /**
+     * A picture saved on the Letters screen whose file cannot be read. The letters would go
+     * out without it, so none go and the step stays open.
+     *
+     * @param  string  $which  letterhead, footer or signature
+     */
+    public static function aLetterPictureCannotBeRead(string $which): self
+    {
+        $picture = $which === 'footer' ? 'footer strip' : $which;
+
+        return new self(
+            "The {$picture} saved on the Letters screen cannot be read, so no letter was issued. "
+            ."Whoever writes the company's letters can upload it again there."
+        );
+    }
+
+    /** A drawn document the documents disk would not take, so nothing was issued. */
+    public static function aDocumentCouldNotBeStored(string $document): self
+    {
+        return new self("The {$document} could not be stored, so no letter was issued. Try again in a few minutes.");
+    }
+
+    /**
      * A new link asked for from an older link that has already been replaced.
      *
      * Only the newest link may ask for another, and the newest link is always the one the

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CaseDocumentController;
+use App\Http\Controllers\IssuedDocumentController;
 use App\Http\Controllers\StepLinkController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -79,3 +80,15 @@ Route::get('cases/{case}/documents/{sequence}/{question}', [CaseDocumentControll
     ->whereNumber('sequence')
     ->where('question', '[a-z][a-z0-9_]*')
     ->name('case-document');
+
+/*
+| Opening a document issued on an exit: a leaver's letter or the settlement statement.
+|
+| Signed in and checked on every request, as an attached file is. The address names the
+| issued row and nothing else, and the file is found from the row: its disk and path are
+| never read from the request.
+*/
+Route::get('issued-documents/{document}', [IssuedDocumentController::class, 'show'])
+    ->middleware('auth')
+    ->whereNumber('document')
+    ->name('issued-document');

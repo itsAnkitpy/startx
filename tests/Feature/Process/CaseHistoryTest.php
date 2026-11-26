@@ -101,8 +101,8 @@ it('does not mark a step that has simply not come round yet', function () {
 
         expect(collect((new CaseHistory)->stepByStep($anjalis))->pluck('tone')->all())
             // Her manager's approval, the two clearances nobody has opened, the link she was
-            // sent, and HR's final check.
-            ->toBe(['done', 'later', 'later', 'waiting', 'later']);
+            // sent, HR's final check and her letters.
+            ->toBe(['done', 'later', 'later', 'waiting', 'later', 'later']);
     });
 });
 
@@ -177,7 +177,7 @@ it('does not cry failure on an exit somebody turned down', function () {
         // The link she was sent as the clearances opened still reads as sent and not
         // answered, which is what happened.
         expect(collect((new CaseHistory)->stepByStep($anjalis->fresh()))->pluck('tone')->all())
-            ->toBe(['done', 'done', 'stopped', 'waiting', 'stopped']);
+            ->toBe(['done', 'done', 'stopped', 'waiting', 'stopped', 'stopped']);
 
         theCasePageFor($anjalis->fresh(), whoIsAtMeridian('chandni'))
             ->assertOk()
@@ -195,7 +195,7 @@ it('does not cry failure on an exit that was withdrawn', function () {
         // His manager had accepted it, and the link he was sent still reads as sent and
         // not answered. Nothing reads as an approval that never happened.
         expect(collect((new CaseHistory)->stepByStep($deepaks->fresh()))->pluck('tone')->all())
-            ->toBe(['done', 'stopped', 'stopped', 'waiting', 'stopped']);
+            ->toBe(['done', 'stopped', 'stopped', 'waiting', 'stopped', 'stopped']);
     });
 });
 

@@ -2,12 +2,12 @@
 
 namespace App\Models;
 
+use App\Exceptions\ProcessRefused;
 use App\Process\Letter;
 use App\Tenancy\BelongsToTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 
 /**
  * What one client company prints its letters with: the wording of each letter kind, and the
@@ -60,7 +60,8 @@ class LetterSetup extends Model
      * A saved picture's bytes, or nothing when none is saved.
      *
      * A saved picture whose file cannot be read is refused rather than read as none: the
-     * disk answers a missing file with nothing, and a letter would go out without it.
+     * disk answers a missing file with nothing, and a letter would go out without it. Refused
+     * in words for HR, since issuing an exit's letters is where it is met.
      *
      * ponytail: read from today's documents disk, which is where the screen writes them.
      * Copy them across, or keep the disk beside each path, when that disk changes.
@@ -78,6 +79,6 @@ class LetterSetup extends Model
         }
 
         return Storage::disk((string) config('startx.documents_disk'))->get($path)
-            ?? throw new RuntimeException("The {$which} saved for this company cannot be read from {$path}.");
+            ?? throw ProcessRefused::aLetterPictureCannotBeRead($which);
     }
 }

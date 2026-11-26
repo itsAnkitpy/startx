@@ -8,6 +8,7 @@ use App\Models\Designation;
 use App\Models\EmploymentRecord;
 use App\Models\FormDefinition;
 use App\Models\FormField;
+use App\Models\IssuedDocument;
 use App\Models\Office;
 use App\Models\OrgUnit;
 use App\Models\ProcessStep;
@@ -304,7 +305,7 @@ class MeridianSeeder extends Seeder
 
     /**
      * The exit Meridian really runs: the leaver's manager accepts it, every clearance runs
-     * at once, and HR checks the whole thing last.
+     * at once, HR checks the whole thing, and HR issues the leaver's letters last.
      *
      * **The clearances are one group**, so HR, finance and the leaver's own confirmation
      * all open the moment the manager approves — usually on the day the person resigns,
@@ -358,6 +359,14 @@ class MeridianSeeder extends Seeder
         ProcessStep::factory()->of($exit)->at(5, 3)->named('HR final check')
             ->heldByTheRole('hr_head')->offering('approved')->dueIn(24)
             ->escalatingTo($lateItGoesTo)->create();
+
+        // The leaver's letters go out last, and not before the last working day, which is
+        // the day the relieving letter relieves them from (module 09 step 3). No time limit
+        // of its own, since it cannot be done any sooner; the legal deadline runs underneath.
+        ProcessStep::factory()->of($exit)->at(6, 4)->named('Issue the leaver\'s letters')
+            ->heldByTheRole('hr_head')->offering('approved')
+            ->issuing(IssuedDocument::RelievingLetter, IssuedDocument::ExperienceLetter, IssuedDocument::SettlementStatement)
+            ->create();
 
         $exit->publish();
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Tenancy\BelongsToTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * One document as it was issued on a case: where its PDF is, and the PDF's SHA-256.
@@ -24,8 +25,21 @@ class IssuedDocument extends Model
 
     public const RelievingLetter = 'relieving_letter';
 
-    /** Written on the letters screen from step 2; issued from step 3, which lets the database take it. */
     public const ExperienceLetter = 'experience_letter';
+
+    /** Drawn by our own page from the exit's settlement lines, never from a client's wording. */
+    public const SettlementStatement = 'settlement_statement';
+
+    /**
+     * Each kind as a person reads it, and the question the exit's page asks before showing
+     * it (P7): a letter opens for whoever may see the person, the statement only for whoever
+     * may see the money on it.
+     */
+    private const Kinds = [
+        self::RelievingLetter => ['Relieving letter', 'view'],
+        self::ExperienceLetter => ['Experience letter', 'view'],
+        self::SettlementStatement => ['Settlement statement', 'viewSettlement'],
+    ];
 
     /**
      * @return array<string, string>
@@ -35,5 +49,31 @@ class IssuedDocument extends Model
         return [
             'created_at' => 'datetime',
         ];
+    }
+
+    public function case(): BelongsTo
+    {
+        return $this->belongsTo(ProcessCase::class, 'case_id');
+    }
+
+    public function issuedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'issued_by');
+    }
+
+    public static function nameOf(string $kind): string
+    {
+        return self::Kinds[$kind][0];
+    }
+
+    public function name(): string
+    {
+        return self::nameOf($this->kind);
+    }
+
+    /** The case policy's question that opens this document. */
+    public function openedBy(): string
+    {
+        return self::Kinds[$this->kind][1];
     }
 }

@@ -270,10 +270,12 @@ it('seeds the old tool\'s seven department clearances with no code between them'
         $exit = ProcessTemplate::query()->where('key', 'exit')->sole();
 
         expect($exit->status)->toBe(ProcessTemplate::Published)
-            ->and($exit->steps()->count())->toBe(7)
+            ->and($exit->steps()->whereNotNull('form_definition_id')->count())->toBe(7)
             // All seven clear at once, which is how the old tool ran them: every
             // department had its own pending list and none waited on another.
-            ->and($exit->steps()->pluck('group_no')->unique()->all())->toBe([1]);
+            ->and($exit->steps()->whereNotNull('form_definition_id')->pluck('group_no')->unique()->all())->toBe([1])
+            // Then the leaver's letters go out (module 09 step 3).
+            ->and($exit->steps()->whereNull('form_definition_id')->pluck('group_no', 'name')->all())->toBe(['Issue the leaver\'s letters' => 2]);
 
         // Forty-nine questions the old tool carried as columns on one table.
         expect(FormDefinition::query()->where('status', FormDefinition::Published)->count())->toBe(7)

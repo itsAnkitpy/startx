@@ -2,6 +2,7 @@
 
 use App\Authorization\Permission;
 use App\Authorization\PermissionResolver;
+use App\Exceptions\ProcessRefused;
 use App\Filament\Pages\Letters;
 use App\Models\IssuedDocument;
 use App\Models\LetterSetup;
@@ -169,7 +170,7 @@ it('refuses to draw a letter whose saved signature cannot be read, rather than l
         LetterSetup::query()->create(['signature' => 'letter-pictures/'.$this->vertex->getKey().'/gone.png']);
 
         expect(fn () => LetterSetup::current()->around())
-            ->toThrow(RuntimeException::class, 'The signature saved for this company cannot be read');
+            ->toThrow(ProcessRefused::class, 'The signature saved on the Letters screen cannot be read, so no letter was issued.');
     });
 });
 

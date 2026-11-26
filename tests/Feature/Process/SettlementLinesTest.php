@@ -466,7 +466,7 @@ it('refuses marking a question that is not money as owed', function () {
 | The one gate on finishing
 */
 
-it('refuses HR\'s final check while a figure finance filed never became a line', function () {
+it('refuses the letters that would finish the exit while a figure finance filed never became a line', function () {
     TenantContext::run($this->meridian, function () {
         $exit = deepaksExitAwaitingFinance();
         everythingButFinanceOnDeepaks($exit);
@@ -475,11 +475,13 @@ it('refuses HR\'s final check while a figure finance filed never became a line',
         CaseStep::factory()->of($exit)->at(3)->heldBy(owedAtMeridian('chandni'))->decided('approved')
             ->create(['payload' => ['imprest_card_returned' => false, 'recover_from_them' => 40000]]);
 
-        expect(fn () => (new CaseEngine)->decide($exit->fresh(), 5, 'approved', owedAtMeridian('rakesh')))
+        (new CaseEngine)->decide($exit->fresh(), 5, 'approved', owedAtMeridian('rakesh'));
+
+        expect(fn () => issueTheLettersOn($exit, 6, owedAtMeridian('rakesh')))
             ->toThrow(ProcessRefused::class, '[Amount to recover from them] on [Finance clearance]');
 
         expect($exit->fresh()->closed_at)->toBeNull()
-            ->and(CaseStep::query()->where('case_id', $exit->getKey())->where('sequence', 5)->exists())->toBeFalse();
+            ->and(CaseStep::query()->where('case_id', $exit->getKey())->where('sequence', 6)->exists())->toBeFalse();
     });
 });
 
@@ -490,6 +492,7 @@ it('lets the exit finish with a disputed line on it', function () {
 
         (new CaseEngine)->resolveHold($exit->fresh(), 3, 'closed_disputed', owedAtMeridian('chandni'), 'Deepak disputes the figure');
         (new CaseEngine)->decide($exit->fresh(), 5, 'approved', owedAtMeridian('rakesh'));
+        issueTheLettersOn($exit, 6, owedAtMeridian('rakesh'));
 
         expect($exit->fresh()->closed_at)->not->toBeNull()
             ->and(linesOn($exit))->toHaveCount(1);

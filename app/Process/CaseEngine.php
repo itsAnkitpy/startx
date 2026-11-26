@@ -7,6 +7,8 @@ use App\Models\CaseEvent;
 use App\Models\CaseStep;
 use App\Models\EmployeeAsset;
 use App\Models\EmploymentRecord;
+use App\Models\IssuedDocument;
+use App\Models\LetterSetup;
 use App\Models\Office;
 use App\Models\ProcessCase;
 use App\Models\ProcessStep;
@@ -522,6 +524,14 @@ final class CaseEngine
                 throw ProcessRefused::outcomeNotOffered($step->name, $outcome, (array) $step->allowed_outcomes);
             }
 
+            // An exit's letters (module 09 step 3), refused before anything is written on
+            // what is known without drawing a page.
+            $issuing = $outcome === 'approved' ? $step->issues() : [];
+
+            if ($issuing !== []) {
+                $this->refuseUnlessTheLettersMayGo($case, $step);
+            }
+
             // Both outcomes that hand the work back to somebody else have to say why. A
             // hold is an argument another department has to answer and a send-back is a
             // correction somebody has to make, and neither is any use as a bare word.
@@ -578,10 +588,62 @@ final class CaseEngine
                 $this->closeIfNothingIsOutstanding($case, $by);
             }
 
+            // Once the exit may finish, so a handover still owed is refused before a page is
+            // drawn or a file written. In the same write as the answer, so a document that
+            // cannot be drawn or stored undoes it and the step stays open, saying why.
+            if ($issuing !== []) {
+                $this->issueTheDocuments($case, $issuing, $by);
+            }
+
             $this->tellWhatTheAnswerMoved($case, $step, $outcome, $by->name, $by, $reason, $target);
 
             return $attempt;
         });
+    }
+
+    /**
+     * Whether an exit's letters may go now: from the last working day on the company's own
+     * calendar (Ankit, 26 November 2026), and only to a leaver with a personal address, the
+     * one their link goes to (step 4).
+     */
+    private function refuseUnlessTheLettersMayGo(ProcessCase $case, ProcessStep $step): void
+    {
+        $about = $case->subject?->name ?? 'the person this case is about';
+        $ahead = $case->lastWorkingDayStillAhead();
+
+        if ($ahead !== null) {
+            throw ProcessRefused::notBeforeTheLastWorkingDay($about, $ahead->format('j F Y'));
+        }
+
+        if (trim((string) $case->subject?->personal_email) === '') {
+            throw ProcessRefused::thereIsNowhereToSendTheLetters($step->name, $about);
+        }
+    }
+
+    /**
+     * Draw, store and record each document an exit's letters step issues: each letter from
+     * the company's wording, the statement from our own page, all with the company's
+     * letterhead, footer and signature, read once so a picture gone missing refuses the lot.
+     *
+     * ponytail: only the queue's approval issues. A letters step offers nothing else, so
+     * neither way out of a hold and no link can reach one; give them this call if one ever can.
+     *
+     * @param  list<string>  $kinds
+     */
+    private function issueTheDocuments(ProcessCase $case, array $kinds, User $by): void
+    {
+        $setup = LetterSetup::current();
+        $around = $setup->around();
+        $letter = new Letter;
+
+        // Read again inside this write, so the statement counts every line filed on it.
+        $case = $case->fresh();
+
+        foreach ($kinds as $kind) {
+            $letter->issue($case, $kind, $kind === IssuedDocument::SettlementStatement
+                ? $letter->statementPage($case, $around)
+                : $letter->page($letter->tokensFor($case), $setup->wordingOf($kind), $around), $by);
+        }
     }
 
     /**
@@ -1489,8 +1551,8 @@ final class CaseEngine
         // (module 07 step 4). Here, because every answer that can finish a case comes
         // through here — the queue, the link, both ways out of a hold — so a request sent
         // by hand meets the same refusal as the button. Whichever answer would finish it
-        // is refused and nothing of it is kept: at Meridian that is always HR's final
-        // check. It holds the case, never the person; the last working day and both
+        // is refused and nothing of it is kept: at Meridian that is always the leaver's
+        // letters. It holds the case, never the person; the last working day and both
         // deadlines are untouched.
         $stillToMove = Succession::whatStillHasToMove($case);
 

@@ -1,13 +1,17 @@
 <?php
 
+use App\Models\ProcessCase;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Process\CaseEngine;
 use App\Tenancy\Rls;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /*
@@ -235,4 +239,22 @@ function browseAs(User $person, string|array $paths): mixed
     pest()->browser()->withHost($person->tenant->slug.'.'.config('tenancy.central_domain'));
 
     return visit($paths);
+}
+
+/**
+ * An exit's letters step answered on the leaver's last working day, the first day it can be
+ * (module 09 step 3), with the documents written to a disk nobody keeps.
+ *
+ * For tests about how an exit finishes rather than about its letters, which since module 09
+ * finish it.
+ */
+function issueTheLettersOn(ProcessCase $exit, int $sequence, User $by): void
+{
+    Storage::fake(config('startx.documents_disk'));
+
+    if ($exit->lastWorkingDayStillAhead() !== null) {
+        test()->travelTo(CarbonImmutable::parse($exit->statutory_from->toDateString().' 10:00', $exit->tenant->timezone));
+    }
+
+    (new CaseEngine)->decide($exit->fresh(), $sequence, 'approved', $by);
 }

@@ -105,6 +105,12 @@ class ProcessStepFactory extends Factory
         return $this->state(['reminder_rule' => ['nudge_at' => $fractions]]);
     }
 
+    /** The documents the step issues when it is approved, each one of IssuedDocument's kinds. */
+    public function issuing(string ...$kinds): static
+    {
+        return $this->state(['on_complete' => array_map(fn (string $kind): array => ['issue' => $kind], $kinds)]);
+    }
+
     /** What this step's actor may choose. */
     public function offering(string ...$outcomes): static
     {

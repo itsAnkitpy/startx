@@ -119,6 +119,10 @@ it('keeps HR\'s final check closed while one clearance is still outstanding', fu
 
         (new CaseEngine)->decide($rakeshs, 5, 'approved', $priya);
 
+        // And his letters, the last step since module 09.
+        expect(waitingOnTheExit($rakeshs->fresh()))->toBe(['Issue the leaver\'s letters']);
+        issueTheLettersOn($rakeshs, 6, $priya);
+
         expect($rakeshs->fresh()->state)->toBe(ProcessCase::Closed);
     });
 });

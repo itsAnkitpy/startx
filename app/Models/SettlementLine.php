@@ -115,6 +115,43 @@ class SettlementLine extends Model
     }
 
     /**
+     * In paise, a disputed amount counted like any other.
+     *
+     * @param  array<array{line: SettlementLine}>  $rows  the statement's rows, or some of them
+     */
+    public static function total(array $rows, string $direction): int
+    {
+        return collect($rows)->where('line.direction', $direction)->sum('line.amount_paise');
+    }
+
+    /**
+     * What the clearances claimed less what they owe, in words that say who owes whom, never
+     * a minus sign (Ankit, 23 November 2026). A disputed amount counts, and is said: the net is
+     * what the departments raised, and leaving it out would settle the argument on a screen
+     * nobody argued it on.
+     */
+    public static function netOfClaims(ProcessCase $case): string
+    {
+        $rows = self::onTheStatementOf($case);
+        $disputedRows = array_filter($rows, fn (array $row): bool => $row['disputed']);
+        $net = self::total($rows, self::Recovery) - self::total($rows, self::Payable);
+        $name = $case->subject?->name;
+
+        $said = match (true) {
+            $net > 0 => self::inRupees($net).' to recover from '.$name,
+            $net < 0 => self::inRupees(-$net).' owed to '.$name,
+            default => 'Nothing either way',
+        };
+
+        $disputed = array_filter([
+            ($claimed = self::total($disputedRows, self::Recovery)) > 0 ? self::inRupees($claimed).' claimed' : null,
+            ($owed = self::total($disputedRows, self::Payable)) > 0 ? self::inRupees($owed).' owed' : null,
+        ]);
+
+        return $said.($disputed === [] ? '' : ', including '.implode(' and ', $disputed).' under dispute');
+    }
+
+    /**
      * Write the lines an attempt owes, if it has just passed.
      *
      * Every answer that can pass a clearance calls this: approving from the queue, approving

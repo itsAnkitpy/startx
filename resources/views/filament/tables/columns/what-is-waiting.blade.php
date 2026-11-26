@@ -21,6 +21,10 @@
     $escalated = $record['escalated'];
     $whatWasSaid = $record['whatWasSaid'];
     $awayPerson = $record['coveringFor'];
+
+    // An exit's letters wait for the last working day, and the engine refuses them before
+    // it, so the card says when rather than offering a button that can only be refused.
+    $lettersFrom = $step->issues() === [] ? null : $case->lastWorkingDayStillAhead();
 @endphp
 
 {{-- No section around this. In a content grid Filament already draws each row as a
@@ -179,18 +183,25 @@
             {{-- Approving is one press. Every other outcome asks for a reason first: the
                  engine refuses a hold and a send-back without one, and a rejection with no
                  words on it tells the person whose request ended nothing at all. --}}
+            @if ($lettersFrom !== null)
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ \App\Exceptions\ProcessRefused::notBeforeTheLastWorkingDay((string) $case->subject?->name, $lettersFrom->format('j F Y'))->getMessage() }}
+                </p>
+            @endif
+
             @foreach ($step->allowed_outcomes ?? [] as $outcome)
                 {{-- Nothing offers a step the state it is already in. A clearance on hold
                      needs answering, not holding again, and the reason it was held is on
                      the card above. --}}
                 @continue ($onHold && $outcome === 'held')
+                @continue ($lettersFrom !== null && $outcome === 'approved')
 
                 <x-filament::button
                     :color="$outcome === 'approved' ? 'success' : ($outcome === 'rejected' ? 'danger' : 'gray')"
                     wire:click="{{ $outcome === 'approved' ? 'decide' : 'askFor' }}({{ $case->getKey() }}, {{ $step->sequence }}, '{{ $outcome }}')"
                     wire:loading.attr="disabled"
                 >
-                    {{ $page->buttonFor($outcome) }}
+                    {{ $page->buttonFor($outcome, $step) }}
                 </x-filament::button>
             @endforeach
 
