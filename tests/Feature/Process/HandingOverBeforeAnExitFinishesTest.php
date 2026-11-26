@@ -105,7 +105,7 @@ it('refuses Rakesh\'s letters while his work is on him, and lets his exit finish
 
         Livewire::actingAs($priya)->test(MyQueue::class)
             ->call('decide', $rakeshs->getKey(), 6, 'approved')
-            ->assertNotified('Recorded.');
+            ->assertNotified("Rakesh Menon's letters were issued.");
 
         expect($rakeshs->fresh()->state)->toBe(ProcessCase::Closed);
     });

@@ -203,7 +203,7 @@ it('refuses Rakesh\'s letters while his work is on him, and finishes his exit on
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/my-queue')
         ->click($card.' button:has-text("Issue the letters")')
-        ->assertSee('Recorded.')
+        ->assertSee("Rakesh Menon's letters were issued.")
         ->assertNoSmoke();
 
     browseAs(personAt(MeridianSeeder::Slug, 'priya'), '/admin/cases/'.$rakeshs->getKey())

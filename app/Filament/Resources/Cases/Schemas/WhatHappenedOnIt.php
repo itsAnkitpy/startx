@@ -18,6 +18,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Facades\FilamentTimezone;
+use Filament\Support\Icons\Heroicon;
 
 class WhatHappenedOnIt
 {
@@ -277,6 +278,10 @@ class WhatHappenedOnIt
                                 TextEntry::make('kind')
                                     ->hiddenLabel()
                                     ->weight(FontWeight::Medium)
+                                    // In the link colour with a document beside it, so it reads as something that opens.
+                                    ->color('primary')
+                                    ->icon(Heroicon::DocumentText)
+                                    ->iconColor('primary')
                                     ->state(fn (IssuedDocument $record): string => $record->name())
                                     ->url(fn (IssuedDocument $record): string => route('issued-document', $record), shouldOpenInNewTab: true),
 

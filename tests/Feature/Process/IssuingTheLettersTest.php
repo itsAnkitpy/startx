@@ -16,6 +16,7 @@ use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Database\Seeders\VertexSeeder;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -184,7 +185,9 @@ it('refuses the letters before Neha\'s last working day, and her card says when 
 
         Livewire::actingAs(vertexsOwn('meera'))->test(MyQueue::class)
             ->assertDontSee($refusal)
-            ->assertSee('Issue the letters');
+            ->assertSee('Issue the letters')
+            ->call('decide', $exit->getKey(), 8, 'approved')
+            ->assertNotified("Neha Deshpande's letters were issued.");
     });
 });
 
@@ -213,6 +216,25 @@ it('keeps the step open and says why when a picture saved on the Letters screen 
             ->and(Storage::disk(config('startx.documents_disk'))->allFiles('issued-documents'))->toBe([])
             ->and(nehasExitAtVertex()->state)->toBe(ProcessCase::Open)
             ->and(nehasExitAtVertex()->liveSteps->firstWhere('sequence', 8)?->acted_at)->toBeNull();
+    });
+});
+
+it('prints the letterhead saved on the Letters screen on every document issued', function () {
+    TenantContext::run($this->vertex, function () {
+        $letterhead = 'letter-pictures/'.$this->vertex->getKey().'/letterhead.png';
+        Storage::disk(config('startx.documents_disk'))->put($letterhead, UploadedFile::fake()->image('letterhead.png', 1200, 200)->getContent());
+        LetterSetup::query()->create(['letterhead' => $letterhead]);
+        everyDepartmentClearsNeha();
+        $this->travelTo(onNehasLastWorkingDay());
+
+        (new CaseEngine)->decide(nehasExitAtVertex(), 8, 'approved', vertexsOwn('meera'));
+
+        // No PDF reader is installed; an embedded picture is an image object in the PDF itself.
+        $pictured = IssuedDocument::query()->get()->map(fn (IssuedDocument $document): bool => str_contains(
+            (string) Storage::disk($document->disk)->get($document->path), '/Subtype /Image'
+        ));
+
+        expect($pictured->all())->toBe([true, true, true]);
     });
 });
 

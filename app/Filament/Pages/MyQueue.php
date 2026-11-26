@@ -684,7 +684,10 @@ class MyQueue extends Page implements HasTable
                     $this->sendBackTo[$caseId][$sequence] ?? null,
                 ),
             $caseId,
-            'Recorded.',
+            // Approving an exit's letters step issues them for good, so it says that.
+            $outcome === 'approved' && $waiting !== null && $waiting->step->issues() !== []
+                ? $waiting->case->subject?->name."'s letters were issued."
+                : 'Recorded.',
         );
 
         // Only once it is actually recorded. A refusal is a sentence asking the person to
