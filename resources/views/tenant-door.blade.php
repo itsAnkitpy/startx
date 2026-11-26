@@ -116,7 +116,7 @@
              forward, and the way forward is always a new link to the address already on
              the record — never to one typed here. --}}
         @isset($askAgainFor)
-            <form method="POST" action="{{ route('step-link.again', $askAgainFor) }}">
+            <form method="POST" action="{{ $askAgainAt ?? route('step-link.again', $askAgainFor) }}">
                 @csrf
                 <button type="submit">Send me a new link</button>
             </form>

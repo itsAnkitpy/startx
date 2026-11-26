@@ -97,6 +97,9 @@ class TemplateCatalogue
      */
     public const LinkToAnswerAStep = 'link_to_answer_a_step';
 
+    /** The link a leaver answers the documents issued on her exit through, ours for the same reason. */
+    public const LinkToTheirDocuments = 'link_to_their_documents';
+
     /** Sent to whoever a step is waiting on, and to whoever is above them when it is late. */
     public const StepAvailableHolder = 'step_available_holder';
 
@@ -111,6 +114,14 @@ class TemplateCatalogue
      * 3. Without it the step simply leaves their queue.
      */
     public const HoldOverriddenHolder = 'hold_overridden_holder';
+
+    /**
+     * Sent to whoever issued a leaver's documents (module 09 step 4): one refused, or every
+     * one answered. Not to whoever raised the exit, who can be the leaver herself.
+     */
+    public const DocumentRefusedIssuer = 'document_refused_issuer';
+
+    public const DocumentsAnsweredIssuer = 'documents_answered_issuer';
 
     /** The two messages about the product itself failing rather than about a step. */
     public const CaseBreachWarning = 'case_breach_warning';
@@ -136,7 +147,9 @@ class TemplateCatalogue
      * the person a case is about, which go to a personal address because a work account
      * ends with the job. And the notice that a message did not arrive, because whoever gets
      * it has a phone call to make that afternoon. The last two settled with Ankit on
-     * 17 November 2026. What is left for a summary is "your turn" and the news to whoever
+     * 17 November 2026. And a document refused through its link, and the email saying every
+     * document is answered, which is the only one when the last answer is the refusal, since
+     * a refused statement is money in dispute (Ankit, 26 November 2026). What is left for a summary is "your turn" and the news to whoever
      * raised a case, which is where the volume is.
      *
      * @return array<string, array{name: string, goes_to: string, sent_when: string, bypasses_digest: bool, tokens: list<string>, subject: string, body: string}>
@@ -509,6 +522,56 @@ class TemplateCatalogue
                     TEXT,
             ],
 
+            self::DocumentRefusedIssuer => [
+                'name' => 'A document you issued was refused',
+                'goes_to' => 'Whoever issued the document',
+                'sent_when' => 'The person it was issued to refuses it through their link',
+                // At once, even to somebody on a summary: a refused statement is money in
+                // dispute (Ankit, 26 November 2026).
+                'bypasses_digest' => true,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
+                    'document.name', 'document.answered_by', 'document.reason',
+                ],
+                'subject' => '{{ case.number }} — {{ document.answered_by }} refused the {{ document.name }}',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ document.answered_by }} has refused the {{ document.name }} you issued on {{ case.number }}, {{ case.what_it_is_about }}.
+
+                    The reason given was: {{ document.reason }}
+
+                    Nothing else has changed: the exit stays as it is, and what happens next is for you to decide.
+
+                    You can read the whole story of it here: {{ case.link }}
+
+                    TEXT,
+            ],
+
+            self::DocumentsAnsweredIssuer => [
+                'name' => 'Every document you issued is answered',
+                'goes_to' => 'Whoever issued the documents',
+                'sent_when' => 'The person they were issued to has answered the last of them',
+                // At once too: when the last answer is a refusal, this is the only email
+                // that says so.
+                'bypasses_digest' => true,
+                'tokens' => [
+                    'person.name', 'case.number', 'case.what_it_is_about', 'case.link',
+                    'document.answered_by', 'documents.answers',
+                ],
+                'subject' => '{{ case.number }} — {{ document.answered_by }} has answered every document',
+                'body' => <<<'TEXT'
+                    {{ person.name }},
+
+                    {{ document.answered_by }} has answered every document issued on {{ case.number }}, {{ case.what_it_is_about }}:
+
+                    {{ documents.answers }}
+
+                    You can read the whole story of it here: {{ case.link }}
+
+                    TEXT,
+            ],
+
             self::CaseBreachWarning => [
                 'name' => 'A case has missed its legal deadline',
                 'goes_to' => 'Whoever raised the case, and everybody who can change settings',
@@ -592,6 +655,14 @@ class TemplateCatalogue
                 'name' => 'A link to answer one step',
                 'goes_to' => 'Somebody with no account here',
                 'sent_when' => 'A step is waiting on somebody who cannot sign in',
+                'bypasses_digest' => true,
+                'tokens' => [],
+            ],
+
+            self::LinkToTheirDocuments => [
+                'name' => 'A link to the documents issued to them',
+                'goes_to' => 'The person the documents were issued to, at their personal address',
+                'sent_when' => 'Their documents are issued, or a fresh link is asked for',
                 'bypasses_digest' => true,
                 'tokens' => [],
             ],

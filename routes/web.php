@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CaseDocumentController;
+use App\Http\Controllers\DocumentLinkController;
 use App\Http\Controllers\IssuedDocumentController;
 use App\Http\Controllers\StepLinkController;
 use Illuminate\Http\Request;
@@ -62,6 +63,23 @@ Route::post('step/{token}', [StepLinkController::class, 'submit'])->name('step-l
 Route::post('step/{token}/again', [StepLinkController::class, 'again'])
     ->middleware('throttle:5,60')
     ->name('step-link.again');
+
+/*
+| The link a leaver answers the documents issued on her exit through (module 09 step 4), on
+| the same terms as a step's link: the token is the whole permission, checked on every
+| request, and asking for a fresh one is held to a few tries an hour. A document is named by
+| its number on the link's own exit, never by a path.
+*/
+Route::get('documents/{token}', [DocumentLinkController::class, 'show'])->name('document-link');
+Route::get('documents/{token}/{document}', [DocumentLinkController::class, 'file'])
+    ->whereNumber('document')
+    ->name('document-link.file');
+Route::post('documents/{token}/{document}', [DocumentLinkController::class, 'answer'])
+    ->whereNumber('document')
+    ->name('document-link.answer');
+Route::post('documents/{token}/again', [DocumentLinkController::class, 'again'])
+    ->middleware('throttle:5,60')
+    ->name('document-link.again');
 
 /*
 | Opening a document somebody attached to a step.

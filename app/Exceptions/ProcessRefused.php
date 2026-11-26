@@ -741,4 +741,64 @@ class ProcessRefused extends RuntimeException
     {
         return new self('The email to '.implode(' and ', $names)." about {$step} did not go out just now. It will be tried again by itself over the next few hours.");
     }
+
+    /**
+     * The documents an exit issued, sent through their link to a leaver with no personal
+     * address on record any more (module 09 step 4).
+     */
+    public static function thereIsNowhereToSendTheirDocuments(string $about): self
+    {
+        return new self("There is no personal email address recorded for {$about} to send the link to.");
+    }
+
+    /**
+     * A link to a leaver's documents that has run out of time or opens, or been replaced.
+     * One sentence for all three, as for a step's link, so a guessed address learns nothing.
+     */
+    public static function thatDocumentsLinkNoLongerOpens(): self
+    {
+        return new self(
+            'This link does not open anything any more. Links last a couple of days and can be '
+            .'opened a few times. Ask for a new one below.'
+        );
+    }
+
+    /** An older link to a leaver's documents asking for a fresh one, as for a step's link. */
+    public static function aNewerDocumentsLinkHasGoneOut(): self
+    {
+        return new self(
+            'A newer link to these documents has already been sent to the same address. Look for '
+            .'the most recent message — older links stop working as soon as a new one goes out.'
+        );
+    }
+
+    /** HR sending the leaver a fresh link a second time in one day, as a chase is held to one. */
+    public static function aFreshLinkAlreadyWentToday(string $about): self
+    {
+        return new self("A fresh link already went to {$about} today. You can send another tomorrow.");
+    }
+
+    /** HR sending a link when nothing on it is waiting for an answer, from a page left open. */
+    public static function everyDocumentIsAnswered(string $about): self
+    {
+        return new self("Every document issued to {$about} has been answered, so there is no link to send.");
+    }
+
+    /** A document answered again, through any link: an answer is given once (P9). */
+    public static function thatDocumentIsAlreadyAnswered(string $document, string $answered): self
+    {
+        return new self("The {$document} has already been answered: {$answered}. An answer cannot be changed.");
+    }
+
+    /** An answer a document does not take, such as a letter "accepted". */
+    public static function notAnAnswerThatDocumentTakes(string $document): self
+    {
+        return new self("The {$document} cannot be answered that way.");
+    }
+
+    /** Refusing the statement says why, in at least ten characters (P9), as the old tool did. */
+    public static function aRefusalNeedsAReason(string $document, int $atLeast): self
+    {
+        return new self("Say why you are refusing the {$document}, in at least {$atLeast} characters.");
+    }
 }

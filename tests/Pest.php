@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\FormField;
+use App\Models\IssuedDocument;
 use App\Models\ProcessCase;
 use App\Models\Tenant;
 use App\Models\User;
@@ -7,6 +9,7 @@ use App\Process\CaseEngine;
 use App\Tenancy\Rls;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Database\Seeders\VertexSeeder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -257,4 +260,76 @@ function issueTheLettersOn(ProcessCase $exit, int $sequence, User $by): void
     }
 
     (new CaseEngine)->decide($exit->fresh(), $sequence, 'approved', $by);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Neha leaving Vertex (module 09)
+|--------------------------------------------------------------------------
+|
+| Shared by the tests of her letters going out and of her answering them, each of which
+| seeds Vertex first.
+|
+*/
+
+function vertexsOwn(string $first): User
+{
+    return User::query()->where('work_email', $first.'@vertex.test')->sole();
+}
+
+function nehasExitAtVertex(): ProcessCase
+{
+    return ProcessCase::query()->where('subject_user_id', vertexsOwn('neha')->getKey())->sole();
+}
+
+/**
+ * Every one of Vertex's seven clearances answered, each by whoever holds it, with the money
+ * the statement test in module 08 worked out by hand: ₹2,520.09 claimed, ₹16,235.31 owed.
+ */
+function everyDepartmentClearsNeha(): ProcessCase
+{
+    $holders = [1 => 'meera', 2 => 'meera', 3 => 'sanjay', 4 => 'farhan', 5 => 'meera', 6 => 'sanjay', 7 => 'meera'];
+    $money = [
+        6 => [
+            'finance_recovery_amount' => 2000.10,
+            'finance_recovery_reason' => 'Salary advance',
+            'finance_payable_amount' => 15000.75,
+            'finance_payable_reason' => 'Bonus',
+        ],
+        7 => [
+            'notice_recovery_amount' => 500,
+            'hr_other_recovery_amount' => 19.99,
+            'hr_other_reason' => 'Uniform',
+            'encashment_payable_amount' => 1234.56,
+        ],
+    ];
+
+    foreach ($holders as $sequence => $first) {
+        $exit = nehasExitAtVertex();
+        $required = $exit->template->steps->firstWhere('sequence', $sequence)->form->fields
+            ->where('required', true)
+            ->mapWithKeys(fn (FormField $field): array => [$field->key => true])
+            ->all();
+
+        (new CaseEngine)->decide($exit, $sequence, 'approved', vertexsOwn($first), [...$required, ...($money[$sequence] ?? [])]);
+    }
+
+    return nehasExitAtVertex();
+}
+
+/** Ten in the morning on Neha's last working day, on Vertex's own clock. */
+function onNehasLastWorkingDay(): CarbonImmutable
+{
+    return CarbonImmutable::parse(nehasExitAtVertex()->statutory_from->toDateString().' 10:00', Tenant::query()->where('slug', VertexSeeder::Slug)->sole()->timezone);
+}
+
+/** An address on Vertex's own subdomain. */
+function atVertexsAddress(string $path): string
+{
+    return 'http://'.VertexSeeder::Slug.'.'.config('tenancy.central_domain').'/'.ltrim($path, '/');
+}
+
+function issuedOnNehasExit(string $kind): IssuedDocument
+{
+    return IssuedDocument::query()->where('case_id', nehasExitAtVertex()->getKey())->where('kind', $kind)->sole();
 }

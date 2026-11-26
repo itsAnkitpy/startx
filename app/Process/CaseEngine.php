@@ -593,6 +593,10 @@ final class CaseEngine
             // cannot be drawn or stored undoes it and the step stays open, saying why.
             if ($issuing !== []) {
                 $this->issueTheDocuments($case, $issuing, $by);
+
+                // Once they are saved, the leaver's link to answer them (step 4), to the
+                // personal address checked above.
+                DB::afterCommit(fn (): string => (new DocumentLinks)->send($case));
             }
 
             $this->tellWhatTheAnswerMoved($case, $step, $outcome, $by->name, $by, $reason, $target);

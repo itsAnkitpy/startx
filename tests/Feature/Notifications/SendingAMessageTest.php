@@ -233,10 +233,12 @@ it('writes to the person it is about and to whoever raised it when a case finish
         expect($rakeshs->fresh()->closed_at)->not->toBeNull();
 
         // Rakesh at the address that outlives his job, and Chandni at work — she raised it
-        // and had to go and look for this until now.
+        // and had to go and look for this until now. Then Rakesh's link to answer his
+        // letters, at the same address (module 09 step 4).
         expect(whatActuallyLeft())->toBe([
             'rakesh@personal.example — Your Exit at Meridian Logistics is complete',
             'chandni@meridian.test — #'.$rakeshs->number.' is finished',
+            'rakesh@personal.example — Meridian Logistics — your documents',
         ]);
 
         expect(NotificationDelivery::query()->where('case_id', $rakeshs->getKey())
@@ -244,6 +246,7 @@ it('writes to the person it is about and to whoever raised it when a case finish
             ->toEqualCanonicalizing([
                 TemplateCatalogue::CaseClosedSubject,
                 TemplateCatalogue::CaseClosedInitiator,
+                TemplateCatalogue::LinkToTheirDocuments,
             ]);
     });
 });

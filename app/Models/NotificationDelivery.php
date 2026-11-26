@@ -96,7 +96,9 @@ class NotificationDelivery extends Model
         // A chase somebody pressed names them, which is what keeps it a person chasing a
         // person rather than an anonymous system mail.
         if ($this->triggeredBy instanceof User) {
-            return $this->triggeredBy->name.' pressed the chase button';
+            return $this->triggeredBy->name.($this->template_key === TemplateCatalogue::LinkToTheirDocuments
+                ? ' sent a fresh link'
+                : ' pressed the chase button');
         }
 
         return TemplateCatalogue::anyMessage($this->template_key)['sent_when'] ?? '';

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Cases\Pages;
 
 use App\Exceptions\ProcessRefused;
 use App\Filament\Resources\Cases\CaseResource;
+use App\Models\IssuedDocument;
 use App\Models\ProcessCase;
 use App\Models\Succession;
 use App\Models\User;
@@ -12,6 +13,7 @@ use App\Process\AvailableStep;
 use App\Process\AvailableSteps;
 use App\Process\CaseEngine;
 use App\Process\CaseHistory;
+use App\Process\DocumentLinks;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Filament\Actions\Action;
@@ -26,9 +28,10 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Facades\FilamentTimezone;
 
 /**
- * One case, with the whole story of it underneath — and, on somebody's exit, the four
+ * One case, with the whole story of it underneath — and, on somebody's exit, the five
  * things that can be done to it from this screen: change its last working day, withdraw
- * it, override a clearance on hold, and hand over their work.
+ * it, override a clearance on hold, hand over their work, and send the leaver a fresh link
+ * to their documents.
  */
 class ViewCase extends ViewRecord
 {
@@ -46,6 +49,7 @@ class ViewCase extends ViewRecord
     {
         return [
             $this->chase(),
+            $this->sendAFreshLink(),
             $this->changeLastWorkingDay(),
             $this->withdraw(),
             $this->overrideAHold(),
@@ -391,6 +395,59 @@ class ViewCase extends ViewRecord
         $case = $this->getRecord();
 
         return $case;
+    }
+
+    /**
+     * Send the leaver a fresh link to the documents issued on their exit (module 09 step 4,
+     * P14), for an email that never arrived, such as to an address since corrected. Open or
+     * closed, while a document this person may open waits for an answer, and once a day, as a
+     * chase is. The address is the one on the record, never one typed here.
+     */
+    private function sendAFreshLink(): Action
+    {
+        return Action::make('sendAFreshLink')
+            ->label('Send a fresh link')
+            ->icon('heroicon-o-envelope')
+            ->visible(fn (): bool => $this->documentsWaitingThatTheyMayOpen())
+            ->modalHeading(fn (): string => 'Send '.$this->theCase()->subject?->name.' a fresh link to their documents')
+            ->modalDescription('It goes to the personal email address on their record, and any link sent before stops working. Use it when the first email never arrived, for example because the address was wrong and has since been corrected. Once a day.')
+            ->modalSubmitActionLabel('Send it')
+            ->action(function (Action $action): void {
+                $case = $this->theCase();
+
+                // The list of what was sent below was read before this one existed.
+                $case->unsetRelation('messagesSent');
+
+                try {
+                    (new DocumentLinks)->sendByHand($case, auth()->user());
+                } catch (ProcessRefused $refused) {
+                    Notification::make()
+                        ->danger()
+                        ->title('Nothing was sent')
+                        ->body($refused->getMessage())
+                        ->send();
+
+                    $action->halt();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->success()
+                    ->title('A fresh link is on its way to '.$case->subject?->name)
+                    ->body('How it went shows below under what we sent.')
+                    ->send();
+            });
+    }
+
+    /** Private, as every question this page asks: a public method is one the browser may call. */
+    private function documentsWaitingThatTheyMayOpen(): bool
+    {
+        $case = $this->theCase();
+        $reader = auth()->user();
+
+        return $case->issuedDocuments->contains(fn (IssuedDocument $document): bool => $document->answer === null
+            && ($reader?->can($document->openedBy(), $case) ?? false));
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\ProcessCase;
 use App\Models\SettlementLine;
 use App\Models\Succession;
 use App\Models\User;
+use App\Notifications\TemplateCatalogue;
 use App\Process\CaseHistory;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\RepeatableEntry\TableColumn;
@@ -273,6 +274,7 @@ class WhatHappenedOnIt
                                 TableColumn::make('Document'),
                                 TableColumn::make('Issued by'),
                                 TableColumn::make('When'),
+                                TableColumn::make('Where it stands'),
                             ])
                             ->schema([
                                 TextEntry::make('kind')
@@ -288,6 +290,20 @@ class WhatHappenedOnIt
                                 TextEntry::make('issuedBy.name')->hiddenLabel(),
 
                                 TextEntry::make('created_at')->hiddenLabel()->dateTime('j F Y, H:i'),
+
+                                // The leaver's answer through her link (step 4), and a refusal's
+                                // reason beside it. Only on the rows this person may open, so the
+                                // statement's answer reaches only whoever may see the money.
+                                TextEntry::make('answer')
+                                    ->hiddenLabel()
+                                    ->state(fn (IssuedDocument $record): string => $record->answer === null
+                                        ? 'Waiting for '.$record->case->subject?->name
+                                        : $record->answerReads(FilamentTimezone::get()).($record->reason === null ? '' : '. Why: '.$record->reason))
+                                    ->color(fn (IssuedDocument $record): string => match ($record->answer) {
+                                        null => 'gray',
+                                        'refused' => 'danger',
+                                        default => 'success',
+                                    }),
                             ]),
                     ]),
 
@@ -302,11 +318,12 @@ class WhatHappenedOnIt
                             ->hiddenLabel()
                             ->color('gray')
                             ->state('Nothing has been sent about this case.')
-                            ->visible(fn (ProcessCase $record): bool => $record->messagesSent->isEmpty()),
+                            ->visible(fn (ProcessCase $record): bool => self::sentTheyMaySee($record) === []),
 
                         RepeatableEntry::make('messagesSent')
                             ->hiddenLabel()
-                            ->visible(fn (ProcessCase $record): bool => $record->messagesSent->isNotEmpty())
+                            ->state(fn (ProcessCase $record): array => self::sentTheyMaySee($record))
+                            ->visible(fn (ProcessCase $record): bool => self::sentTheyMaySee($record) !== [])
                             ->table([
                                 TableColumn::make('Message'),
                                 TableColumn::make('Sent to'),
@@ -382,6 +399,26 @@ class WhatHappenedOnIt
 
         return $case->issuedDocuments
             ->filter(fn (IssuedDocument $document): bool => $reader?->can($document->openedBy(), $case) ?? false)
+            ->values()->all();
+    }
+
+    /**
+     * The messages sent about this case that the person reading the page may see: a claim
+     * email, or a statement refused, only for whoever may see the money, since its name alone
+     * tells a department clearing the exit that money is in question.
+     *
+     * @return list<NotificationDelivery>
+     */
+    private static function sentTheyMaySee(ProcessCase $case): array
+    {
+        $seesTheMoney = auth()->user()?->can('viewSettlement', $case) ?? false;
+
+        return $case->messagesSent
+            ->filter(fn (NotificationDelivery $sent): bool => $seesTheMoney || ! in_array($sent->template_key, [
+                TemplateCatalogue::MoneyClaimedSubject,
+                TemplateCatalogue::MoneyClaimChangedSubject,
+                TemplateCatalogue::DocumentRefusedIssuer,
+            ], true))
             ->values()->all();
     }
 
